@@ -1,2 +1,2 @@
 # zio-raft
-Raft algorithm implement in scala zio
+Raft algorithm implemented in scala zio

@@ -1,0 +1,8 @@
+.vscode
+target
+raft/target
+project/target
+project/.bloop
+project/project
+.metals
+.DS_Store

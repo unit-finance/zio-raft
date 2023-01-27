@@ -25,11 +25,10 @@ object StreamItem {
   case object Tick extends StreamItem
   case class Message(message: RPCMessage) extends StreamItem
   case class CommandMessage(
-      message: Command,
-      promise: Promise[Nothing, Response]
+      message: Command
   ) extends StreamItem
 }
-class Raft(
+class Raft[A <: Command](
     memberId: MemberId,
     peers: Peers,
     state: Ref[State],
@@ -408,7 +407,7 @@ class Raft(
         } yield ()
   }
 
-  def handleCommand(commandMessage: Command): UIO[Response] = ???
+  def handleCommand(commandMessage: Command): UIO[StateMachine[A]] = ???
 
   def handleStreamItem(item: StreamItem) =
     item match
@@ -420,20 +419,15 @@ class Raft(
           _ <- handleMessage(message)
           _ <- postRules
         } yield ()
-      case CommandMessage(message, promise) =>
+      case CommandMessage(message) =>
         for {
           _ <- preRules
-          response <- handleCommand(message)
+          _ <- handleCommand(message)
           _ <- postRules
-          _ <- promise.succeed(response)
         } yield ()
 
-  def sendCommand(command: Command): UIO[Response] =
-    for {
-      promise <- Promise.make[Nothing, Response]
-      _ <- commandsQueue.offer(CommandMessage(command, promise))
-      result <- promise.await
-    } yield result
+  def sendCommand(command: Command): UIO[Unit] =
+    commandsQueue.offer(CommandMessage(command)).unit
 
   def run =
     val tick = ZStream.repeat(StreamItem.Tick)

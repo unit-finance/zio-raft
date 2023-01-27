@@ -1,6 +1,8 @@
 package zio.raft
 
 import zio.prelude.State as ZState
+import zio.Promise
+import zio.ZIO
 
 case class Term(value: Long):
   def <(other: Term) = value < other.value
@@ -47,8 +49,12 @@ case class ClusterConfiguration(
 
   def quorum = numberOfServers / 2
 
-trait Command
-trait Response
+trait Command:
+  type Response
+
+  val promise: Option[Promise[Nothing, Response]]
+
+  def complete(response: Response) = promise.fold(ZIO.unit)(_.succeed(response))
 
 case class EntryKey(term: Term, index: Index)
 case class LogEntry(command: Command, term: Term, index: Index)

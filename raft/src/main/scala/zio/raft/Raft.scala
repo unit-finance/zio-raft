@@ -34,7 +34,8 @@ class Raft[A <: Command](
     state: Ref[State],
     commandsQueue: Queue[CommandMessage],
     stable: Stable,
-    logStore: LogStore
+    logStore: LogStore,
+    codec: Codec[A]
 ) {
   val electionTimeout = 150
   val rpcTimeout = 50.millis
@@ -268,6 +269,26 @@ class Raft[A <: Command](
         case _ => ZIO.unit
     yield ()
 
+  def applyToStateMachineRule = 
+    for
+      s <- state.get
+      newState <- applyToStateMachine(s)
+      _ <- state.set(newState)
+    yield ()
+
+  def applyToStateMachine(state: State): UIO[State]  = 
+    if state.commintIndex > state.lastApplied then 
+      val state1 = state.increaseLatApplied
+      for {
+        command <- logStore.getLog(state1.lastApplied)
+        // TODO: stateMachine.apply
+        // TODO: leader only, complete promise
+        state2 <- applyToStateMachine(state1)
+      } yield state2
+    else ZIO.succeed(state)
+     
+
+
   def sendHeartbeatRule(peer: MemberId) =
     for
       s <- state.get
@@ -306,7 +327,7 @@ class Raft[A <: Command](
     for
       s <- state.get
       now <- zio.clock.instant
-      leaderLastIndex <- LogStore.lastIndex
+      leaderLastIndex <- logStore.lastIndex
       _ <- s match
         case l: Leader
             if l.rpcDue
@@ -386,6 +407,7 @@ class Raft[A <: Command](
       _ <- ZIO.foreach_(peers)(p =>
         sendAppendEntriesRule(p) &&& sendRequestVoteRule(p)
       )
+      _ <- applyToStateMachineRule
     yield ()
 
   def handleMessage(message: RPCMessage): URIO[Clock with Random, Unit] = {
@@ -407,7 +429,19 @@ class Raft[A <: Command](
         } yield ()
   }
 
-  def handleCommand(commandMessage: Command): UIO[StateMachine[A]] = ???
+  def handleCommand(command: Command) = 
+    state.get.flatMap {
+      case Leader(nextIndex, matchIndex, rpcDue, heartbeatDue, commintIndex, lastApplied) => 
+        for 
+          lastIndex <- logStore.lastIndex
+          lastTerm <- logStore.lastTerm
+          entry = LogEntry(command, lastTerm, lastIndex.plusOne)
+        yield ()
+      case _ =>
+        // TODO: die the promise...
+        ZIO.dieMessage("Not a leader")
+    }
+  
 
   def handleStreamItem(item: StreamItem) =
     item match

@@ -2,7 +2,7 @@ package zio.raft
 
 import zio.prelude.State as ZState
 import zio.Promise
-import zio.ZIO
+import zio.{ZIO, Chunk, Task}
 
 case class Term(value: Long):
   def <(other: Term) = value < other.value
@@ -83,3 +83,6 @@ object AppendEntriesResult:
   case class Success(from: MemberId, term: Term, matchIndex: Index) extends AppendEntriesResult
   case class Failure(from: MemberId, term: Term) extends AppendEntriesResult
 
+trait Codec[A <: Command]:
+  def decode(bytes: Chunk[Byte]): Task[A]
+  def encode(a: A): Task[Chunk[Byte]]

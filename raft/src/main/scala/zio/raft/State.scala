@@ -13,7 +13,11 @@ sealed trait State:
       case f: State.Candidate => f.copy(commintIndex = commintIndex)
       case f: State.Leader    => f.copy(commintIndex = commintIndex)
 
-  def increaseLatApplied: State = ???
+  def increaseLatApplied: State = this match
+    case f: State.Follower  => f.copy(lastApplied = lastApplied.plusOne)
+    case f: State.Candidate => f.copy(lastApplied = lastApplied.plusOne)
+    case f: State.Leader    => f.copy(lastApplied = lastApplied.plusOne)
+  
 
 object State:
   case class Follower(commintIndex: Index, lastApplied: Index, electionTimeout: Instant) extends State

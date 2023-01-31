@@ -295,7 +295,6 @@ class Raft[A <: Command](
                                 _ <- promise.succeed(res)
                             } yield ()
           case _ => ZIO.unit
-        
         state2 <- applyToStateMachine(state1)
       } yield state2
     else ZIO.succeed(state)

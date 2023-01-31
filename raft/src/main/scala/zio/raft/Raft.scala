@@ -24,18 +24,22 @@ sealed trait StreamItem
 object StreamItem {
   case object Tick extends StreamItem
   case class Message(message: RPCMessage) extends StreamItem
-  case class CommandMessage(
-      message: Command
+  case class CommandMessage[A <: Command](
+      message: A,
+      promise: Promise[Nothing, Response]
   ) extends StreamItem
 }
 class Raft[A <: Command](
     memberId: MemberId,
     peers: Peers,
     state: Ref[State],
-    commandsQueue: Queue[CommandMessage],
+    commandsQueue: Queue[CommandMessage[A]],
     stable: Stable,
-    logStore: LogStore,
-    codec: Codec[A]
+    logStore: LogStore[A],
+    codec: Codec[A],
+    stateMachine: StateMachine[A],
+    rpc: RPC[A],
+    waitingResponse: Ref[Map[A, Promise[Nothing, Response]]]
 ) {
   val electionTimeout = 150
   val rpcTimeout = 50.millis
@@ -125,7 +129,7 @@ class Raft[A <: Command](
     yield ()
 
   def handleAppendEntriesRequest(
-      r: AppendEntriesRequest
+      r: AppendEntriesRequest[A]
   ): URIO[Clock & Random, AppendEntriesResult] =
     for
       currentTerm <- stable.currentTerm
@@ -229,7 +233,7 @@ class Raft[A <: Command](
   def becomeLeaderRule =
     def becomeLeader(c: Candidate) =
       for
-        lastIndex <- LogStore.lastIndex
+        lastIndex <- logStore.lastIndex
         _ <- state.set(
           Leader(
             NextIndex(lastIndex.plusOne),
@@ -280,9 +284,18 @@ class Raft[A <: Command](
     if state.commintIndex > state.lastApplied then 
       val state1 = state.increaseLatApplied
       for {
-        command <- logStore.getLog(state1.lastApplied)
+        command <- logStore.getLog(state1.lastApplied).map(_.get) //todo: Handle onot found
         // TODO: stateMachine.apply
         // TODO: leader only, complete promise
+        (_, res) <- stateMachine.apply(command.command)
+        _ <- state match
+          case l: Leader => for {
+                                map <- waitingResponse.getAndUpdate(_.removed(command.command))
+                                promise = map.get(command.command).get //todo: handle not found ?
+                                _ <- promise.succeed(res)
+                            } yield ()
+          case _ => ZIO.unit
+        
         state2 <- applyToStateMachine(state1)
       } yield state2
     else ZIO.succeed(state)
@@ -301,14 +314,14 @@ class Raft[A <: Command](
             currentTerm <- stable.currentTerm
             lastIndex <- logStore.lastIndex
             previousTerm <- logStore.logTerm(previousIndex)
-            _ <- RPC.sendAppendEntires(
+            _ <- rpc.sendAppendEntires(
               peer,
-              AppendEntriesRequest(
+              AppendEntriesRequest[A](
                 currentTerm,
                 memberId,
                 previousIndex,
                 previousTerm,
-                List.empty,
+                List.empty[LogEntry[A]],
                 Index.min(l.commintIndex, lastIndex)
               )
             )
@@ -345,7 +358,7 @@ class Raft[A <: Command](
               if lastIndex < nextIndex then ZIO.succeed(List.empty)
               else logStore.getLogs(nextIndex, lastIndex)
 
-            _ <- RPC.sendAppendEntires(
+            _ <- rpc.sendAppendEntires(
               peer,
               AppendEntriesRequest(
                 currentTerm,
@@ -379,7 +392,7 @@ class Raft[A <: Command](
             lastIndex <- logStore.lastIndex
             lastIndexTerm <- logStore.logTerm(lastIndex)
             _ <- state.set(c.withRPCDue(peer, now.plus(rpcTimeout)))
-            _ <- RPC.sendRequestVote(
+            _ <- rpc.sendRequestVote(
               peer,
               RequestVoteRequest(
                 currentTerm,
@@ -418,7 +431,7 @@ class Raft[A <: Command](
           // todo: send res
         } yield ()
       case r: RequestVoteResult => handleRequestVoteReply(r)
-      case r: AppendEntriesRequest =>
+      case r: AppendEntriesRequest[A] =>
         for {
           res <- handleAppendEntriesRequest(r)
         } yield ()
@@ -429,13 +442,14 @@ class Raft[A <: Command](
         } yield ()
   }
 
-  def handleCommand(command: Command) = 
+  def handleCommand(command: A): ZIO[Any, Nothing, Unit] = 
     state.get.flatMap {
       case Leader(nextIndex, matchIndex, rpcDue, heartbeatDue, commintIndex, lastApplied) => 
         for 
           lastIndex <- logStore.lastIndex
           lastTerm <- logStore.lastTerm
-          entry = LogEntry(command, lastTerm, lastIndex.plusOne)
+          entry = LogEntry[A](command, lastTerm, lastIndex.plusOne) // todo: store in log storage
+          _ <- logStore.storeLog(entry)
         yield ()
       case _ =>
         // TODO: die the promise...
@@ -453,21 +467,26 @@ class Raft[A <: Command](
           _ <- handleMessage(message)
           _ <- postRules
         } yield ()
-      case CommandMessage(message) =>
+      case commandMessage: CommandMessage[A] =>
         for {
           _ <- preRules
-          _ <- handleCommand(message)
+          _ <- handleCommand(commandMessage.message)
           _ <- postRules
         } yield ()
 
-  def sendCommand(command: Command): UIO[Unit] =
-    commandsQueue.offer(CommandMessage(command)).unit
+  def sendCommand(command: A): UIO[Response] =
+    //todo: leader only
+     for {
+      promise <- Promise.make[Nothing, Response]
+      _ <- waitingResponse.update(map => map + (command -> promise))
+      _ <- commandsQueue.offer(CommandMessage(command, promise))
+      res <- promise.await
+    } yield (res)
 
   def run =
     val tick = ZStream.repeat(StreamItem.Tick)
     val messages = ZStream
-      .fromEffect(RPC.incomingMessages)
-      .flatMap(queue => ZStream.fromQueue(queue))
+      .fromQueue(rpc.incomingMessages)
       .map(Message(_))
     val commandMessage =
       ZStream.fromQueue(this.commandsQueue)

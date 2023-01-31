@@ -49,15 +49,11 @@ case class ClusterConfiguration(
 
   def quorum = numberOfServers / 2
 
-trait Command:
-  type Response
-
-  val promise: Option[Promise[Nothing, Response]]
-
-  def complete(response: Response) = promise.fold(ZIO.unit)(_.succeed(response))
+trait Response
+trait Command
 
 case class EntryKey(term: Term, index: Index)
-case class LogEntry(command: Command, term: Term, index: Index)
+case class LogEntry[A <: Command](command: A, term: Term, index: Index)
 
 sealed trait RPCMessage:
   val term: Term
@@ -69,12 +65,12 @@ object RequestVoteResult:
   case class Granted(from: MemberId, term: Term) extends RequestVoteResult
   case class Rejected(from: MemberId, term: Term) extends RequestVoteResult
 
-case class AppendEntriesRequest(
+case class AppendEntriesRequest[A <: Command](
                           term: Term,
                           leaderId: MemberId,
                           previousIndex: Index,
                           previousTerm: Term,
-                          entries: List[LogEntry],
+                          entries: List[LogEntry[A]],
                           leaderCommitIndex: Index
                         ) extends RPCMessage
 

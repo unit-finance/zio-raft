@@ -19,187 +19,203 @@ import zio.ZQueue
 import zio.Promise
 import zio.raft.AppendEntriesResult.Success
 import zio.raft.AppendEntriesResult.Failure
+import zio.logging.log
+import zio.logging.Logging
+import zio.raft.State.Follower
 
-sealed trait StreamItem
-object StreamItem {
-  case object Tick extends StreamItem
-  case class Message(message: RPCMessage) extends StreamItem
-  case class CommandMessage[A <: Command](
-      message: A,
-      promise: Promise[Nothing, Response]
-  ) extends StreamItem
-}
+sealed trait StreamItem[A <: Command]
+object StreamItem:
+  case class Tick[A <: Command]() extends StreamItem[A]
+  case class Message[A <: Command](message: RPCMessage[A]) extends StreamItem[A]
+  trait CommandMessage[A <: Command] extends StreamItem[A]:
+    val command: A
+    val promise: CommandPromise[command.Response]
+
+  // object CommandPromise
+  //   def apply()    
+
 class Raft[A <: Command](
     memberId: MemberId,
     peers: Peers,
     state: Ref[State],
     commandsQueue: Queue[CommandMessage[A]],
     stable: Stable,
-    logStore: LogStore[A],
-    codec: Codec[A],
-    stateMachine: StateMachine[A],
+    logStore: LogStore[A],    
     rpc: RPC[A],
-    waitingResponse: Ref[Map[A, Promise[Nothing, Response]]]
-) {
-  val electionTimeout = 150
+    stateMachine: Ref[StateMachine[A]], // This should be part of state?
+    pendingCommands: PendingCommands // This should be part of leader state?
+):
   val rpcTimeout = 50.millis
   val batchSize = 100
-  val numberOfServers = peers.length + 1
+  val numberOfServers = peers.length + 1 
 
-  def makeElectionTimeout =
-    for
-      now <- zio.clock.instant
-      interval <- zio.random
-        .nextIntBetween(electionTimeout, electionTimeout * 2)
-        .map(_.millis)
-    yield now.plus(interval)
-
-  def stepDown(term: Term) =
-    for
-      _ <- stable.newTerm(term, None)
+  def stepDown(newTerm: Term, leaderId: Option[MemberId]) =
+    for      
+      _ <- stable.newTerm(newTerm, None)
+      _ <- pendingCommands.reset(leaderId)
       electionTimeout <- makeElectionTimeout
       _ <- state.update(s =>
-        State.Follower(s.commintIndex, s.lastApplied, electionTimeout)
+        State.Follower(s.commitIndex, s.lastApplied, electionTimeout, leaderId)
       )
-    yield term
+      _ <- log.debug(s"Following $leaderId")
+    yield newTerm
 
-  def convertToFollower =
+  def convertToFollower(leaderId: MemberId) =
     for
       electionTimeout <- makeElectionTimeout
-      _ <- state.update(s =>
-        State.Follower(s.commintIndex, s.lastApplied, electionTimeout)
-      )
+
+      s <- state.get
+
+      _ <- s match
+        case s: State.Follower if s.leaderId != Some(leaderId) =>
+          log.debug(s"Following $leaderId")
+        case s: State.Follower => ZIO.unit
+        case s => 
+          log.debug(s"Following $leaderId")
+      
+      _ <- state.set(State.Follower(s.commitIndex, s.lastApplied, electionTimeout, Some(leaderId)))      
     yield ()
 
   def resetElectionTimer =
     for
       electionTimeout <- makeElectionTimeout
-      _ <- state.update {
+      _ <- state.update:
         case f: State.Follower  => f.copy(electionTimeout = electionTimeout)
         case c: State.Candidate => c.copy(electionTimeout = electionTimeout)
         case s                  => s
-      }
     yield ()
 
-  def updateCommitIndex(f: Index => Index): UIO[Unit] =
-    state.update(s => s.withCommitIndex(f(s.commintIndex)))
-
-  def handleRequestVoteRequest(
-      r: RequestVoteRequest
-  ): URIO[Clock & Random, RequestVoteResult] =
+  def makeElectionTimeout =
     for
+      now <- zio.clock.instant
+      interval <- zio.random
+        .nextIntBetween(Raft.electionTimeout, Raft.electionTimeout * 2)
+        .map(_.millis)
+    yield now.plus(interval)
+
+  def setCommitIndex(commitIndex: Index): UIO[Unit] =
+    state.update(s => s.withCommitIndex(commitIndex))
+
+  def handleRequestVoteRequest(m: RequestVoteRequest[A]) =
+    for      
       currentTerm <- stable.currentTerm
       currentTerm <-
-        if currentTerm < r.term then stepDown(r.term)
+        if currentTerm < m.term then stepDown(m.term, None)
         else ZIO.succeed(currentTerm)
       votedFor <- stable.votedFor
       lastTerm <- logStore.lastTerm
       lastIndex <- logStore.lastIndex
       result <-
         if (
-          currentTerm == r.term && (votedFor.contains(
-            r.candidateId
+          currentTerm == m.term && (votedFor.contains(
+            m.candidateId
           ) || votedFor.isEmpty) &&
-          (r.lastLogTerm > lastTerm ||
-            (r.lastLogTerm == lastTerm &&
-              r.lastLogIndex >= lastIndex))
+          (m.lastLogTerm > lastTerm ||
+            (m.lastLogTerm == lastTerm &&
+              m.lastLogIndex >= lastIndex))
         )
         then
-          resetElectionTimer.as(
-            RequestVoteResult.Granted(memberId, currentTerm)
-          )
-        else ZIO.succeed(RequestVoteResult.Rejected(memberId, currentTerm))
+          for 
+            _ <- stable.voteFor(m.candidateId)
+            _ <- resetElectionTimer
+          yield RequestVoteResult.Granted[A](memberId, currentTerm)
+        else ZIO.succeed(RequestVoteResult.Rejected[A](memberId, currentTerm))
     yield result
 
-  def handleRequestVoteReply(r: RequestVoteResult) =
-    for
+  def handleRequestVoteReply(m: RequestVoteResult[A]) =
+    for      
       currentTerm <- stable.currentTerm
       currentTerm <-
-        if currentTerm < r.term then stepDown(r.term)
+        if currentTerm < m.term then stepDown(m.term, None)
         else ZIO.succeed(currentTerm)
 
       s <- state.get
       _ <- s match
-        case candidate: State.Candidate =>
-          r match
-            case _: RequestVoteResult.Rejected => ZIO.unit
-            case g: RequestVoteResult.Granted =>
-              state.set(candidate.addVote(g.from))
+        case candidate: State.Candidate if currentTerm == m.term =>
+          m match
+            case m: RequestVoteResult.Rejected[A] => 
+              state.set(candidate.ackRpc(m.from))
+            case m: RequestVoteResult.Granted[A] =>
+              state.set(candidate.addVote(m.from).ackRpc(m.from))
         case _ => ZIO.unit
     yield ()
 
   def handleAppendEntriesRequest(
-      r: AppendEntriesRequest[A]
-  ): URIO[Clock & Random, AppendEntriesResult] =
-    for
+      m: AppendEntriesRequest[A]
+  ): URIO[Clock & Random & Logging, AppendEntriesResult[A]] =
+    for      
       currentTerm <- stable.currentTerm
       currentTerm <-
-        if currentTerm < r.term then stepDown(r.term)
+        if currentTerm < m.term then stepDown(m.term, Some(m.leaderId))
         else ZIO.succeed(currentTerm)
 
       result <-
-        if currentTerm != r.term then
-          ZIO.succeed(AppendEntriesResult.Failure(memberId, currentTerm))
+        if currentTerm > m.term then
+          ZIO.succeed(AppendEntriesResult.Failure[A](memberId, currentTerm, m.previousIndex))
         else
           for
-            _ <- convertToFollower
+            _ <- convertToFollower(m.leaderId)
             lastIndex <- logStore.lastIndex
-            localPreviousLogTerm <- logStore.logTerm(r.previousIndex)
+            localPreviousLogTerm <- logStore.logTerm(m.previousIndex)
+            success = 
+              m.previousIndex.isZero || (m.previousIndex <= lastIndex && localPreviousLogTerm == m.previousTerm) 
             result <-
-              if r.previousIndex.isZero || (r.previousIndex <= lastIndex && localPreviousLogTerm == r.previousTerm)
-              then
+              if success then
                 for
                   // TODO: omptimize this code
-                  matchIndex <- ZIO.foldLeft(r.entries)(
-                    r.previousIndex.plusOne
-                  )((index, entry) =>
-                    for
+                  index <- ZIO.foldLeft(m.entries)(
+                    m.previousIndex
+                  )((previousIndex, entry) =>
+                    val index = previousIndex.plusOne
+                    for                      
                       logTerm <- logStore.logTerm(index)
                       _ <- ZIO.when(logTerm != entry.term)(
                         logStore.deleteFrom(index)
                       )
                       _ <- logStore.storeLog(entry)
-                    yield index.plusOne
+                    yield index
                   )
 
-                  _ <- updateCommitIndex(commitIndex =>
-                    Index.max(commitIndex, r.leaderCommitIndex)
-                  )
-                yield AppendEntriesResult.Success(
+                  commitIndex = Index.min(m.leaderCommitIndex, index)
+                  _ <- setCommitIndex(commitIndex)
+                yield AppendEntriesResult.Success[A](
                   memberId,
                   currentTerm,
-                  matchIndex
+                  index
                 )
               else
-                ZIO.succeed(AppendEntriesResult.Failure(memberId, currentTerm))
+                ZIO.succeed(AppendEntriesResult.Failure[A](memberId, currentTerm, m.previousIndex))
           yield result
     yield result
 
-  def handleAppendEntriesReply(r: AppendEntriesResult) =
-    for
+  def handleAppendEntriesReply(m: AppendEntriesResult[A]) =
+    for      
       currentTerm <- stable.currentTerm
       currentTerm <-
-        if currentTerm < r.term then stepDown(r.term)
+        if currentTerm < m.term then stepDown(m.term, None)
         else ZIO.succeed(currentTerm)
 
       s <- state.get
       _ <- s match
-        case leader: State.Leader if currentTerm == r.term =>
-          r match
+        case leader: State.Leader if currentTerm == m.term =>
+          m match
             case AppendEntriesResult.Success(from, _, index) =>
-              val currentIndex = leader.matchIndex.get(from)
+              val currentMatchIndex = leader.matchIndex.get(from)
+              val currentNextIndex = leader.nextIndex.get(from)
+
+              // we might acknowledge and old message, so we need to check if the index is greater than the current one
               state.set(
                 leader
-                  .withMatchIndex(from, Index.max(currentIndex, index))
-                  .withNextIndex(from, index.plusOne)
-                  .withRPCDueNow(from)
+                  .withMatchIndex(from, Index.max(currentMatchIndex, index))
+                  .withNextIndex(from, Index.max(currentNextIndex, index.plusOne))
               )
-            case AppendEntriesResult.Failure(from, _) =>
-              val nextIndex = leader.nextIndex.get(from)
+            case AppendEntriesResult.Failure(from, _, index) =>
+              val currentNextIndex = leader.nextIndex.get(from)
+
+              // we don't want to increase the index if we already processed a failure with a lower index
               state.set(
                 leader
-                  .withNextIndex(from, Index.max(Index.one, nextIndex.minusOne))
-                  .withRPCDueNow(from)
+                  .withNextIndex(from, Index.max(Index.one, Index.min(currentNextIndex, index)))
               )
         case _ => ZIO.unit
     yield ()
@@ -207,14 +223,15 @@ class Raft[A <: Command](
   def startNewElectionRule =
     def start =
       for
-        currentTerm <- Stable.currentTerm
-        _ <- Stable.newTerm(currentTerm.plusOne, Some(memberId))
-        electionTimeout <- makeElectionTimeout
+        _ <- log.debug(s"start new election")
+        currentTerm <- stable.currentTerm
+        _ <- stable.newTerm(currentTerm.plusOne, Some(memberId))
+        electionTimeout <- makeElectionTimeout        
         _ <- state.update(s =>
           State.Candidate(
             RPCDue.makeNow(peers),
             1,
-            s.commintIndex,
+            s.commitIndex,
             s.lastApplied,
             electionTimeout
           )
@@ -233,14 +250,14 @@ class Raft[A <: Command](
   def becomeLeaderRule =
     def becomeLeader(c: Candidate) =
       for
-        lastIndex <- logStore.lastIndex
+        _ <- log.debug(s"become leader")
+        lastLogIndex <- logStore.lastIndex
         _ <- state.set(
           Leader(
-            NextIndex(lastIndex.plusOne),
-            MatchIndex.empty,
-            RPCDue.makeNever(peers),
+            NextIndex(lastLogIndex.plusOne),
+            MatchIndex(peers),            
             HeartbeatDue.empty,
-            c.commintIndex,
+            c.commitIndex,
             c.lastApplied
           )
         )
@@ -264,52 +281,48 @@ class Raft[A <: Command](
           val matchIndexes =
             (lastIndex :: l.matchIndex.indices).sortBy(_.value)
           val n = matchIndexes(numberOfServers / 2)
-          for
-            nTerm <- logStore.logTerm(n)
-            _ <- ZIO.when(nTerm == currentTerm)(
-              state.set(l.withCommitIndex(Index.max(n, l.commintIndex)))
-            )
-          yield ()
+          if n > l.commitIndex then            
+            for
+              nTerm <- logStore.logTerm(n)
+              _ <- ZIO.when(nTerm == currentTerm)(state.set(l.withCommitIndex(n)))
+              _ <- log.debug(s"advanceCommitIndexRule $nTerm $currentTerm ${l.commitIndex} ${n}").when(nTerm == currentTerm)
+            yield ()
+          else ZIO.unit
         case _ => ZIO.unit
     yield ()
 
-  def applyToStateMachineRule = 
+  def applyToStateMachineRule =
     for
       s <- state.get
-      newState <- applyToStateMachine(s)
+      _ <- log.debug(s"applyToStateMachineRule ${s.commitIndex} ${s.lastApplied}").when(s.commitIndex > s.lastApplied)
+      newState <- applyToStateMachine(s)      
       _ <- state.set(newState)
     yield ()
 
-  def applyToStateMachine(state: State): UIO[State]  = 
-    if state.commintIndex > state.lastApplied then 
-      val state1 = state.increaseLatApplied
-      for {
-        command <- logStore.getLog(state1.lastApplied).map(_.get) //todo: Handle onot found
-        // TODO: stateMachine.apply
-        // TODO: leader only, complete promise
-        (_, res) <- stateMachine.apply(command.command)
+  def applyToStateMachine(state: State): UIO[State] =    
+    if state.commitIndex > state.lastApplied then
+      val state1 = state.increaseLastApplied
+      for
+        logEntry <- logStore
+          .getLog(state1.lastApplied)
+          .map(_.get) // todo: Handle onot found
+        response <- stateMachine.modify(_.apply(logEntry.command))
         _ <- state match
-          case l: Leader => for {
-                                map <- waitingResponse.getAndUpdate(_.removed(command.command))
-                                promise = map.get(command.command).get //todo: handle not found ?
-                                _ <- promise.succeed(res)
-                            } yield ()
-          case _ => ZIO.unit
+          case l: Leader => pendingCommands.complete(logEntry.index, response)
+          case _         => ZIO.unit
         state2 <- applyToStateMachine(state1)
-      } yield state2
+      yield state2
     else ZIO.succeed(state)
-     
-
 
   def sendHeartbeatRule(peer: MemberId) =
-    for
+    for      
       s <- state.get
       now <- zio.clock.instant
       _ <- s match
         case l: Leader if l.heartbeatDue.due(now, peer) =>
           val nextIndex = l.nextIndex.get(peer)
           val previousIndex = nextIndex.minusOne
-          for
+          for            
             currentTerm <- stable.currentTerm
             lastIndex <- logStore.lastIndex
             previousTerm <- logStore.logTerm(previousIndex)
@@ -321,14 +334,14 @@ class Raft[A <: Command](
                 previousIndex,
                 previousTerm,
                 List.empty[LogEntry[A]],
-                Index.min(l.commintIndex, lastIndex)
+                l.commitIndex
               )
             )
 
             _ <- state.set(
               l.withHeartbeaetDue(
                 peer,
-                now.plus((electionTimeout / 2).millis)
+                now.plus(Raft.heartbeartInterval)
               )
             )
           yield ()
@@ -336,27 +349,26 @@ class Raft[A <: Command](
     yield ()
 
   def sendAppendEntriesRule(peer: MemberId) =
-    for
+    for      
       s <- state.get
       now <- zio.clock.instant
-      leaderLastIndex <- logStore.lastIndex
+      leaderLastLogIndex <- logStore.lastIndex
       _ <- s match
         case l: Leader
-            if l.rpcDue
-              .due(now, peer) && leaderLastIndex >= l.nextIndex.get(peer) =>
+            if leaderLastLogIndex >= l.nextIndex.get(peer) =>
           val nextIndex = l.nextIndex.get(peer)
           val previousIndex = nextIndex.minusOne
           val lastIndex =
-            Index.min(previousIndex.plus(batchSize), leaderLastIndex)
-          val matchIndex = l.matchIndex.get(peer)
-
+            Index.min(nextIndex.plus(batchSize - 1), leaderLastLogIndex)
+            
           for
             currentTerm <- stable.currentTerm
             previousTerm <- logStore.logTerm(previousIndex)
-            entries <-
-              if lastIndex < nextIndex then ZIO.succeed(List.empty)
-              else logStore.getLogs(nextIndex, lastIndex)
-
+            // TODO: check if nextIndex is in the logstore, otherwise send InstallSnapshot
+            entries <- logStore.getLogs(nextIndex, lastIndex)
+            
+            _ <- log.debug(s"sendAppendEntriesRule $peer $leaderLastLogIndex $nextIndex").when(entries.nonEmpty)
+            
             _ <- rpc.sendAppendEntires(
               peer,
               AppendEntriesRequest(
@@ -365,15 +377,15 @@ class Raft[A <: Command](
                 previousIndex,
                 previousTerm,
                 entries,
-                Index.min(l.commintIndex, lastIndex)
+                l.commitIndex
               )
             )
 
             _ <- state.set(
-              l.withRPCDue(peer, now.plus(rpcTimeout))
+              l.withNextIndex(peer, lastIndex.plusOne)
                 .withHeartbeaetDue(
                   peer,
-                  now.plus((electionTimeout / 2).millis)
+                  now.plus(Raft.heartbeartInterval)
                 )
             )
           yield ()
@@ -386,18 +398,18 @@ class Raft[A <: Command](
       now <- zio.clock.instant
       _ <- s match
         case c: Candidate if c.rpcDue.due(now, peer) =>
-          for
+          for            
             currentTerm <- stable.currentTerm
-            lastIndex <- logStore.lastIndex
-            lastIndexTerm <- logStore.logTerm(lastIndex)
+            lastLogIndex <- logStore.lastIndex
+            lastLogTerm <- logStore.logTerm(lastLogIndex)
             _ <- state.set(c.withRPCDue(peer, now.plus(rpcTimeout)))
             _ <- rpc.sendRequestVote(
               peer,
-              RequestVoteRequest(
+              RequestVoteRequest[A](
                 currentTerm,
                 memberId,
-                lastIndex,
-                lastIndexTerm
+                lastLogIndex,
+                lastLogTerm
               )
             )
           yield ()
@@ -422,70 +434,89 @@ class Raft[A <: Command](
       _ <- applyToStateMachineRule
     yield ()
 
-  def handleMessage(message: RPCMessage): URIO[Clock with Random, Unit] = {
+  def handleMessage(message: RPCMessage[A]) =
     message match
-      case r: RequestVoteRequest =>
-        for {
+      case r: RequestVoteRequest[A] =>
+        for
           res <- handleRequestVoteRequest(r)
-          // todo: send res
-        } yield ()
-      case r: RequestVoteResult => handleRequestVoteReply(r)
-      case r: AppendEntriesRequest[A] =>
-        for {
-          res <- handleAppendEntriesRequest(r)
-        } yield ()
-
-      case r: AppendEntriesResult =>
-        for {
-          _ <- handleAppendEntriesReply(r)
-        } yield ()
-  }
-
-  def handleCommand(command: A): ZIO[Any, Nothing, Unit] = 
-    state.get.flatMap {
-      case Leader(nextIndex, matchIndex, rpcDue, heartbeatDue, commintIndex, lastApplied) => 
-        for 
-          lastIndex <- logStore.lastIndex
-          lastTerm <- logStore.lastTerm
-          entry = LogEntry[A](command, lastTerm, lastIndex.plusOne) // todo: store in log storage
-          _ <- logStore.storeLog(entry)
+          _ <- rpc.sendRequestVoteResponse(r.candidateId, res)
         yield ()
-      case _ =>
-        // TODO: die the promise...
-        ZIO.dieMessage("Not a leader")
-    }
-  
+      case r: RequestVoteResult[A] => handleRequestVoteReply(r)
+      case r: AppendEntriesRequest[A] =>
+        for
+          res <- handleAppendEntriesRequest(r)
+          _ <- ZIO.when(res.isInstanceOf[Failure[A]] || r.entries.nonEmpty)(
+            log.debug(s"handleAppendEntriesRequest $r $res")
+          )
+          _ <- rpc.sendAppendEntriesResponse(r.leaderId, res)
+        yield ()
 
-  def handleStreamItem(item: StreamItem) =
+      case r: AppendEntriesResult[A] =>
+        for
+          _ <- handleAppendEntriesReply(r)
+        yield ()
+
+  def handleRequestFromClient(
+      command: A,
+      promise: CommandPromise[command.Response]
+  ): ZIO[Logging, Nothing, Unit] =
+    state.get.flatMap:
+      case Leader(
+            nextIndex,
+            matchIndex,            
+            heartbeatDue,
+            commintIndex,
+            lastApplied
+          ) =>
+        for
+          lastIndex <- logStore.lastIndex
+          currentTerm <- stable.currentTerm
+          entry = LogEntry[A](
+            command,
+            currentTerm,
+            lastIndex.plusOne
+          )
+          _ <- log.debug(s"handleCommand $entry")
+          _ <- logStore.storeLog(entry)
+          _ <- pendingCommands.add(entry.index, promise)
+        yield ()
+      case f: Follower =>
+        promise.fail(NotALeaderError(f.leaderId)).unit
+      case c: Candidate =>
+        promise.fail(NotALeaderError(None)).unit
+
+  def handleStreamItem(item: StreamItem[A]) =
     item match
-      case Tick =>
+      case Tick() =>
         preRules &&& postRules
       case Message(message) =>
-        for {
+        for
           _ <- preRules
           _ <- handleMessage(message)
           _ <- postRules
-        } yield ()
+        yield ()
       case commandMessage: CommandMessage[A] =>
-        for {
+        for
+          _ <- log.debug(s"${commandMessage.command}")
           _ <- preRules
-          _ <- handleCommand(commandMessage.message)
+          _ <- handleRequestFromClient(commandMessage.command, commandMessage.promise)
           _ <- postRules
-        } yield ()
+        yield ()
 
-  def sendCommand(command: A): UIO[Response] =
-    //todo: leader only
-     for {
-      promise <- Promise.make[Nothing, Response]
-      _ <- waitingResponse.update(map => map + (command -> promise))
-      _ <- commandsQueue.offer(CommandMessage(command, promise))
-      res <- promise.await
-    } yield (res)
+  def sendCommand(commandArg: A): ZIO[Any, NotALeaderError, commandArg.Response] =
+    // todo: leader only
+    for
+      promiseArg <- Promise.make[NotALeaderError, commandArg.Response]
+      _ <- commandsQueue.offer(new CommandMessage {
+        val command = commandArg
+        val promise = promiseArg.asInstanceOf
+      })
+      res <- promiseArg.await
+    yield (res)
 
   def run =
-    val tick = ZStream.repeat(StreamItem.Tick)
-    val messages = ZStream
-      .fromQueue(rpc.incomingMessages)
+    val tick = ZStream.repeat(StreamItem.Tick[A]())
+    val messages = rpc.incomingMessages
       .map(Message(_))
     val commandMessage =
       ZStream.fromQueue(this.commandsQueue)
@@ -493,4 +524,37 @@ class Raft[A <: Command](
       .mergeAllUnbounded(16)(tick, messages, commandMessage)
       .foreach(handleStreamItem)
 
-}
+end Raft
+
+object Raft:
+  // TODO: make configurable
+  val initialElectionTimeout = 2000.millis
+  val electionTimeout = 150
+  val heartbeartInterval = (electionTimeout  / 2).millis
+
+  def makeManaged[A <: Command](
+      memberId: MemberId,
+      peers: Peers,      
+      stable: Stable,
+      logStore: LogStore[A],      
+      rpc: RPC[A],
+      stateMachine: StateMachine[A]
+  ) =
+    for
+      now <- zio.clock.instant.toManaged_
+      electionTimeout = now.plus(initialElectionTimeout)
+      state <- Ref.makeManaged[State](State.Follower(Index.zero, Index.zero, electionTimeout, None))
+      commandsQueue <- Queue.unbounded[CommandMessage[A]].toManaged_
+      refStateMachine <- Ref.makeManaged(stateMachine)
+      pendingCommands <- PendingCommands.makeManaged
+    yield new Raft(
+      memberId,
+      peers,
+      state,
+      commandsQueue,
+      stable,
+      logStore,      
+      rpc,
+      refStateMachine,
+      pendingCommands
+    )

@@ -1,2 +1,3 @@
 [ ] Election timeout, rpc timeout, batchSize should be configureable
 [ ] Logging
+[ ] merge heartbeat and appendentries...

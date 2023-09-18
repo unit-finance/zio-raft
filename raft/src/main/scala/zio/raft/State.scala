@@ -4,32 +4,35 @@ import zio.{Ref, ZIO, UIO}
 import java.time.Instant
 
 sealed trait State:
-  val commintIndex: Index
+  val commitIndex: Index
   val lastApplied: Index
 
   def withCommitIndex(commintIndex: Index) =
     this match
-      case f: State.Follower  => f.copy(commintIndex = commintIndex)
-      case f: State.Candidate => f.copy(commintIndex = commintIndex)
-      case f: State.Leader    => f.copy(commintIndex = commintIndex)
+      case f: State.Follower  => f.copy(commitIndex = commintIndex)
+      case f: State.Candidate => f.copy(commitIndex = commintIndex)
+      case f: State.Leader    => f.copy(commitIndex = commintIndex)
 
-  def increaseLatApplied: State = this match
+  def increaseLastApplied: State = this match
     case f: State.Follower  => f.copy(lastApplied = lastApplied.plusOne)
     case f: State.Candidate => f.copy(lastApplied = lastApplied.plusOne)
     case f: State.Leader    => f.copy(lastApplied = lastApplied.plusOne)
   
 
 object State:
-  case class Follower(commintIndex: Index, lastApplied: Index, electionTimeout: Instant) extends State
+  case class Follower(commitIndex: Index, lastApplied: Index, electionTimeout: Instant, leaderId: Option[MemberId]) extends State
   case class Candidate(
       rpcDue: RPCDue,
       voteGranted: Int,
-      commintIndex: Index,
+      commitIndex: Index,
       lastApplied: Index,
       electionTimeout: Instant
   ) extends State:
     def addVote(peer: MemberId) = 
-        this.copy(voteGranted = voteGranted + 1, rpcDue = rpcDue.ack(peer))
+        this.copy(voteGranted = voteGranted + 1)
+
+    def ackRpc(peer: MemberId) = 
+        this.copy(rpcDue = rpcDue.ack(peer))
 
     def withRPCDue(from: MemberId, when: Instant) =
       this.copy(rpcDue = rpcDue.set(from, when))
@@ -37,23 +40,23 @@ object State:
   case class Leader(
       nextIndex: NextIndex,
       matchIndex: MatchIndex,
-      rpcDue: RPCDue,
+      // rpcDue: RPCDue,
       heartbeatDue: HeartbeatDue,
-      commintIndex: Index,
-      lastApplied: Index
-  ) extends State {
+      commitIndex: Index,
+      lastApplied: Index      
+  ) extends State:    
+
     def withMatchIndex(from: MemberId, index: Index) =
       this.copy(matchIndex = matchIndex.set(from, index))
 
     def withNextIndex(from: MemberId, index: Index) =
       this.copy(nextIndex = nextIndex.set(from, index))
 
-    def withRPCDueNow(from: MemberId) =
-      this.copy(rpcDue = rpcDue.now(from))
+    // def withRPCDueNow(from: MemberId) =
+    //   this.copy(rpcDue = rpcDue.now(from))
 
-    def withRPCDue(from: MemberId, when: Instant) =
-      this.copy(rpcDue = rpcDue.set(from, when))
+    // def withRPCDue(from: MemberId, when: Instant) =
+    //   this.copy(rpcDue = rpcDue.set(from, when))
 
     def withHeartbeaetDue(from: MemberId, when: Instant) =
       this.copy(heartbeatDue = heartbeatDue.set(from, when))
-  }

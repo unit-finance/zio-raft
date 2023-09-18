@@ -1,22 +1,22 @@
 package zio.raft
 
-import zio.{UIO, ZIO, Queue}
+import zio.{UIO, ZIO}
 import zio.Has
+import zio.stream.Stream
 
 trait RPC[A <: Command]:
   def sendRequestVoteResponse(
       candidateId: MemberId,
-      response: RequestVoteResult
+      response: RequestVoteResult[A]
   ): UIO[Unit]
   def sendAppendEntriesResponse(
       leaderId: MemberId,
-      response: AppendEntriesResult
+      response: AppendEntriesResult[A]
   ): UIO[Unit]
   def sendAppendEntires(
       peer: MemberId,
       request: AppendEntriesRequest[A]
   ): UIO[Unit]
-  def sendRequestVote(peer: MemberId, m: RequestVoteRequest): UIO[Unit]
-  def broadcastAppendEntires(request: AppendEntriesRequest[A]): UIO[Unit]
-  def incomingMessages: Queue[RPCMessage]
+  def sendRequestVote(peer: MemberId, m: RequestVoteRequest[A]): UIO[Unit]
+  def incomingMessages: Stream[Nothing, RPCMessage[A]]
 

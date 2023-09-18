@@ -3,6 +3,7 @@ package zio.raft
 import zio.prelude.State as ZState
 import zio.Promise
 import zio.{ZIO, Chunk, Task}
+import scala.util.Try
 
 case class Term(value: Long):
   def <(other: Term) = value < other.value
@@ -49,21 +50,26 @@ case class ClusterConfiguration(
 
   def quorum = numberOfServers / 2
 
-trait Response
-trait Command
+trait Command:
+  type Response
+
+
+case class NotALeaderError(leaderId: Option[MemberId])
+
+type CommandPromise[A] = Promise[NotALeaderError, A]
 
 case class EntryKey(term: Term, index: Index)
 case class LogEntry[A <: Command](command: A, term: Term, index: Index)
 
-sealed trait RPCMessage:
+sealed trait RPCMessage[A <: Command]:
   val term: Term
 
-case class RequestVoteRequest(term: Term, candidateId: MemberId, lastLogIndex: Index, lastLogTerm: Term) extends RPCMessage
+case class RequestVoteRequest[A <: Command](term: Term, candidateId: MemberId, lastLogIndex: Index, lastLogTerm: Term) extends RPCMessage[A]
 
-sealed trait RequestVoteResult extends RPCMessage
+sealed trait RequestVoteResult[A <: Command] extends RPCMessage[A]
 object RequestVoteResult:
-  case class Granted(from: MemberId, term: Term) extends RequestVoteResult
-  case class Rejected(from: MemberId, term: Term) extends RequestVoteResult
+  case class Granted[A <: Command](from: MemberId, term: Term) extends RequestVoteResult[A]
+  case class Rejected[A <: Command](from: MemberId, term: Term) extends RequestVoteResult[A]
 
 case class AppendEntriesRequest[A <: Command](
                           term: Term,
@@ -72,13 +78,9 @@ case class AppendEntriesRequest[A <: Command](
                           previousTerm: Term,
                           entries: List[LogEntry[A]],
                           leaderCommitIndex: Index
-                        ) extends RPCMessage
+                        ) extends RPCMessage[A]
 
-sealed trait AppendEntriesResult extends RPCMessage
+sealed trait AppendEntriesResult[A <: Command] extends RPCMessage[A]
 object AppendEntriesResult:
-  case class Success(from: MemberId, term: Term, matchIndex: Index) extends AppendEntriesResult
-  case class Failure(from: MemberId, term: Term) extends AppendEntriesResult
-
-trait Codec[A <: Command]:
-  def decode(bytes: Chunk[Byte]): Task[A]
-  def encode(a: A): Task[Chunk[Byte]]
+  case class Success[A <: Command](from: MemberId, term: Term, matchIndex: Index) extends AppendEntriesResult[A]
+  case class Failure[A <: Command](from: MemberId, term: Term, index: Index) extends AppendEntriesResult[A]

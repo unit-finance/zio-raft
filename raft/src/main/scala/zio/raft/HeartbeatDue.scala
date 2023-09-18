@@ -2,7 +2,7 @@ package zio.raft
 
 import java.time.Instant
 
-case class HeartbeatDue(map: Map[MemberId, Instant]):
+case class HeartbeatDue(map: Map[MemberId, Instant]) :
   def set(peer: MemberId, timeout: Instant) =
     this.copy(map.updated(peer, timeout))
     

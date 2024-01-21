@@ -502,6 +502,11 @@ class Raft[A <: Command](
           _ <- handleRequestFromClient(commandMessage.command, commandMessage.promise)
           _ <- postRules
         yield ()
+        
+  def isTheLeader =
+    for
+      s <- state.get
+    yield if s.isInstanceOf[Leader] then true else false
 
   def sendCommand(commandArg: A): ZIO[Any, NotALeaderError, commandArg.Response] =
     // todo: leader only
@@ -547,7 +552,7 @@ object Raft:
       commandsQueue <- Queue.unbounded[CommandMessage[A]].toManaged_
       refStateMachine <- Ref.makeManaged(stateMachine)
       pendingCommands <- PendingCommands.makeManaged
-    yield new Raft(
+      raft = new Raft(
       memberId,
       peers,
       state,
@@ -558,3 +563,5 @@ object Raft:
       refStateMachine,
       pendingCommands
     )
+      _ <- raft.run.forkManaged
+    yield raft

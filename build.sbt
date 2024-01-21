@@ -24,6 +24,7 @@ lazy val raft = project
 //    ),
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zioVersion,
+      "dev.zio" %% "zio-test" % zioVersion,
       "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
       "dev.zio" %% "zio-logging" % zioLoggingVersion
     )

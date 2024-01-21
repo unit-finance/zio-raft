@@ -7,11 +7,11 @@ sealed trait State:
   val commitIndex: Index
   val lastApplied: Index
 
-  def withCommitIndex(commintIndex: Index) =
+  def withCommitIndex(commitIndex: Index) =
     this match
-      case f: State.Follower  => f.copy(commitIndex = commintIndex)
-      case f: State.Candidate => f.copy(commitIndex = commintIndex)
-      case f: State.Leader    => f.copy(commitIndex = commintIndex)
+      case f: State.Follower  => f.copy(commitIndex = commitIndex)
+      case f: State.Candidate => f.copy(commitIndex = commitIndex)
+      case f: State.Leader    => f.copy(commitIndex = commitIndex)
 
   def increaseLastApplied: State = this match
     case f: State.Follower  => f.copy(lastApplied = lastApplied.plusOne)
@@ -58,5 +58,5 @@ object State:
     // def withRPCDue(from: MemberId, when: Instant) =
     //   this.copy(rpcDue = rpcDue.set(from, when))
 
-    def withHeartbeaetDue(from: MemberId, when: Instant) =
+    def withHeartbeatDue(from: MemberId, when: Instant) =
       this.copy(heartbeatDue = heartbeatDue.set(from, when))

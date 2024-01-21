@@ -71,6 +71,6 @@ object CalculatorApp extends zio.App:
 
     raft.use(raft => {
       for 
-        _ <- new HttpServer(raft).run.fork.when(memberId == MemberId("peer1"))
+        _ <- new HttpServer(raft).run.fork.when(memberId == MemberId("peer1")) *> ZIO.never
       yield ()
     } ).exitCode.provideCustomLayer(ZContext.live.orDie ++ logging)

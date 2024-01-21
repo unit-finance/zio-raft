@@ -339,7 +339,7 @@ class Raft[A <: Command](
             )
 
             _ <- state.set(
-              l.withHeartbeaetDue(
+              l.withHeartbeatDue(
                 peer,
                 now.plus(Raft.heartbeartInterval)
               )
@@ -383,7 +383,7 @@ class Raft[A <: Command](
 
             _ <- state.set(
               l.withNextIndex(peer, lastIndex.plusOne)
-                .withHeartbeaetDue(
+                .withHeartbeatDue(
                   peer,
                   now.plus(Raft.heartbeartInterval)
                 )

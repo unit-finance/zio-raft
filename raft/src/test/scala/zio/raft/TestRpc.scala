@@ -55,4 +55,4 @@ case class TestRpc[A <: Command](myQueue: zio.Queue[RPCMessage[A]], isResponding
  override def sendRequestVote(peer: MemberId, m: RequestVoteRequest[A]): UIO[Unit] = 
     peers.get.flatMap(_.get(peer).get.offer(m)).unit
  override def incomingMessages: ZStream[Any, Nothing, RPCMessage[A]] = 
-    ZStream.fromQueue(myQueue).filterM(_ => isResponding.get)
+    ZStream.fromQueue(myQueue).filterM(_ => isResponding.get).tap(m => ZIO.debug(s"received $m"))

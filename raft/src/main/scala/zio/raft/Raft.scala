@@ -49,6 +49,8 @@ class Raft[A <: Command](
   val batchSize = 100
   val numberOfServers = peers.length + 1 
 
+  def getMemberId = this.memberId
+
   def stepDown(newTerm: Term, leaderId: Option[MemberId]) =
     for      
       _ <- stable.newTerm(newTerm, None)
@@ -57,7 +59,7 @@ class Raft[A <: Command](
       _ <- state.update(s =>
         State.Follower(s.commitIndex, s.lastApplied, electionTimeout, leaderId)
       )
-      _ <- log.debug(s"Following $leaderId")
+      _ <- log.debug(s"memberId=${this.getMemberId} Following $leaderId")
     yield newTerm
 
   def convertToFollower(leaderId: MemberId) =
@@ -68,10 +70,10 @@ class Raft[A <: Command](
 
       _ <- s match
         case s: State.Follower if s.leaderId != Some(leaderId) =>
-          log.debug(s"Following $leaderId")
+          log.debug(s"memberId=${this.getMemberId} Following $leaderId")
         case s: State.Follower => ZIO.unit
         case s => 
-          log.debug(s"Following $leaderId")
+          log.debug(s"memberId=${this.getMemberId} Following $leaderId")
       
       _ <- state.set(State.Follower(s.commitIndex, s.lastApplied, electionTimeout, Some(leaderId)))      
     yield ()
@@ -223,7 +225,7 @@ class Raft[A <: Command](
   def startNewElectionRule =
     def start =
       for
-        _ <- log.debug(s"start new election")
+        _ <- log.debug(s"memberId=${this.getMemberId} start new election")
         currentTerm <- stable.currentTerm
         _ <- stable.newTerm(currentTerm.plusOne, Some(memberId))
         electionTimeout <- makeElectionTimeout        
@@ -250,7 +252,7 @@ class Raft[A <: Command](
   def becomeLeaderRule =
     def becomeLeader(c: Candidate) =
       for
-        _ <- log.debug(s"become leader")
+        _ <- log.debug(s"memberId=${this.getMemberId} become leader")
         lastLogIndex <- logStore.lastIndex
         _ <- state.set(
           Leader(
@@ -285,7 +287,7 @@ class Raft[A <: Command](
             for
               nTerm <- logStore.logTerm(n)
               _ <- ZIO.when(nTerm == currentTerm)(state.set(l.withCommitIndex(n)))
-              _ <- log.debug(s"advanceCommitIndexRule $nTerm $currentTerm ${l.commitIndex} ${n}").when(nTerm == currentTerm)
+              _ <- log.debug(s"memberId=${this.getMemberId} advanceCommitIndexRule $nTerm $currentTerm ${l.commitIndex} ${n}").when(nTerm == currentTerm)
             yield ()
           else ZIO.unit
         case _ => ZIO.unit
@@ -294,7 +296,7 @@ class Raft[A <: Command](
   def applyToStateMachineRule =
     for
       s <- state.get
-      _ <- log.debug(s"applyToStateMachineRule ${s.commitIndex} ${s.lastApplied}").when(s.commitIndex > s.lastApplied)
+      _ <- log.debug(s"memberId=${this.getMemberId} applyToStateMachineRule ${s.commitIndex} ${s.lastApplied}").when(s.commitIndex > s.lastApplied)
       newState <- applyToStateMachine(s)      
       _ <- state.set(newState)
     yield ()
@@ -367,7 +369,7 @@ class Raft[A <: Command](
             // TODO: check if nextIndex is in the logstore, otherwise send InstallSnapshot
             entries <- logStore.getLogs(nextIndex, lastIndex)
             
-            _ <- log.debug(s"sendAppendEntriesRule $peer $leaderLastLogIndex $nextIndex").when(entries.nonEmpty)
+            _ <- log.debug(s"memberId=${this.getMemberId} sendAppendEntriesRule $peer $leaderLastLogIndex $nextIndex").when(entries.nonEmpty)
             
             _ <- rpc.sendAppendEntires(
               peer,
@@ -446,7 +448,7 @@ class Raft[A <: Command](
         for
           res <- handleAppendEntriesRequest(r)
           _ <- ZIO.when(res.isInstanceOf[Failure[A]] || r.entries.nonEmpty)(
-            log.debug(s"handleAppendEntriesRequest $r $res")
+            log.debug(s"memberId=${this.getMemberId} handleAppendEntriesRequest $r $res")
           )
           _ <- rpc.sendAppendEntriesResponse(r.leaderId, res)
         yield ()
@@ -476,7 +478,7 @@ class Raft[A <: Command](
             currentTerm,
             lastIndex.plusOne
           )
-          _ <- log.debug(s"handleCommand $entry")
+          _ <- log.debug(s"memberId=${this.getMemberId} handleCommand $entry")
           _ <- logStore.storeLog(entry)
           _ <- pendingCommands.add(entry.index, promise)
         yield ()
@@ -497,7 +499,7 @@ class Raft[A <: Command](
         yield ()
       case commandMessage: CommandMessage[A] =>
         for
-          _ <- log.debug(s"${commandMessage.command}")
+          _ <- log.debug(s"memberId=${this.getMemberId} ${commandMessage.command}")
           _ <- preRules
           _ <- handleRequestFromClient(commandMessage.command, commandMessage.promise)
           _ <- postRules

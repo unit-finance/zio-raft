@@ -41,23 +41,19 @@ case class TestRpc[A <: Command](myQueue: zio.Queue[RPCMessage[A]], isResponding
  override def sendRequestVoteResponse(
      candidateId: MemberId,
      response: RequestVoteResult[A]
- ): UIO[Unit] = peers.get.flatMap(_.get(candidateId).get.offer(response)).unit
+ ): UIO[Unit] = peers.get.flatMap(_.get(candidateId).get.offer(response)).unit.unlessM(isResponding.get.map(!_))
  override def sendAppendEntriesResponse(
      leaderId: MemberId,
      response: AppendEntriesResult[A]
  ): UIO[Unit] = 
-    peers.get.flatMap(_.get(leaderId).get.offer(response)).unit
+    peers.get.flatMap(_.get(leaderId).get.offer(response)).unit.unlessM(isResponding.get.map(!_))
  override def sendAppendEntires(
      peer: MemberId,
      request: AppendEntriesRequest[A]
  ): UIO[Unit] = 
-    peers.get.flatMap(_.get(peer).get.offer(request)).unit
+    peers.get.flatMap(_.get(peer).get.offer(request)).unit.unlessM(isResponding.get.map(!_))
  override def sendRequestVote(peer: MemberId, m: RequestVoteRequest[A]): UIO[Unit] = 
-    peers.get.flatMap(_.get(peer).get.offer(m)).unit
+    peers.get.flatMap(_.get(peer).get.offer(m)).unit.unlessM(isResponding.get.map(!_))
  override def incomingMessages: ZStream[Any, Nothing, RPCMessage[A]] = 
     ZStream.fromQueue(myQueue)
-    .filterM(x => isResponding.get.tap({
-      case true => ZIO.unit
-      case false => ZIO.debug(s"dropping message $x")
-    }))
-    .tap(m => ZIO.debug(s"received $m"))
+    .filterM(x => isResponding.get)

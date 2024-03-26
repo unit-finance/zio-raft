@@ -42,6 +42,7 @@ object State:
       matchIndex: MatchIndex,
       // rpcDue: RPCDue,
       heartbeatDue: HeartbeatDue,
+      replicationStatus: ReplicationStatus,
       commitIndex: Index,
       lastApplied: Index      
   ) extends State:    
@@ -51,6 +52,21 @@ object State:
 
     def withNextIndex(from: MemberId, index: Index) =
       this.copy(nextIndex = nextIndex.set(from, index))
+
+    def withPause(from: MemberId) =
+      this.copy(replicationStatus = replicationStatus.pause(from))
+
+    def withResume(from: MemberId) =
+      this.copy(replicationStatus = replicationStatus.resume(from))
+
+    def withSnapshot(from: MemberId, now: Instant, index: Index) =
+      this.copy(replicationStatus = replicationStatus.snapshot(from, now, index))
+
+    def withSnaphotResponse(from: MemberId, now: Instant, responseIndex: Index, done: Boolean) =
+      this.copy(replicationStatus = replicationStatus.snapshotResponse(from, now, responseIndex, done))
+
+    def withSnapshotFailure(from: MemberId, now: Instant, responseIndex: Index) = 
+      this.copy(replicationStatus = replicationStatus.snapshotFailure(from, now, responseIndex))
 
     // def withRPCDueNow(from: MemberId) =
     //   this.copy(rpcDue = rpcDue.now(from))

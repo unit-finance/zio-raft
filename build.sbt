@@ -1,7 +1,7 @@
 lazy val zioVersion = "1.0.18"
 lazy val zhttpVersion = "1.0.0.0-RC29"
 lazy val zioLoggingVersion = "0.5.14"
-lazy val mainScalaVersion = "3.3.0"
+lazy val mainScalaVersion = "3.3.3"
 
 scalaVersion := mainScalaVersion
 
@@ -10,7 +10,7 @@ resolvers +=
 
 lazy val root = project
   .in(file("."))
-  .aggregate(raft, calculator, zmq, raftZmq)
+  .aggregate(raft, kvstore, zmq, raftZmq)
 
 lazy val raft = project
   .in(file("raft"))
@@ -22,18 +22,20 @@ lazy val raft = project
 //    scalacOptions ++= Seq(
 //      "-source:future"
 //    ),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zioVersion,
-      "dev.zio" %% "zio-test" % zioVersion,
+      "dev.zio" %% "zio-test" % zioVersion % Test,
+      "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
       "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
       "dev.zio" %% "zio-logging" % zioLoggingVersion
     )
   )
 
-lazy val calculator = project
-  .in(file("calculator"))
+lazy val kvstore = project
+  .in(file("kvstore"))
   .settings(
-    name := "calculator",
+    name := "kvstore",
     scalaVersion := mainScalaVersion,
     scalacOptions ++= Seq("-indent", "-rewrite"),
     libraryDependencies ++= Seq(
@@ -53,6 +55,8 @@ lazy val raftZmq = project
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zioVersion,
       "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
+      "dev.zio" %% "zio-test" % zioVersion % Test,
+      "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
       "org.scodec" %% "scodec-bits" % "1.1.37",
       "org.scodec" %% "scodec-core" % "2.2.1"
     )

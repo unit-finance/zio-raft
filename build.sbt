@@ -7,7 +7,7 @@ lazy val mainScalaVersion = "3.3.3"
 ThisBuild / organization := "io.github.unit-finance"
 ThisBuild / organizationName := "Unit"
 ThisBuild / organizationHomepage := Some(url("https://unit.co"))
-ThisBuild / version := "0.1.0"
+ThisBuild / version := "0.0.1"
 
 ThisBuild / scmInfo := Some(
   ScmInfo(
@@ -18,26 +18,23 @@ ThisBuild / scmInfo := Some(
 
 ThisBuild / homepage := Some(url("https://github.com/unit-finance/zio-raft"))
 
+ThisBuild / publishTo := {
+  val nexus = "https://s01.oss.sonatype.org/"
+  if (isSnapshot.value) Some("snapshots" at nexus + "content/repositories/snapshots")
+  else Some("releases" at nexus + "service/local/staging/deploy/maven2")
+}
+
+ThisBuild / credentials += Credentials(
+  "Sonatype Nexus Repository Manager",
+  "s01.oss.sonatype.org",
+  sys.env.getOrElse("SONATYPE_USERNAME", ""),
+  sys.env.getOrElse("SONATYPE_PASSWORD", "")
+)
 
 scalaVersion := mainScalaVersion
 
 resolvers +=
   "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots"
-
-publishTo := Some(
-  "Sonatype Central" at "https://central.sonatype.com"
-)
-
-lazy val sonatypeCredentials = {
-  val username = sys.env.get("SONATYPE_USERNAME")
-  val password = sys.env.get("SONATYPE_PASSWORD")
-  (username, password) match {
-    case (Some(u), Some(p)) => Seq(Credentials("Sonatype Central", "central.sonatype.com", u, p))
-    case _ => Seq.empty[Credentials]
-  }
-}
-
-credentials ++= sonatypeCredentials
 
 lazy val root = project
   .in(file("."))

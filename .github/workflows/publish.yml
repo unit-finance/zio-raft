@@ -11,6 +11,14 @@ jobs:
       with:
         distribution: 'adopt'
         java-version: '21'
+    - name: Extract version from release tag
+      id: extract_version
+      run: |
+        version=$(echo "${GITHUB_REF#refs/tags/}")
+        echo "VERSION=$version" >> $GITHUB_ENV
+    - name: Update SBT version in build.sbt
+      run: |
+        sed -i "s/ThisBuild \/ version := .*/ThisBuild \/ version := \"$VERSION\"/" build.sbt
     - name: Compile
       run: sbt compile
     - name: Publish

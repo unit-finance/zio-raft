@@ -29,5 +29,5 @@ jobs:
     - name: Publish
       env:
         GITHUB_USERNAME: ${{ secrets.GITHUB_ACTOR }}
-        GITHUB_ACTOR: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: sbt publish

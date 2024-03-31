@@ -25,7 +25,7 @@ ThisBuild / homepage := Some(url("https://github.com/unit-finance/zio-raft"))
 //   else Some("releases" at nexus + "service/local/staging/deploy/maven2")
 // }
 
-ThisBuild / publishTo := Some("https://maven.pkg.github.com/unit-finance/zio-raft")
+ThisBuild / publishTo := Some("GitHub Package Registry" at "https://maven.pkg.github.com/unit-finance/zio-raft")
 
 ThisBuild / credentials += Credentials(
   "Sonatype Nexus Repository Manager",

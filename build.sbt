@@ -60,8 +60,7 @@ lazy val root = project
   .in(file("."))
   .aggregate(raft, kvstore, zmq, raftZmq)
   .settings(
-    publish / skip := true,
-    publishers +=
+    publish / skip := true
   )
 
 lazy val raft = project

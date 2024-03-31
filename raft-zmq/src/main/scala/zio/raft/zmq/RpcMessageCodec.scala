@@ -1,6 +1,6 @@
 package zio.raft.zmq
 
-import scodec.codecs.{discriminated, uint8, int64, utf8_32, listOfN, int32, bool, variableSizeBytes, bytes}
+import scodec.codecs.{discriminated, uint8, int64, utf8_32, listOfN, int32, bool, variableSizeBytes, bytes, optional}
 import zio.raft.*
 import scodec.{Codec, DecodeResult}
 import zio.Chunk
@@ -42,7 +42,7 @@ object RpcMessageCodec:
           
     private def appendEntriesResultCodec[A <: Command] = discriminated[AppendEntriesResult[A]].by(uint8)
         .typecase(0, (memberIdCodec :: termCodec :: indexCodec).as[AppendEntriesResult.Success[A]])
-        .typecase(1, (memberIdCodec :: termCodec :: indexCodec).as[AppendEntriesResult.Failure[A]])
+        .typecase(1, (memberIdCodec :: termCodec :: indexCodec :: optional(bool(8), termCodec :: indexCodec)).as[AppendEntriesResult.Failure[A]])
 
     private def requestVoteRequestCodec[A <: Command] = (termCodec :: memberIdCodec :: indexCodec :: termCodec).as[RequestVoteRequest[A]]
     

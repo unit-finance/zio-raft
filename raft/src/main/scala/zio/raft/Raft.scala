@@ -190,12 +190,12 @@ class Raft[A <: Command](
             lastIndex <- logStore.lastIndex
             matchIndex = l.matchIndex.get(m.from)
 
-            _ <- ZIO.when(wasPaused && !leader.replicationStatus.isSnapshot(m.from))(log.info(s"memberId=${this.memberId} Resuming $m.from"))
-
-            // if the matchIndex is behind the last index, we need to send the append entries again for the peer to be able to resume            
             _ <- ZIO.when(
-              matchIndex < lastIndex && wasPaused && !leader.replicationStatus.isSnapshot(m.from)
-            )(sendAppendEntries(m.from, leader, lastIndex))
+              wasPaused && !leader.replicationStatus.isSnapshot(m.from)
+            )(log.info(s"memberId=${this.memberId} Resuming $m.from"))
+
+            // if the matchIndex is behind the last index, we need to send the append entries again for the peer to be able to resume
+            _ <- ZIO.when(matchIndex < lastIndex)(sendAppendEntries(m.from, leader, lastIndex))
           yield ()
         case _ => ZIO.unit
     yield ()
@@ -214,7 +214,7 @@ class Raft[A <: Command](
         if currentTerm > m.term then
           ZIO.succeed(
             AppendEntriesResult
-              .Failure[A](memberId, currentTerm, m.previousIndex)
+              .Failure[A](memberId, currentTerm, m.previousIndex, None)
           )
         else
           for
@@ -263,9 +263,15 @@ class Raft[A <: Command](
                   messageLastIndex
                 )
               else
-                ZIO.succeed(
-                  AppendEntriesResult
-                    .Failure[A](memberId, currentTerm, m.previousIndex)
+                for (hintTerm, hintIndex) <- logStore.findConflictByTerm(
+                    m.previousTerm,
+                    Index.min(m.previousIndex, lastIndex)
+                  )
+                yield AppendEntriesResult.Failure[A](
+                  memberId,
+                  currentTerm,
+                  m.previousIndex,
+                  Some(hintTerm, hintIndex)
                 )
           yield result
     yield result
@@ -295,7 +301,28 @@ class Raft[A <: Command](
                   .withMatchIndex(from, Index.max(currentMatchIndex, index))
                   .withResume(from)
               )
-            case AppendEntriesResult.Failure(from, _, index) =>
+            case AppendEntriesResult.Failure(
+                  from,
+                  _,
+                  _,
+                  Some(hintTerm, hintIndex)
+                ) =>
+              for
+                index <- 
+                  if hintTerm.isZero then ZIO.succeed(hintIndex)
+                  else logStore.findConflictByTerm(hintTerm, hintIndex).map(_._2)
+                currentNextIndex = leader.nextIndex.get(from)
+
+                // we don't want to increase the index if we already processed a failure with a lower index
+                _ <- state.set(
+                  leader
+                    .withNextIndex(
+                      from,
+                      Index.max(Index.one, Index.min(currentNextIndex, index))
+                    )
+                )
+              yield ()
+            case AppendEntriesResult.Failure(from, _, index, _) =>
               val currentNextIndex = leader.nextIndex.get(from)
 
               // we don't want to increase the index if we already processed a failure with a lower index
@@ -306,6 +333,7 @@ class Raft[A <: Command](
                     Index.max(Index.one, Index.min(currentNextIndex, index))
                   )
               )
+
         case _ => ZIO.unit
     yield ()
 
@@ -336,8 +364,7 @@ class Raft[A <: Command](
               r.lastIndex,
               r.offset,
               r.data
-            )
-            // TODO: if we failed to write the snapshot we should reject the snapshot
+            )            
             result <-
               (r.done, written) match
                 case (_, false) =>
@@ -538,7 +565,9 @@ class Raft[A <: Command](
           _ <- (snapshotStore
             .createNewSnapshot(
               Snapshot(s.lastApplied, previousTerm, stream)
-            ) &&& logStore.discardLogUpTo(s.lastApplied)).fork // TODO: make discarding the log configurable (the user might want to control that)
+            ) &&& logStore.discardLogUpTo(
+            s.lastApplied
+          )).fork // TODO: make discarding the log configurable (the user might want to control that)
         yield ()
     yield ()
 
@@ -670,7 +699,9 @@ class Raft[A <: Command](
             // Empty snapshot is special case where we only send one message
             isEmpty <- snapshot.stream.runHead.map(_.isEmpty)
 
-            _ <- if isEmpty then rpc.sendInstallSnapshot(
+            _ <-
+              if isEmpty then
+                rpc.sendInstallSnapshot(
                   peer,
                   InstallSnapshotRequest(
                     currentTerm,
@@ -681,27 +712,30 @@ class Raft[A <: Command](
                     true,
                     Chunk.empty
                   )
-                ) else snapshot.stream
-              .grouped(chunkZize.toInt)
-              .zipWithNext
-              .zipWithIndex
-              .foreach { case ((chunk, next), index) =>
-                log.debug(
-                  s"memberId=${this.memberId} sendInstallSnapshot $peer $index")                
-                rpc.sendInstallSnapshot(
-                  peer,
-                  InstallSnapshotRequest(
-                    currentTerm,
-                    memberId,
-                    snapshot.previousIndex,
-                    snapshot.previousTerm,
-                    index * chunkZize,
-                    next.isEmpty,
-                    chunk
-                  )
-                )
-              }
-              .fork
+                ).fork
+              else
+                snapshot.stream
+                  .grouped(chunkZize.toInt)
+                  .zipWithNext
+                  .zipWithIndex
+                  .foreach { case ((chunk, next), index) =>
+                    log.debug(
+                      s"memberId=${this.memberId} sendInstallSnapshot $peer $index"
+                    )
+                    rpc.sendInstallSnapshot(
+                      peer,
+                      InstallSnapshotRequest(
+                        currentTerm,
+                        memberId,
+                        snapshot.previousIndex,
+                        snapshot.previousTerm,
+                        index * chunkZize,
+                        next.isEmpty,
+                        chunk
+                      )
+                    )
+                  }
+                  .fork
 
             _ <- state.set(
               l.withNextIndex(peer, snapshot.previousIndex.plusOne)
@@ -914,7 +948,7 @@ object Raft:
       state <- Ref.makeManaged[State](
         State.Follower(previousIndex, previousIndex, electionTimeout, None)
       )
-      commandsQueue <- Queue.unbounded[CommandMessage[A]].toManaged_
+      commandsQueue <- Queue.unbounded[CommandMessage[A]].toManaged_ // TODO: should this be bounded for pack-pressure?
 
       pendingCommands <- PendingCommands.makeManaged
       raft = new Raft(

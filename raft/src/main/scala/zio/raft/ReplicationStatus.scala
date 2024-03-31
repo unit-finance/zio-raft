@@ -3,21 +3,23 @@ package zio.raft
 import java.time.Instant
 
 enum PeerReplicationStatus:
-  case Paused
-  case Replicating
+  case Replicating(paused: Boolean)
   case Snapshot(lastResponse: Instant, index: Index)
 
 class ReplicationStatus(val peerStatus: Map[MemberId, PeerReplicationStatus]):
   def pause(peer: MemberId): ReplicationStatus =
-    new ReplicationStatus(
-      peerStatus.updated(peer, PeerReplicationStatus.Paused)
-    )
+    peerStatus.get(peer) match
+      case Some(PeerReplicationStatus.Replicating(false)) =>
+        new ReplicationStatus(
+          peerStatus.updated(peer, PeerReplicationStatus.Replicating(true))
+        )
+      case _ => this
 
   def resume(peer: MemberId): ReplicationStatus =
     peerStatus.get(peer) match
-      case Some(PeerReplicationStatus.Paused) =>
+      case Some(PeerReplicationStatus.Replicating(true)) =>
         new ReplicationStatus(
-          peerStatus.updated(peer, PeerReplicationStatus.Replicating)
+          peerStatus.updated(peer, PeerReplicationStatus.Replicating(false))
         )
       case _ => this
 
@@ -37,7 +39,7 @@ class ReplicationStatus(val peerStatus: Map[MemberId, PeerReplicationStatus]):
           if responseIndex == snapshotIndex =>
         if done then
           new ReplicationStatus(
-            peerStatus.updated(peer, PeerReplicationStatus.Replicating)
+            peerStatus.updated(peer, PeerReplicationStatus.Replicating(false))
           )
         else
           new ReplicationStatus(
@@ -53,15 +55,15 @@ class ReplicationStatus(val peerStatus: Map[MemberId, PeerReplicationStatus]):
       case Some(PeerReplicationStatus.Snapshot(_, snapshotIndex))
           if responseIndex == snapshotIndex =>
         new ReplicationStatus(
-          peerStatus.updated(peer, PeerReplicationStatus.Replicating)
+          peerStatus.updated(peer, PeerReplicationStatus.Replicating(false))
         )
       case _ => this
 
   def isPaused(peer: MemberId): Boolean =
     peerStatus.get(peer) match
-      case Some(PeerReplicationStatus.Paused)         => true
-      case Some(PeerReplicationStatus.Snapshot(_, _)) => true
-      case _                                          => false
+      case Some(PeerReplicationStatus.Replicating(true)) => true
+      case Some(PeerReplicationStatus.Snapshot(_, _))    => true
+      case _                                             => false
 
   def isSnapshot(peer: MemberId): Boolean =
     peerStatus.get(peer) match
@@ -70,5 +72,5 @@ class ReplicationStatus(val peerStatus: Map[MemberId, PeerReplicationStatus]):
 
 object ReplicationStatus:
   def apply(peers: Peers) = new ReplicationStatus(
-    peers.map(_ -> PeerReplicationStatus.Replicating).toMap
+    peers.map(_ -> PeerReplicationStatus.Replicating(false)).toMap
   )

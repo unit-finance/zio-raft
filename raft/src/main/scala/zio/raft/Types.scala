@@ -13,6 +13,8 @@ case class Term(value: Long):
   def <=(other: Term) = value <= other.value
 
   def plusOne = Term(value + 1L)
+
+  def isZero = value == 0L
 object Term:
   val zero = Term(0L)
 
@@ -93,7 +95,7 @@ object AppendEntriesResult:
       term: Term,
       matchIndex: Index
   ) extends AppendEntriesResult[A]
-  case class Failure[A <: Command](from: MemberId, term: Term, index: Index)
+  case class Failure[A <: Command](from: MemberId, term: Term, index: Index, hint: Option[(Term, Index)])
       extends AppendEntriesResult[A]
 
 case class HeartbeatRequest[A <: Command](term: Term, leaderId: MemberId, leaderCommitIndex: Index) extends RPCMessage[A]

@@ -20,13 +20,21 @@ trait LogStore[A <: Command]:
   def getLogs(from: Index, toInclusive: Index): UIO[Option[List[LogEntry[A]]]]
   def storeLog(logEntry: LogEntry[A]): UIO[Unit]  
   def storeLogs(entries: Iterable[LogEntry[A]]): UIO[Unit]  
-  // def storeLogs(logEntries: Array[LogEntry]) : UIO[Unit]
-  // def deleteRange(min: Index, max: Index) : UIO[Unit]
+    
   def deleteFrom(minInclusive: Index): UIO[Unit]
   def discardEntireLog(previousIndex: Index, previousTerm: Term): UIO[Unit]
 
   // The previousIndex and previousTerm of the index must be kept, the payload can be dropped
   def discardLogUpTo(index: Index): UIO[Unit]
+
+  def findConflictByTerm(term: Term, index: Index) : UIO[(Term, Index)] =
+    if index.isZero then ZIO.succeed((Term.zero, Index.zero))
+    else 
+      logTerm(index).flatMap:
+        case None => ZIO.succeed((Term.zero, index))
+        case Some(ourTerm) if ourTerm <= term => ZIO.succeed((ourTerm, index))
+        case Some(ourTerm) => findConflictByTerm(term, index.minusOne)
+
 end LogStore
 
 object LogStore:

@@ -47,8 +47,8 @@ class KVStateMachine(map: Map[String, String]) extends StateMachine[KVCommand]:
     // TODO: we need to improve the conversion of Stream to BitVector
     stream.toInputStream.map(is => BitVector.fromInputStream(is, 1024)).map(bv => mapCodec.decodeValue(bv).require).map(m => KVStateMachine(m)).useNow
 
-  override def shouldTakeSnapshot(lastSnaphotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean = 
-    commitIndex.value - lastSnaphotIndex.value > 2
+  override def shouldTakeSnapshot(lastSnaphotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean = false
+    // commitIndex.value - lastSnaphotIndex.value > 2
   
   override def apply(command: KVCommand): (command.Response, StateMachine[KVCommand]) =
     command match

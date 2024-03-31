@@ -78,7 +78,9 @@ class ZmqRpc[A <: Command](server: ZSocket, clients: Map[MemberId, ZSocket], cod
     val client = clients(peer)
     val message = RpcMessageCodec.codec[A](codec).encode(m).require.toByteArray    
     
-    log.debug(s"sending install snapshot to $peer $m") *> client.sendImmediately(message).ignore
+    // Wait for the peer to be available when sending a snapshot, otherwise we might drop some parts of the snapshot
+    // This can still happen of course (message fails in transit) but waiting improve the chances of successful delivery of snapshot
+    client.send(message).ignore
 
   override def sendInstallSnapshotResponse(peer: MemberId, m: InstallSnapshotResult[A]): UIO[Unit] = 
     val client = clients(peer)

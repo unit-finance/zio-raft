@@ -47,8 +47,8 @@ ThisBuild / credentials +=
   Credentials(
     "GitHub Package Registry",
     "maven.pkg.github.com",
-    sys.env.getOrElse("GITHUB_USERNAME"),
-    sys.env.getOrElse("GITHUB_TOKEN")
+    sys.env.getOrElse("GITHUB_USERNAME", ""),
+    sys.env.getOrElse("GITHUB_TOKEN", "")
   )
 
 scalaVersion := mainScalaVersion

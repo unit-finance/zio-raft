@@ -3,14 +3,44 @@ lazy val zhttpVersion = "1.0.0.0-RC29"
 lazy val zioLoggingVersion = "0.5.14"
 lazy val mainScalaVersion = "3.3.3"
 
+
+ThisBuild / organization := "io.github.unit-finance"
+ThisBuild / organizationName := "Unit"
+ThisBuild / organizationHomepage := Some(url("https://unit.co"))
+ThisBuild / version := "0.1.0"
+
+ThisBuild / scmInfo := Some(
+  ScmInfo(
+    url("https://github.com/unit-finance/zio-raft"),
+    "scm:git@github.com:unit-finance/zio-raft.git"
+  )
+)
+
+ThisBuild / homepage := Some(url("https://github.com/unit-finance/zio-raft"))
+
+
 scalaVersion := mainScalaVersion
 
 resolvers +=
   "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots"
 
+publishTo := Some(
+  "Sonatype Central" at "https://central.sonatype.com"
+)
+
+credentials += Credentials(
+  "Sonatype Central",
+  "central.sonatype.com",
+  sys.env("SONATYPE_USERNAME"),
+  sys.env("SONATYPE_PASSWORD")
+)
+
 lazy val root = project
   .in(file("."))
   .aggregate(raft, kvstore, zmq, raftZmq)
+  .settings(  
+    publish / skip := true
+  )
 
 lazy val raft = project
   .in(file("raft"))
@@ -36,6 +66,7 @@ lazy val kvstore = project
   .in(file("kvstore"))
   .settings(
     name := "kvstore",
+    publish / skip := true,
     scalaVersion := mainScalaVersion,
     scalacOptions ++= Seq("-indent", "-rewrite"),
     libraryDependencies ++= Seq(
@@ -49,7 +80,7 @@ lazy val kvstore = project
 lazy val raftZmq = project
   .in(file("raft-zmq"))
   .settings(
-    name := "raft-zmq",
+    name := "zio-raft-zmq",
     scalaVersion := mainScalaVersion,
     scalacOptions ++= Seq("-indent", "-rewrite"),
     libraryDependencies ++= Seq(

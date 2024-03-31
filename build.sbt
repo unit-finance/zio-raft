@@ -3,7 +3,8 @@ lazy val zhttpVersion = "1.0.0.0-RC29"
 lazy val zioLoggingVersion = "0.5.14"
 lazy val mainScalaVersion = "3.3.3"
 
-ThisBuild / organization := "io.github.unit-finance"
+//ThisBuild / organization := "io.github.unit-finance"
+ThisBuild / organization := "co.unit"
 ThisBuild / organizationName := "Unit"
 ThisBuild / organizationHomepage := Some(url("https://unit.co"))
 ThisBuild / version := "0.0.1"
@@ -24,17 +25,7 @@ ThisBuild / homepage := Some(url("https://github.com/unit-finance/zio-raft"))
 //   else Some("releases" at nexus + "service/local/staging/deploy/maven2")
 // }
 
-ThisBuild / publishTo := {
-  val githubOwner = "unit-finance"
-  val githubRepository = "zio-raft"
-  
-  val nexus = "https://maven.pkg.github.com/" + githubOwner
-  if (isSnapshot.value)
-    Some("snapshots" at nexus + "/"+ githubRepository + "/snapshots")
-  else
-    Some("releases"  at nexus + "/"+ githubRepository + "/releases")
-
-}
+ThisBuild / publishTo := Some("https://maven.pkg.github.com/unit-finance/zio-raft")
 
 ThisBuild / credentials += Credentials(
   "Sonatype Nexus Repository Manager",

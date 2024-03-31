@@ -22,4 +22,7 @@ jobs:
     - name: Compile
       run: sbt compile
     - name: Publish
+      env:
+        SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+        SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
       run: sbt publish

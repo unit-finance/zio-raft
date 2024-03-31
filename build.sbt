@@ -28,12 +28,16 @@ publishTo := Some(
   "Sonatype Central" at "https://central.sonatype.com"
 )
 
-credentials += Credentials(
-  "Sonatype Central",
-  "central.sonatype.com",
-  sys.env("SONATYPE_USERNAME"),
-  sys.env("SONATYPE_PASSWORD")
-)
+lazy val sonatypeCredentials = {
+  val username = sys.env.get("SONATYPE_USERNAME")
+  val password = sys.env.get("SONATYPE_PASSWORD")
+  (username, password) match {
+    case (Some(u), Some(p)) => Seq(Credentials("Sonatype Central", "central.sonatype.com", u, p))
+    case _ => Seq.empty[Credentials]
+  }
+}
+
+credentials ++= sonatypeCredentials
 
 lazy val root = project
   .in(file("."))

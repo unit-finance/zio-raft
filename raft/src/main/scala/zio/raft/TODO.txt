@@ -2,3 +2,5 @@
 [ ] Logging
 [ ] metrics
 [ ] Snapshot state should expire after some time
+[ ] Leader should cache unapplied entries
+[ ] auto-batch commands from user

@@ -3,11 +3,11 @@ lazy val zhttpVersion = "1.0.0.0-RC29"
 lazy val zioLoggingVersion = "0.5.14"
 lazy val mainScalaVersion = "3.3.3"
 
-//ThisBuild / organization := "io.github.unit-finance"
-ThisBuild / organization := "co.unit"
+ThisBuild / organization := "io.github.unit-finance"
+// ThisBuild / organization := "co.unit"
 ThisBuild / organizationName := "Unit"
 ThisBuild / organizationHomepage := Some(url("https://unit.co"))
-ThisBuild / version := "0.0.1"
+ThisBuild / version := "0.0.1-SNAPSHOT"
 
 ThisBuild / scmInfo := Some(
   ScmInfo(
@@ -18,14 +18,12 @@ ThisBuild / scmInfo := Some(
 
 ThisBuild / homepage := Some(url("https://github.com/unit-finance/zio-raft"))
 
-// ThisBuild / publishTo := {
-//   val nexus = "https://s01.oss.sonatype.org/"
-//   if (isSnapshot.value)
-//     Some("snapshots" at nexus + "content/repositories/snapshots")
-//   else Some("releases" at nexus + "service/local/staging/deploy/maven2")
-// }
-
-ThisBuild / publishTo := Some("GitHub Package Registry" at "https://maven.pkg.github.com/unit-finance/zio-raft")
+ThisBuild / publishTo := {
+  val nexus = "https://s01.oss.sonatype.org/"
+  if (isSnapshot.value)
+    Some("snapshots" at nexus + "content/repositories/snapshots")
+  else Some("releases" at nexus + "service/local/staging/deploy/maven2")
+}
 
 ThisBuild / credentials += Credentials(
   "Sonatype Nexus Repository Manager",
@@ -33,14 +31,6 @@ ThisBuild / credentials += Credentials(
   sys.env.getOrElse("SONATYPE_USERNAME", ""),
   sys.env.getOrElse("SONATYPE_PASSWORD", "")
 )
-
-ThisBuild / credentials +=
-  Credentials(
-    "GitHub Package Registry",
-    "maven.pkg.github.com",
-    sys.env.getOrElse("GITHUB_USERNAME", ""),
-    sys.env.getOrElse("GITHUB_TOKEN", "")
-  )
 
 scalaVersion := mainScalaVersion
 

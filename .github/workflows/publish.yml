@@ -21,13 +21,8 @@ jobs:
         sed -i "s/ThisBuild \/ version := .*/ThisBuild \/ version := \"$VERSION\"/" build.sbt
     - name: Compile
       run: sbt compile
-    # - name: Publish
-    #   env:
-    #     SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
-    #     SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-    #   run: sbt publish
     - name: Publish
       env:
-        GITHUB_USERNAME: ${{ secrets.GITHUB_ACTOR }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+        SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
       run: sbt publish

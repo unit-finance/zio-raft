@@ -5,6 +5,9 @@ import zio.stream.ZStream
 
 object TestRpc:
 
+  def makeOne[A <: Command] =
+    make[A](1).map(_.head._1)
+
   def make[A <: Command](
       numberOfPeers: Int
   ): ZIO[Any, Nothing, List[Tuple2[RPC[A], Ref[Boolean]]]] =

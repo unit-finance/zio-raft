@@ -4,3 +4,5 @@
 [ ] Snapshot state should expire after some time
 [ ] Leader should cache unapplied entries
 [ ] auto-batch commands from user
+[ ] reject all existing promises when leader step down or if they get deleted from disk and test it
+[ ] leader should figure out if he is not the leader anymore

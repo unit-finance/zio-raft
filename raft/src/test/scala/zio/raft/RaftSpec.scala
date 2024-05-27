@@ -1,7 +1,6 @@
 package zio.raft
 
 import zio.test.*
-import zio.logging.Logging
 import zio.raft.RequestVoteResult
 import zio.raft.HeartbeatRequest
 import zio.raft.State.Candidate
@@ -11,17 +10,17 @@ import zio.ZIO
 import zio.raft.StreamItem.CommandMessage
 import zio.raft.Index.range
 import zio.raft.AppendEntriesResult.Success
+import zio.Scope
 
-object RaftSpec extends MutableRunnableSpec(Logging.console()):
+object RaftSpec extends ZIOSpecDefault:
   def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean) =
     (for
-      stable <- Stable.makeInMemoryManaged
-      logStore <- LogStore.makeInMemoryManaged[TestCommands]
-      snapshotStore <- SnapshotStore.makeInMemoryManaged
+      stable <- Stable.makeInMemory
+      logStore <- LogStore.makeInMemory[TestCommands]
+      snapshotStore <- SnapshotStore.makeInMemory
       rpc <- zio.Queue
         .unbounded[(MemberId, RPCMessage[TestCommands])]
         .map(new MockRpc(_))
-        .toManaged_
       raft <- Raft.make(
         memberId,
         peers,
@@ -31,7 +30,7 @@ object RaftSpec extends MutableRunnableSpec(Logging.console()):
         rpc,
         new TestStateMachine(0, enableSnapshot)
       )
-    yield (raft, rpc)).useNow
+    yield (raft, rpc))
 
   def isCandidate(raft: Raft[TestCommands]) =
     for s <- raft.state.get
@@ -129,172 +128,186 @@ object RaftSpec extends MutableRunnableSpec(Logging.console()):
       _ <- handleTick(raft)
     yield ()
 
-  testM("bootstrap"):
-    for
-      (raft, rpc) <- makeRaft(
-        MemberId("peer1"),
-        Array(MemberId("peer2"), MemberId("peer3")),
-        false
-      )
-      _ <- handleBootstrap(raft)
-      isCandidateAfterBootstarp <- isCandidate(raft)
-
-      _ <- raft.state.get.debug
-
-      messages <- rpc.queue.takeAll
-
-      _ <- handleVoteGranted(raft, Term(1), MemberId("peer2"))
-      isLeaderAfterGranted <- raft.isTheLeader
-
-      expectedMessages: List[(MemberId, RPCMessage[TestCommands])] = List(
-        MemberId("peer2") -> RequestVoteRequest(
-          Term(1),
+  override def spec: Spec[TestEnvironment & Scope, Any] = suite("Raft Spec")(
+    test("bootstrap") {
+      for
+        (raft, rpc) <- makeRaft(
           MemberId("peer1"),
-          Index(0),
-          Term(0)
-        ),
-        MemberId("peer3") -> RequestVoteRequest(
-          Term(1),
-          MemberId("peer1"),
-          Index(0),
-          Term(0)
+          Array(MemberId("peer2"), MemberId("peer3")),
+          false
         )
-      )
-    yield assertTrue(
-      messages == expectedMessages
-    ) // isCandidateAfterBootstarp && isLeaderAfterGranted &&
+        _ <- handleBootstrap(raft)
+        isCandidateAfterBootstarp <- isCandidate(raft)
 
-  testM("check heartbeat is sent"):
-    for
-      (raft, rpc) <- makeRaft(
-        MemberId("peer1"),
-        Array(MemberId("peer2"), MemberId("peer3")),
-        false
-      )
-      _ <- handleBootstrap(raft)
-      _ <- handleVoteGranted(raft, Term(1), MemberId("peer2"))
+        _ <- raft.state.get.debug
 
-      _ <- rpc.queue.takeAll
+        messages <- rpc.queue.takeAll
 
-      _ <- handleTick(raft)
+        _ <- handleVoteGranted(raft, Term(1), MemberId("peer2"))
+        isLeaderAfterGranted <- raft.isTheLeader
 
-      messages <- rpc.queue.takeAll
-      expectedMessage: List[(MemberId, RPCMessage[TestCommands])] = List(
-        MemberId("peer2") -> HeartbeatRequest(
-          Term(1),
+        expectedMessages: List[(MemberId, RPCMessage[TestCommands])] = List(
+          MemberId("peer2") -> RequestVoteRequest(
+            Term(1),
+            MemberId("peer1"),
+            Index(0),
+            Term(0)
+          ),
+          MemberId("peer3") -> RequestVoteRequest(
+            Term(1),
+            MemberId("peer1"),
+            Index(0),
+            Term(0)
+          )
+        )
+      yield assertTrue(
+        messages == expectedMessages
+      ) // isCandidateAfterBootstarp && isLeaderAfterGranted &&
+    },
+    test("check heartbeat is sent") {
+      for
+        (raft, rpc) <- makeRaft(
           MemberId("peer1"),
-          Index(0)
-        ),
-        MemberId("peer3") -> HeartbeatRequest(
-          Term(1),
+          Array(MemberId("peer2"), MemberId("peer3")),
+          false
+        )
+        _ <- handleBootstrap(raft)
+        _ <- handleVoteGranted(raft, Term(1), MemberId("peer2"))
+
+        _ <- rpc.queue.takeAll
+
+        _ <- handleTick(raft)
+
+        messages <- rpc.queue.takeAll
+        expectedMessage: List[(MemberId, RPCMessage[TestCommands])] = List(
+          MemberId("peer2") -> HeartbeatRequest(
+            Term(1),
+            MemberId("peer1"),
+            Index(0)
+          ),
+          MemberId("peer3") -> HeartbeatRequest(
+            Term(1),
+            MemberId("peer1"),
+            Index(0)
+          )
+        )
+      yield assertTrue(messages == expectedMessage)
+    },
+    test("become follower after heartbeat") {
+      for
+        (raft, _) <- makeRaft(
           MemberId("peer1"),
+          Array(MemberId("peer2"), MemberId("peer3")),
+          false
+        )
+        _ <- handleHeartbeat(raft, Term(1), MemberId("peer2"), Index(0))
+        isFollower <- isFollower(raft)
+        leader <- getLeader(raft)
+      yield assertTrue(isFollower && leader == Some(MemberId("peer2")))
+    },
+    test("become follower after empty append entries") {
+      for
+        (raft, _) <- makeRaft(
+          MemberId("peer1"),
+          Array(MemberId("peer2"), MemberId("peer3")),
+          false
+        )
+        _ <- handelAppendEntries(
+          raft,
+          Term(1),
+          MemberId("peer2"),
+          Index(0),
+          Term(0),
+          List.empty,
           Index(0)
         )
-      )
-    yield assertTrue(messages == expectedMessage)
-
-  testM("become follower after heartbeat"):
-    for
-      (raft, _) <- makeRaft(
-        MemberId("peer1"),
-        Array(MemberId("peer2"), MemberId("peer3")),
-        false
-      )
-      _ <- handleHeartbeat(raft, Term(1), MemberId("peer2"), Index(0))
-      isFollower <- isFollower(raft)
-      leader <- getLeader(raft)
-    yield assertTrue(isFollower && leader == Some(MemberId("peer2")))
-
-  testM("become follower after empty append entries"):
-    for
-      (raft, _) <- makeRaft(
-        MemberId("peer1"),
-        Array(MemberId("peer2"), MemberId("peer3")),
-        false
-      )
-      _ <- handelAppendEntries(
-        raft,
-        Term(1),
-        MemberId("peer2"),
-        Index(0),
-        Term(0),
-        List.empty,
-        Index(0)
-      )
-      isFollower <- isFollower(raft)
-      leader <- getLeader(raft)
-    yield assertTrue(isFollower && leader == Some(MemberId("peer2")))
-
-  testM("become follower after append entries"):
-    for
-      (raft, _) <- makeRaft(
-        MemberId("peer1"),
-        Array(MemberId("peer2"), MemberId("peer3")),
-        false
-      )
-      logEntry: LogEntry[TestCommands] = LogEntry(Increase, Term(1), Index(1))
-      _ <- handelAppendEntries(
-        raft,
-        Term(1),
-        MemberId("peer2"),
-        Index(0),
-        Term(0),
-        List(logEntry),
-        Index(1)
-      )
-      follower <- expectFollower(raft)
-      leader <- getLeader(raft)
-    yield assertTrue(
-      leader == Some(MemberId("peer2")) && follower.commitIndex == Index(
-        1
-      ) && follower.lastApplied == Index(1)
-    )
-
-  testM("leader send append entries"):
-    for
-      (raft, rpc) <- makeRaft(
-        MemberId("peer1"),
-        Array(MemberId("peer2"), MemberId("peer3")),
-        false
-      )
-      _ <- bootstrap(raft)
-      _ <- rpc.queue.takeAll
-
-      _ <- sendCommand(raft, Increase)
-
-      messages <- rpc.queue.takeAll
-      expectedAppendEntry: RPCMessage[TestCommands] = AppendEntriesRequest(
-        Term(1),
-        MemberId("peer1"),
-        Index(0),
-        Term(0),
-        List(LogEntry(Increase, Term(1), Index(1))),
-        Index(0)
-      )
-      expectedMessages = List(
-        MemberId("peer2") -> expectedAppendEntry,
-        MemberId("peer3") -> expectedAppendEntry
-      )
-    yield assertTrue(messages == expectedMessages)
-
-  testM("follower send append entries response"):
-    for
-      (raft, rpc) <- makeRaft(
-        MemberId("peer1"),
-        Array(MemberId("peer2"), MemberId("peer3")),
-        false
-      )
-      
-      _ <- handelAppendEntries(raft, Term(1), MemberId("peer2"), Index(0), Term(0), List(LogEntry(Increase, Term(1), Index(1))), Index(0))
-
-      messages <- rpc.queue.takeAll
-      expectedMessages: List[(MemberId, RPCMessage[TestCommands])] = List(
-        MemberId("peer2") -> AppendEntriesResult.Success(
+        isFollower <- isFollower(raft)
+        leader <- getLeader(raft)
+      yield assertTrue(isFollower && leader == Some(MemberId("peer2")))
+    },
+    test("become follower after append entries") {
+      for
+        (raft, _) <- makeRaft(
           MemberId("peer1"),
+          Array(MemberId("peer2"), MemberId("peer3")),
+          false
+        )
+        logEntry: LogEntry[TestCommands] = LogEntry(
+          Increase,
           Term(1),
           Index(1)
         )
+        _ <- handelAppendEntries(
+          raft,
+          Term(1),
+          MemberId("peer2"),
+          Index(0),
+          Term(0),
+          List(logEntry),
+          Index(1)
+        )
+        follower <- expectFollower(raft)
+        leader <- getLeader(raft)
+      yield assertTrue(
+        leader == Some(MemberId("peer2")) && follower.commitIndex == Index(
+          1
+        ) && follower.lastApplied == Index(1)
       )
-    yield assertTrue(messages == expectedMessages)
+    },
+    test("leader send append entries") {
+      for
+        (raft, rpc) <- makeRaft(
+          MemberId("peer1"),
+          Array(MemberId("peer2"), MemberId("peer3")),
+          false
+        )
+        _ <- bootstrap(raft)
+        _ <- rpc.queue.takeAll
 
+        _ <- sendCommand(raft, Increase)
+
+        messages <- rpc.queue.takeAll
+        expectedAppendEntry: RPCMessage[TestCommands] = AppendEntriesRequest(
+          Term(1),
+          MemberId("peer1"),
+          Index(0),
+          Term(0),
+          List(LogEntry(Increase, Term(1), Index(1))),
+          Index(0)
+        )
+        expectedMessages = List(
+          MemberId("peer2") -> expectedAppendEntry,
+          MemberId("peer3") -> expectedAppendEntry
+        )
+      yield assertTrue(messages == expectedMessages)
+    },
+    test("follower send append entries response") {
+      for
+        (raft, rpc) <- makeRaft(
+          MemberId("peer1"),
+          Array(MemberId("peer2"), MemberId("peer3")),
+          false
+        )
+
+        _ <- handelAppendEntries(
+          raft,
+          Term(1),
+          MemberId("peer2"),
+          Index(0),
+          Term(0),
+          List(LogEntry(Increase, Term(1), Index(1))),
+          Index(0)
+        )
+
+        messages <- rpc.queue.takeAll
+        expectedMessages: List[(MemberId, RPCMessage[TestCommands])] = List(
+          MemberId("peer2") -> AppendEntriesResult.Success(
+            MemberId("peer1"),
+            Term(1),
+            Index(1)
+          )
+        )
+      yield assertTrue(messages == expectedMessages)
+    }
+  )
 end RaftSpec

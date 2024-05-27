@@ -1,18 +1,18 @@
 package zio.raft
 
 import zio.ZIO
-import zio.duration.*
-import zio.logging.LogFormat
-import zio.logging.LogLevel
-import zio.logging.Logging
-import zio.test.DefaultMutableRunnableSpec
+import zio.durationInt
 import zio.test.*
+import zio.ZLayer
+import zio.Clock
+import zio.Console
+import zio.System
+import zio.Random
 
-object RaftIntegrationSpec extends MutableRunnableSpec(zio.clock.Clock.live):
-  val logging = Logging.console(
-    logLevel = LogLevel.Debug,
-    format = LogFormat.ColoredLogFormat()
-  ) >>> zio.logging.Logging.withRootLoggerName("raft")
+import zio.Scope
+import zio.test.TestAspect.withLiveClock
+
+object RaftIntegrationSpec extends ZIOSpecDefault:
 
   private def findTheNewLeader(
       currentLeader: Raft[TestCommands],
@@ -45,7 +45,7 @@ object RaftIntegrationSpec extends MutableRunnableSpec(zio.clock.Clock.live):
 
   private def makeRaft(enableSnapshot: Boolean = false) =
     for
-      rpc <- TestRpc.make[TestCommands](3).toManaged_
+      rpc <- TestRpc.make[TestCommands](3)
       stateMachine1 = TestStateMachine.make(enableSnapshot)
       stateMachine2 = TestStateMachine.make(enableSnapshot)
       stateMachine3 = TestStateMachine.make(enableSnapshot)
@@ -54,16 +54,16 @@ object RaftIntegrationSpec extends MutableRunnableSpec(zio.clock.Clock.live):
         MemberId("peer2"),
         MemberId("peer3")
       )
-      stable1 <- Stable.makeInMemoryManaged
-      stable2 <- Stable.makeInMemoryManaged
-      stable3 <- Stable.makeInMemoryManaged
-      logStore1 <- LogStore.makeInMemoryManaged[TestCommands]
-      logStore2 <- LogStore.makeInMemoryManaged[TestCommands]
-      logStore3 <- LogStore.makeInMemoryManaged[TestCommands]
-      snapshotStore1 <- SnapshotStore.makeInMemoryManaged
-      snapshotStore2 <- SnapshotStore.makeInMemoryManaged
-      snapshotStore3 <- SnapshotStore.makeInMemoryManaged
-      raft1 <- Raft.makeManaged(
+      stable1 <- Stable.makeInMemory
+      stable2 <- Stable.makeInMemory
+      stable3 <- Stable.makeInMemory
+      logStore1 <- LogStore.makeInMemory[TestCommands]
+      logStore2 <- LogStore.makeInMemory[TestCommands]
+      logStore3 <- LogStore.makeInMemory[TestCommands]
+      snapshotStore1 <- SnapshotStore.makeInMemory
+      snapshotStore2 <- SnapshotStore.makeInMemory
+      snapshotStore3 <- SnapshotStore.makeInMemory
+      raft1 <- Raft.makeScoped(
         MemberId("peer1"),
         peers.filter(_ != MemberId("peer1")),
         stable1,
@@ -72,7 +72,7 @@ object RaftIntegrationSpec extends MutableRunnableSpec(zio.clock.Clock.live):
         rpc(0)._1,
         stateMachine1
       )
-      raft2 <- Raft.makeManaged(
+      raft2 <- Raft.makeScoped(
         MemberId("peer2"),
         peers.filter(_ != MemberId("peer2")),
         stable2,
@@ -81,7 +81,7 @@ object RaftIntegrationSpec extends MutableRunnableSpec(zio.clock.Clock.live):
         rpc(1)._1,
         stateMachine2
       )
-      raft3 <- Raft.makeManaged(
+      raft3 <- Raft.makeScoped(
         MemberId("peer3"),
         peers.filter(_ != MemberId("peer3")),
         stable3,
@@ -90,7 +90,7 @@ object RaftIntegrationSpec extends MutableRunnableSpec(zio.clock.Clock.live):
         rpc(2)._1,
         stateMachine3
       )
-      _ <- raft1.bootstrap.toManaged_
+      _ <- raft1.bootstrap
     yield (
       raft1,
       rpc(0)._2,
@@ -100,73 +100,62 @@ object RaftIntegrationSpec extends MutableRunnableSpec(zio.clock.Clock.live):
       rpc(2)._2
     )
 
-  testM("raft"):
-    for res <- makeRaft()
-        .use:
-          case (
-                r1,
-                killSwitch1,
-                r2,
-                killSwitch2,
-                r3,
-                killSwitch3
-              ) => {
-            for
-              _ <- r1.sendCommand(Increase)
-              _ <- r1.sendCommand(Increase)
-              _ <- r1.sendCommand(Increase)
-              x <- r1.sendCommand(Get)
-            yield (x)
-          }
-        .provideLayer(zio.ZEnv.live ++ logging)
-    yield assertTrue(res == 3)
+  def spec = suite("Raft Integration Spec")(
+    test("raft") {
+      for
+        (
+          r1,
+          killSwitch1,
+          r2,
+          killSwitch2,
+          r3,
+          killSwitch3
+        ) <- makeRaft()
 
-  testM(
-    "raft, make sure consensus is reached even when 1 node is disconnected"
-  ):
-    for res <- makeRaft()
-        .use:
-          case (
-                r1,
-                killSwitch1,
-                r2,
-                killSwitch2,
-                r3,
-                killSwitch3
-              ) => {
-            for
-              _ <- killSwitch2.set(false)
-              _ <- r1.sendCommand(Increase)
-              _ <- r1.sendCommand(Increase)
-              _ <- r1.sendCommand(Increase)
-              x <- r1.sendCommand(Get)
-            yield (x)
-          }
-        .provideLayer(zio.ZEnv.live ++ logging)
-    yield assertTrue(res == 3)
+        _ <- r1.sendCommand(Increase)
+        _ <- r1.sendCommand(Increase)
+        _ <- r1.sendCommand(Increase)
+        x <- r1.sendCommand(Get)
+      yield assertTrue(x == 3)
+    },
+    test(
+      "raft, make sure consensus is reached even when 1 node is disconnected"
+    ) {
+      for
+        (
+          r1,
+          killSwitch1,
+          r2,
+          killSwitch2,
+          r3,
+          killSwitch3
+        ) <- makeRaft()
+        _ <- killSwitch2.set(false)
+        _ <- r1.sendCommand(Increase)
+        _ <- r1.sendCommand(Increase)
+        _ <- r1.sendCommand(Increase)
+        x <- r1.sendCommand(Get)
+      yield assertTrue(x == 3)
+    },
+    test("raft, make sure leader is replaced") {
+      for
+        (
+          r1,
+          killSwitch1,
+          r2,
+          killSwitch2,
+          r3,
+          killSwitch3
+        ) <- makeRaft()
+        // stop the leader
+        _ <- killSwitch1.set(false)
 
-  testM("raft, make sure leader is replaced"):
-    for res <- makeRaft()
-        .use:
-          case (
-                r1,
-                killSwitch1,
-                r2,
-                killSwitch2,
-                r3,
-                killSwitch3
-              ) => {
-            for
-              // stop the leader
-              _ <- killSwitch1.set(false)
-
-              // find the new leader
-              leader <- waitForNewLeader(r1, r1, r2, r3).debug("new leader")
-              _ <- leader.sendCommand(Increase)
-              _ <- leader.sendCommand(Increase)
-              _ <- leader.sendCommand(Increase)
-              x <- leader.sendCommand(Get)
-            yield (x)
-          }
-        .provideLayer(zio.ZEnv.live ++ logging)
-    yield assertTrue(res == 3)
+        // find the new leader
+        leader <- waitForNewLeader(r1, r1, r2, r3).debug("new leader")
+        _ <- leader.sendCommand(Increase)
+        _ <- leader.sendCommand(Increase)
+        _ <- leader.sendCommand(Increase)
+        x <- leader.sendCommand(Get)
+      yield assertTrue(x == 3)
+    }
+  ) @@ withLiveClock

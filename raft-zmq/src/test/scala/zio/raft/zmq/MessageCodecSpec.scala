@@ -3,17 +3,17 @@ package zio.raft.zmq
 import zio.test.*
 import zio.raft.*
 import scodec.bits.BitVector
+import zio.Scope
 
-object MessageCodecSpec extends DefaultMutableRunnableSpec:
+object MessageCodecSpec extends ZIOSpecDefault:
 
   case class TestCommand(value: String) extends Command:
     type Response = String
 
   object TestCommand:
-    val codec = scodec.codecs.utf8_32.as[TestCommand]  
+    val codec = scodec.codecs.utf8_32.as[TestCommand]
 
-
-  test("encode and decode append entries"):
+  override def spec = test("encode and decode append entries"):
     val appendEntries = AppendEntriesRequest(
       term = Term.zero,
       leaderId = MemberId("leader"),

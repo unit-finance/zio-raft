@@ -1,6 +1,6 @@
 package zio.raft
 
-import zio.{UIO, ZIO, URIO, Has}
+import zio.{UIO, ZIO, URIO}
 import zio.Ref
 
 trait Stable:
@@ -13,10 +13,10 @@ trait Stable:
   def votedFor: UIO[Option[MemberId]]
 
 object Stable:
-  def makeInMemoryManaged = 
+  def makeInMemory = 
     for 
-      term <- Ref.make(Term(0)).toManaged_
-      voteFor <- Ref.make(Option.empty[MemberId]).toManaged_
+      term <- Ref.make(Term(0))
+      voteFor <- Ref.make(Option.empty[MemberId])
     yield new InMemoryStable(term, voteFor)
 
 class InMemoryStable(term: Ref[Term], voteFor: Ref[Option[MemberId]]) extends Stable:

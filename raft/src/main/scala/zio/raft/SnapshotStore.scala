@@ -1,7 +1,7 @@
 package zio.raft
 
 import zio.{UIO, Chunk, Ref, ZIO}
-import zio.stream.Stream
+import zio.stream.{ZStream, Stream}
 
 case class Snapshot(
     previousIndex: Index,
@@ -38,10 +38,10 @@ trait SnapshotStore:
   def latestSnapshot: UIO[Option[Snapshot]]
 
 object SnapshotStore:
-  def makeInMemoryManaged =
+  def makeInMemory =
     for
-      latest <- Ref.makeManaged(None: Option[Snapshot])
-      partial <- Ref.makeManaged(Map.empty[(Term, Index), Chunk[Byte]])
+      latest <- Ref.make(None: Option[Snapshot])
+      partial <- Ref.make(Map.empty[(Term, Index), Chunk[Byte]])
     yield InMemorySnapshotStore(latest, partial)
 
   class InMemorySnapshotStore(
@@ -79,7 +79,7 @@ object SnapshotStore:
           .map(map => map.get((previousTerm, previousIndex)))
           .someOrFail(new Exception("no partial snapshot"))
           .orDie
-        snapshot = Snapshot(previousIndex, previousTerm, Stream.fromChunk(data))
+        snapshot = Snapshot(previousIndex, previousTerm, ZStream.fromChunk(data))
         _ <- latest.set(Some(snapshot))
         _ <- partial.update(_ - ((previousTerm, previousIndex)))
       yield snapshot
@@ -94,7 +94,7 @@ object SnapshotStore:
       for
         // copy the stream
         chunk <- snapshot.stream.runCollect        
-        _ <- latest.set(Some(snapshot.copy(stream = Stream.fromChunk(chunk))))
+        _ <- latest.set(Some(snapshot.copy(stream = ZStream.fromChunk(chunk))))
       yield ()
 
     override def latestSnapshotIndex: UIO[Index] =
@@ -103,7 +103,7 @@ object SnapshotStore:
       for
         snapshot <- latest.get
         result <- snapshot match
-          case None => UIO((Index.zero, 0L))
+          case None => ZIO.succeedNow((Index.zero, 0L))
           case Some(snapshot) =>
             snapshot.stream.runCollect
               .map(_.size.toLong)

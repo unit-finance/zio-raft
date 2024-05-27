@@ -1,13 +1,23 @@
-lazy val zioVersion = "1.0.18"
-lazy val zhttpVersion = "1.0.0.0-RC29"
-lazy val zioLoggingVersion = "0.5.14"
-lazy val mainScalaVersion = "3.3.3"
+lazy val zio2Version = "2.1.1"
+lazy val zioLoggingVersion = "2.2.4"
+
+lazy val zio1Version = "1.0.18"
+
+lazy val jeromqVersion = "0.5.3"
+
+lazy val scala3Version = "3.3.3"
+lazy val scala213Version = "2.13.14"
+lazy val mainScalaVersion = scala3Version
+
+lazy val supportedScalaVersions = List(scala3Version, scala213Version) 
+
 
 ThisBuild / organization := "io.github.unit-finance"
 // ThisBuild / organization := "co.unit"
 ThisBuild / organizationName := "Unit"
 ThisBuild / organizationHomepage := Some(url("https://unit.co"))
 ThisBuild / version := "0.0.1-SNAPSHOT"
+ThisBuild / scalaVersion := mainScalaVersion
 
 ThisBuild / scmInfo := Some(
   ScmInfo(
@@ -39,9 +49,10 @@ resolvers +=
 
 lazy val root = project
   .in(file("."))
-  .aggregate(raft, kvstore, zmq, raftZmq)
+  .aggregate(raft, kvstore, zio1zmq, zio2zmq, raftZmq)
   .settings(
-    publish / skip := true
+    publish / skip := true,
+    crossScalaVersions := Nil,
   )
 
 lazy val raft = project
@@ -56,11 +67,11 @@ lazy val raft = project
 //    ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     libraryDependencies ++= Seq(
-      "dev.zio" %% "zio" % zioVersion,
-      "dev.zio" %% "zio-test" % zioVersion % Test,
-      "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
-      "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
-      "dev.zio" %% "zio-logging" % zioLoggingVersion
+      "dev.zio" %% "zio" % zio2Version,      
+      "dev.zio" %% "zio-test" % zio2Version % Test,
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
+      "dev.zio" %% "zio-prelude" % "1.0.0-RC26",
+      // "dev.zio" %% "zio-logging" % zioLoggingVersion
     )
   )
 
@@ -72,9 +83,9 @@ lazy val kvstore = project
     scalaVersion := mainScalaVersion,
     scalacOptions ++= Seq("-indent", "-rewrite"),
     libraryDependencies ++= Seq(
-      "dev.zio" %% "zio" % zioVersion,
+      "dev.zio" %% "zio" % zio1Version,
       "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
-      "io.d11" %% "zhttp" % zhttpVersion
+      "dev.zio" %% "zio-http" % "3.0.0-RC7"
     )
   )
   .dependsOn(raft, raftZmq)
@@ -85,26 +96,68 @@ lazy val raftZmq = project
     name := "zio-raft-zmq",
     scalaVersion := mainScalaVersion,
     scalacOptions ++= Seq("-indent", "-rewrite"),
-    libraryDependencies ++= Seq(
-      "dev.zio" %% "zio" % zioVersion,
-      "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
-      "dev.zio" %% "zio-test" % zioVersion % Test,
-      "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
+    libraryDependencies ++= Seq(      
+      "dev.zio" %% "zio-test" % zio2Version % Test,
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "org.scodec" %% "scodec-bits" % "1.1.37",
       "org.scodec" %% "scodec-core" % "2.2.1"
     )
   )
-  .dependsOn(raft, zmq)
+  .dependsOn(raft, zio2zmq)
 
-lazy val zmq = project
-  .in(file("zmq"))
+lazy val zio1zmq = project
+  .in(file("zio1-zmq"))
   .settings(
-    name := "zio-zmq",
-    scalaVersion := mainScalaVersion,
-    scalacOptions ++= Seq("-indent", "-rewrite"),
+    name := "zio1-zmq",
+    crossScalaVersions := supportedScalaVersions,
     libraryDependencies ++= Seq(
-      "dev.zio" %% "zio" % zioVersion,
+      "dev.zio" %% "zio" % zio1Version,
       "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
-      "org.zeromq" % "jeromq" % "0.5.3"
-    )
+      "org.zeromq" % "jeromq" % jeromqVersion,
+    ),
+
+    libraryDependencies ++= {
+      CrossVersion.partialVersion(scalaVersion.value) match {
+        case Some((2, n)) => Seq("io.estatico" %% "newtype" % "0.4.4")
+        case Some((3, n)) => Seq()
+        case _ => Seq()
+      }
+    },
+
+    scalacOptions ++= {
+      CrossVersion.partialVersion(scalaVersion.value) match {
+        case Some((2, n)) => List("-Xsource:3", "-Ymacro-annotations")
+        case Some((3, n)) => List()
+        case _ => List()
+      }
+    },
   )
+
+lazy val zio2zmq = project
+  .in(file("zio2-zmq"))
+  .settings(
+    name := "zio2-zmq",
+    crossScalaVersions := supportedScalaVersions,
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio" % zio2Version,
+      "dev.zio" %% "zio-prelude" % "1.0.0-RC26",
+      "org.zeromq" % "jeromq" % jeromqVersion,
+    ),
+
+    libraryDependencies ++= {
+      CrossVersion.partialVersion(scalaVersion.value) match {
+        case Some((2, n)) => Seq("io.estatico" %% "newtype" % "0.4.4")
+        case Some((3, n)) => Seq()
+        case _ => Seq()
+      }
+    },
+
+    scalacOptions ++= {
+      CrossVersion.partialVersion(scalaVersion.value) match {
+        case Some((2, n)) => List("-Xsource:3", "-Ymacro-annotations")
+        case Some((3, n)) => List()
+        case _ => List()
+      }
+    },
+  )
+

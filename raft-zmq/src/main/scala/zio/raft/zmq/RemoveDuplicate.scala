@@ -2,7 +2,7 @@ package zio.raft.zmq
 
 import zio.Ref
 import zio.Chunk
-import zio.stream.ZTransducer
+import zio.stream.ZPipeline
 import zio.ZIO
 import zio.raft.AppendEntriesResult
 import zio.raft.Command
@@ -11,9 +11,9 @@ import zio.raft.AppendEntriesRequest
 import java.time.Instant
 import zio.raft.Raft
 import zio.raft.Index.min
+import zio.Clock
 
 class RemoveDuplicate[A <: Command](
-    clock: zio.clock.Clock.Service,
     refPreviousMessage: Ref[Option[(Instant, RPCMessage[A])]]
 ):
 
@@ -21,7 +21,7 @@ class RemoveDuplicate[A <: Command](
 
   private def filterMessage(m: RPCMessage[A]) =
     for
-      now <- clock.instant
+      now <- Clock.instant
       previousMessage <- refPreviousMessage.get
 
       // TODO: filter heartbeats that are too frequent
@@ -41,13 +41,13 @@ class RemoveDuplicate[A <: Command](
 
   def apply(maybeChunk: Option[Chunk[RPCMessage[A]]]) =
     maybeChunk match
-      case Some(chunk) => chunk.filterM(filterMessage)
+      case Some(chunk) => chunk.filterZIO(filterMessage)
       case None        => ZIO.succeed(Chunk.empty)
 
 object RemoveDuplicate:
-  def apply[A <: Command](clock: zio.clock.Clock.Service) =
+  def apply[A <: Command]() =
     val push = Ref
-      .makeManaged[Option[(Instant, RPCMessage[A])]](None)
-      .map(ref => new RemoveDuplicate(clock, ref))
+      .make[Option[(Instant, RPCMessage[A])]](None)
+      .map(ref => new RemoveDuplicate(ref))
       .map(_.apply)
-    ZTransducer(push)
+    ZPipeline.fromPush(push)

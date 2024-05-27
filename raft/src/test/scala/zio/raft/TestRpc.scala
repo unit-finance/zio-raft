@@ -48,17 +48,17 @@ case class TestRpc[A <: Command](
       candidateId: MemberId,
       response: RequestVoteResult[A]
   ): UIO[Unit] = peers.get
-    .flatMap(_.get(candidateId).get.offer(response))
+    .flatMap(_.get(candidateId).get.offer(response))    
+    .unlessZIO(isResponding.get.map(!_))
     .unit
-    .unlessM(isResponding.get.map(!_))
   override def sendAppendEntriesResponse(
       leaderId: MemberId,
       response: AppendEntriesResult[A]
   ): UIO[Unit] =
     peers.get
-      .flatMap(_.get(leaderId).get.offer(response))
+      .flatMap(_.get(leaderId).get.offer(response))      
+      .unlessZIO(isResponding.get.map(!_))
       .unit
-      .unlessM(isResponding.get.map(!_))
   override def sendAppendEntries(
       peer: MemberId,
       request: AppendEntriesRequest[A]
@@ -78,21 +78,21 @@ case class TestRpc[A <: Command](
       m: RequestVoteRequest[A]
   ): UIO[Unit] =
     peers.get
-      .flatMap(_.get(peer).get.offer(m))
+      .flatMap(_.get(peer).get.offer(m))      
+      .unlessZIO(isResponding.get.map(!_))
       .unit
-      .unlessM(isResponding.get.map(!_))
 
   override def sendHeartbeat(peer: MemberId, m: HeartbeatRequest[A]): UIO[Unit] = 
     peers.get
       .flatMap(_.get(peer).get.offer(m))
+      .unlessZIO(isResponding.get.map(!_))
       .unit
-      .unlessM(isResponding.get.map(!_))
 
   override def sendHeartbeatResponse(leaderId: MemberId, m: HeartbeatResponse[A]): UIO[Unit] = 
     peers.get
       .flatMap(_.get(leaderId).get.offer(m))
+      .unlessZIO(isResponding.get.map(!_))
       .unit
-      .unlessM(isResponding.get.map(!_))
 
   override def sendInstallSnapshot(
       peer: MemberId,
@@ -100,18 +100,18 @@ case class TestRpc[A <: Command](
   ): UIO[Unit] =
     peers.get
       .flatMap(_.get(peer).get.offer(m))
+      .unlessZIO(isResponding.get.map(!_))
       .unit
-      .unlessM(isResponding.get.map(!_))
   override def sendInstallSnapshotResponse(
       leaderId: MemberId,
       response: InstallSnapshotResult[A]
   ): UIO[Unit] =
     peers.get
       .flatMap(_.get(leaderId).get.offer(response))
+      .unlessZIO(isResponding.get.map(!_))
       .unit
-      .unlessM(isResponding.get.map(!_))
 
   override def incomingMessages: ZStream[Any, Nothing, RPCMessage[A]] =
     ZStream
       .fromQueue(myQueue)
-      .filterM(x => isResponding.get)
+      .filterZIO(x => isResponding.get)

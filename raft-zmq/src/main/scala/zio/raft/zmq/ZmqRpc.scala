@@ -12,20 +12,18 @@ import zio.raft.Command
 import zio.raft.AppendEntriesResult
 import zio.zmq.ZSocket
 import zio.zmq.RoutingId
-import zio.Managed
+import zio.managed.*
 import zio.ZLayer
 import scodec.bits.BitVector
 import zio.ZIO
 import zio.stream.ZStream
 import scodec.Codec
-import zio.logging.Logging
-import zio.stream.ZTransducer
 import zio.raft.InstallSnapshotRequest
 import zio.raft.InstallSnapshotResult
 import zio.raft.HeartbeatRequest
 import zio.raft.HeartbeatResponse
 
-class ZmqRpc[A <: Command](server: ZSocket, clients: Map[MemberId, ZSocket], codec: Codec[A], clock: zio.clock.Clock.Service, log: zio.logging.Logger[String])
+class ZmqRpc[A <: Command](server: ZSocket, clients: Map[MemberId, ZSocket], codec: Codec[A])
     extends RPC[A]:
 
   override def sendAppendEntries(
@@ -37,7 +35,7 @@ class ZmqRpc[A <: Command](server: ZSocket, clients: Map[MemberId, ZSocket], cod
 
     for            
       sent <- client.sendImmediately(message).orElseSucceed(false)
-      _ <- log.debug(s"sending entries to $peer $request").when(sent)
+      _ <- ZIO.logDebug(s"sending entries to $peer $request").when(sent)
     yield sent
 
   override def sendRequestVoteResponse(
@@ -88,32 +86,29 @@ class ZmqRpc[A <: Command](server: ZSocket, clients: Map[MemberId, ZSocket], cod
     client.sendImmediately(message).ignore
 
   override def incomingMessages = 
-    server.stream.mapM { message =>      
+    server.stream.mapZIO { message =>      
       val bytes = message.data()
       val rpcMessage = RpcMessageCodec.codec[A](codec).decodeValue(BitVector(bytes)).toEither
       ZIO.succeed(rpcMessage)
     }
     .tap:
       case Right(value) => ZIO.unit
-      case Left(err) => log.error(s"error decoding message: $err")
+      case Left(err) => ZIO.logError(s"error decoding message: $err")
     .collectRight
-    .transduce(RemoveDuplicate[A](clock)) // Because the raft messaging might be very chatty, we want to remove duplicates
+    .via(RemoveDuplicate[A]()) // Because the raft messaging might be very chatty, we want to remove duplicates
     .catchAll(err => ZStream.die(err))      
 
 object ZmqRpc:
-  def makeManaged[A <: Command](bindAddress: String, peers: Map[MemberId, String], codec: Codec[A]) =
+  def make[A <: Command](bindAddress: String, peers: Map[MemberId, String], codec: Codec[A]) =
     for
-      logger <- Managed.service[zio.logging.Logger[String]]      
-      clock <- Managed.service[zio.clock.Clock.Service]
-      
-      clients <- Managed.foreach(peers)((peerId, peerAddress) =>
+      clients <- ZIO.foreach(peers)((peerId, peerAddress) =>
         for
           client <- ZSocket.client
-          _ <- client.options.setImmediate(false).toManaged_
-          _ <- client.connect(peerAddress).toManaged_
+          _ <- client.options.setImmediate(false)
+          _ <- client.connect(peerAddress)
         yield (peerId, client)
       )
 
       server <- ZSocket.server            
-      _ <- server.bind(bindAddress).toManaged_
-    yield new ZmqRpc(server, clients.toMap, codec, clock, logger)
+      _ <- server.bind(bindAddress)
+    yield new ZmqRpc(server, clients.toMap, codec)

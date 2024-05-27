@@ -2,7 +2,6 @@ package zio.raft
 
 import zio.{ZIO, UIO}
 import zio.Ref
-import zio.ZManaged
 
 trait LogStore[A <: Command]:
   // def firstIndex: UIO[Index]
@@ -38,9 +37,9 @@ trait LogStore[A <: Command]:
 end LogStore
 
 object LogStore:
-  def makeInMemoryManaged[A <: Command] = 
+  def makeInMemory[A <: Command] = 
     for 
-      logs <- Ref.make(List.empty[LogEntry[A]]).toManaged_
+      logs <- Ref.make(List.empty[LogEntry[A]])
     yield new InMemoryLogStore(logs)
 
   class InMemoryLogStore[A <: Command](

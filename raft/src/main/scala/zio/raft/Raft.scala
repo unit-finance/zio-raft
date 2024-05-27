@@ -2,11 +2,7 @@ package zio.raft
 
 import zio.{Ref, ZIO, UIO, URIO}
 import zio.raft.RequestVoteResult.Granted
-import zio.Has
 import zio.raft.RequestVoteResult.Rejected
-import zio.duration.*
-import zio.clock.Clock
-import zio.random.Random
 import zio.raft.State.Candidate
 import zio.raft.State.Leader
 import java.time.Instant
@@ -15,18 +11,14 @@ import zio.raft.StreamItem.Tick
 import zio.raft.StreamItem.Message
 import zio.raft.StreamItem.CommandMessage
 import zio.Queue
-import zio.ZQueue
 import zio.Promise
 import zio.raft.AppendEntriesResult.Success
 import zio.raft.AppendEntriesResult.Failure
-import zio.logging.log
-import zio.logging.Logging
 import zio.raft.State.Follower
 import zio.Chunk
-import zio.ZManaged
-import zio.stream.ZTransducer
 import zio.raft.StreamItem.Bootstrap
 import zio.raft.Raft.electionTimeout
+import zio.durationInt
 
 sealed trait StreamItem[A <: Command]
 object StreamItem:
@@ -63,7 +55,7 @@ class Raft[A <: Command](
         State.Follower(s.commitIndex, s.lastApplied, electionTimeout, leaderId)
       )
       currentTerm <- stable.currentTerm
-      _ <- log.debug(
+      _ <- ZIO.logDebug(
         s"memberId=${this.memberId} Following $leaderId $currentTerm"
       )
     yield newTerm
@@ -77,12 +69,12 @@ class Raft[A <: Command](
 
       _ <- s match
         case s: State.Follower if s.leaderId != Some(leaderId) =>
-          log.debug(
+          ZIO.logDebug(
             s"memberId=${this.memberId} Following $leaderId $currentTerm"
           )
         case s: State.Follower => ZIO.unit
         case s =>
-          log.debug(
+          ZIO.logDebug(
             s"memberId=${this.memberId} Following $leaderId $currentTerm"
           )
 
@@ -107,8 +99,8 @@ class Raft[A <: Command](
 
   private def makeElectionTimeout =
     for
-      now <- zio.clock.instant
-      interval <- zio.random
+      now <- zio.Clock.instant
+      interval <- zio.Random
         .nextIntBetween(Raft.electionTimeout, Raft.electionTimeout * 2)
         .map(_.millis)
     yield now.plus(interval)
@@ -196,7 +188,7 @@ class Raft[A <: Command](
 
             _ <- ZIO.when(
               wasPaused && !leader.replicationStatus.isSnapshot(m.from)
-            )(log.info(s"memberId=${this.memberId} Resuming $m.from"))
+            )(ZIO.logInfo(s"memberId=${this.memberId} Resuming $m.from"))
 
             // if the matchIndex is behind the last index, we need to send the append entries again for the peer to be able to resume
             _ <- ZIO.when(matchIndex < lastIndex)(
@@ -208,7 +200,7 @@ class Raft[A <: Command](
 
   private def handleAppendEntriesRequest(
       m: AppendEntriesRequest[A]
-  ): URIO[Clock & Random & Logging, AppendEntriesResult[A]] =
+  ): URIO[Any, AppendEntriesResult[A]] =
     for
       currentTerm <- stable.currentTerm
       currentTerm <-
@@ -246,7 +238,7 @@ class Raft[A <: Command](
               else if success then
                 for
                   _ <- ZIO.when(m.previousIndex < lastIndex)(
-                    ZIO.foreach_(m.entries)(entry => {
+                    ZIO.foreachDiscard(m.entries)(entry => {
                       for
                         logTerm <- logStore.logTerm(entry.index)
                         _ <- ZIO.when(
@@ -289,7 +281,7 @@ class Raft[A <: Command](
         if currentTerm < m.term then stepDown(m.term, None)
         else ZIO.succeed(currentTerm)
 
-      _ <- log.debug(
+      _ <- ZIO.logDebug(
         s"memberId=${this.memberId} handleAppendEntriesReply $m $currentTerm"
       )
 
@@ -351,7 +343,7 @@ class Raft[A <: Command](
         if currentTerm < r.term then stepDown(r.term, Some(r.leaderId))
         else ZIO.succeed(currentTerm)
 
-      _ <- log.debug(
+      _ <- ZIO.logDebug(
         s"memberId=${this.memberId} handleInstallSnapshotRequest $r $currentTerm"
       )
 
@@ -437,7 +429,7 @@ class Raft[A <: Command](
         if currentTerm < m.term then stepDown(m.term, None)
         else ZIO.succeed(currentTerm)
 
-      _ <- log.debug(s"memberId=${this.memberId} handleInstallSnapshotReply $m")
+      _ <- ZIO.logDebug(s"memberId=${this.memberId} handleInstallSnapshotReply $m")
 
       s <- state.get
       _ <- s match
@@ -457,7 +449,7 @@ class Raft[A <: Command](
   private def startElection =
     for
       currentTerm <- stable.currentTerm
-      _ <- log.debug(
+      _ <- ZIO.logDebug(
         s"memberId=${this.memberId} start new election term ${currentTerm.plusOne}"
       )
       _ <- stable.newTerm(currentTerm.plusOne, Some(memberId))
@@ -475,7 +467,7 @@ class Raft[A <: Command](
 
   private def startNewElectionRule =
     for
-      now <- zio.clock.instant
+      now <- zio.Clock.instant
       s <- state.get
       currentTerm <- stable.currentTerm
       _ <- s match
@@ -500,7 +492,7 @@ class Raft[A <: Command](
     def becomeLeader(c: Candidate) =
       for
         currentTerm <- stable.currentTerm
-        _ <- log.debug(
+        _ <- ZIO.logDebug(
           s"memberId=${this.memberId} become leader ${currentTerm}"
         )
         lastLogIndex <- logStore.lastIndex
@@ -540,8 +532,7 @@ class Raft[A <: Command](
               _ <- ZIO.when(nTerm.contains(currentTerm))(
                 state.set(l.withCommitIndex(n))
               )
-              _ <- log
-                .debug(
+              _ <- ZIO.logDebug(
                   s"memberId=${this.memberId} advanceCommitIndexRule $nTerm $currentTerm ${l.commitIndex} ${n}"
                 )
                 .when(nTerm == currentTerm)
@@ -553,8 +544,7 @@ class Raft[A <: Command](
   private def applyToStateMachineRule =
     for
       s <- state.get
-      _ <- log
-        .debug(
+      _ <- ZIO.logDebug(
           s"memberId=${this.memberId} applyToStateMachineRule ${s.commitIndex} ${s.lastApplied}"
         )
         .when(s.commitIndex > s.lastApplied)
@@ -569,7 +559,7 @@ class Raft[A <: Command](
       shouldTakeSnapshot <- stateMachine.get.map(
         _.shouldTakeSnapshot(snapshotIndex, snapshotSize, s.commitIndex)
       )
-      _ <- log.debug(
+      _ <- ZIO.logDebug(
         s"memberId=${this.memberId} takeSnapshotRule $shouldTakeSnapshot $snapshotIndex ${s.commitIndex} $snapshotSize"
       )
       _ <- ZIO.when(shouldTakeSnapshot):
@@ -585,7 +575,7 @@ class Raft[A <: Command](
           _ <- (snapshotStore
             .createNewSnapshot(
               Snapshot(s.lastApplied, previousTerm, stream)
-            ) &&& logStore.discardLogUpTo(
+            ) <*> logStore.discardLogUpTo(
             s.lastApplied
           )).fork // TODO: make discarding the log configurable (the user might want to control that)
         yield ()
@@ -609,7 +599,7 @@ class Raft[A <: Command](
   private def sendHeartbeatRule(peer: MemberId) =
     for
       s <- state.get
-      now <- zio.clock.instant
+      now <- zio.Clock.instant
       _ <- s match
         case l: Leader if l.heartbeatDue.due(now, peer) =>
           for
@@ -661,7 +651,7 @@ class Raft[A <: Command](
     // TODO: should we use the message size instead of batchSize?
     val lastIndex = Index.min(nextIndex.plus(batchSize - 1), leaderLastLogIndex)
     for
-      now <- zio.clock.instant
+      now <- zio.Clock.instant
       currentTerm <- stable.currentTerm
       previousTerm <- logStore.logTerm(previousIndex)
       maybeEntries <- logStore.getLogs(nextIndex, lastIndex)
@@ -669,8 +659,7 @@ class Raft[A <: Command](
       _ <- (previousTerm, maybeEntries) match
         case (Some(previousTerm), Some(entries)) =>
           for
-            _ <- log
-              .debug(
+            _ <- ZIO.logDebug(
                 s"memberId=${this.memberId} sendAppendEntriesRule $peer $leaderLastLogIndex $nextIndex"
               )
               .when(entries.nonEmpty)
@@ -697,8 +686,7 @@ class Raft[A <: Command](
                     )
                 )
               else
-                log
-                  .warn(
+                ZIO.logWarning(
                     s"memberId=${this.memberId} failed to send entries to peer $peer $nextIndex $leaderLastLogIndex, pausing peer"
                   )
                   .when(!sent) *>
@@ -706,7 +694,7 @@ class Raft[A <: Command](
           yield ()
         case _ =>
           for
-            _ <- log.debug(
+            _ <- ZIO.logDebug(
               s"memberId=${this.memberId} sendAppendEntriesRule installSnapshot $peer $leaderLastLogIndex $nextIndex"
             )
 
@@ -741,7 +729,7 @@ class Raft[A <: Command](
                   .zipWithNext
                   .zipWithIndex
                   .foreach { case ((chunk, next), index) =>
-                    log.debug(
+                    ZIO.logDebug(
                       s"memberId=${this.memberId} sendInstallSnapshot $peer $index"
                     )
                     rpc.sendInstallSnapshot(
@@ -773,7 +761,7 @@ class Raft[A <: Command](
   private def sendRequestVoteRule(peer: MemberId) =
     for
       s <- state.get
-      now <- zio.clock.instant
+      now <- zio.Clock.instant
       _ <- s match
         case c: Candidate if c.rpcDue.due(now, peer) =>
           for
@@ -798,8 +786,8 @@ class Raft[A <: Command](
   private def preRules =
     for
       _ <- startNewElectionRule
-      _ <- ZIO.foreach_(peers)(p =>
-        sendRequestVoteRule(p) &&& sendHeartbeatRule(p)
+      _ <- ZIO.foreachDiscard(peers)(p =>
+        sendRequestVoteRule(p) <*> sendHeartbeatRule(p)
       )
     yield ()
 
@@ -807,8 +795,8 @@ class Raft[A <: Command](
     for
       _ <- becomeLeaderRule
       _ <- advanceCommitIndexRule
-      _ <- ZIO.foreach_(peers)(p =>
-        sendAppendEntriesRule(p) &&& sendRequestVoteRule(p)
+      _ <- ZIO.foreachDiscard(peers)(p =>
+        sendAppendEntriesRule(p) <*> sendRequestVoteRule(p)
       )
       changed <- applyToStateMachineRule
       _ <- ZIO.when(changed)(takeSnapshotRule)
@@ -832,7 +820,7 @@ class Raft[A <: Command](
         for
           res <- handleAppendEntriesRequest(r)
           _ <- ZIO.when(res.isInstanceOf[Failure[A]] || r.entries.nonEmpty)(
-            log.debug(
+            ZIO.logDebug(
               s"memberId=${this.memberId} handleAppendEntriesRequest $r $res"
             )
           )
@@ -844,7 +832,7 @@ class Raft[A <: Command](
       case r: InstallSnapshotRequest[A] =>
         for
           res <- handleInstallSnapshotRequest(r)
-          _ <- log.debug(
+          _ <- ZIO.logDebug(
             s"memberId=${this.memberId} handleInstallSnapshotRequest $r $res"
           )
           _ <- rpc.sendInstallSnapshotResponse(r.leaderId, res)
@@ -855,7 +843,7 @@ class Raft[A <: Command](
   private def handleRequestFromClient(
       command: A,
       promise: CommandPromise[command.Response]
-  ): ZIO[Logging, Nothing, Unit] =
+  ): ZIO[Any, Nothing, Unit] =
     state.get.flatMap:
       case Leader(
             nextIndex,
@@ -873,7 +861,7 @@ class Raft[A <: Command](
             currentTerm,
             lastIndex.plusOne
           )
-          _ <- log.debug(s"memberId=${this.memberId} handleCommand $entry")
+          _ <- ZIO.logDebug(s"memberId=${this.memberId} handleCommand $entry")
           _ <- logStore.storeLog(entry)
           _ <- pendingCommands.add(entry.index, promise)
         yield ()
@@ -885,7 +873,7 @@ class Raft[A <: Command](
   private[raft] def handleStreamItem(item: StreamItem[A]) =
     item match
       case Tick() =>
-        preRules &&& postRules
+        preRules <*> postRules
       case Message(message) =>
         for
           _ <- preRules
@@ -894,7 +882,7 @@ class Raft[A <: Command](
         yield ()
       case commandMessage: CommandMessage[A] =>
         for
-          _ <- log.debug(s"memberId=${this.memberId} ${commandMessage.command}")
+          _ <- ZIO.logDebug(s"memberId=${this.memberId} ${commandMessage.command}")
           _ <- preRules
           _ <- handleRequestFromClient(
             commandMessage.command,
@@ -933,7 +921,7 @@ class Raft[A <: Command](
       _ <- commandsQueue.offer(
         StreamItem.Bootstrap()
       ) // TODO: use promise here and fail if the term is not zero
-      _ <- (zio.clock.sleep(electionTimeout.millis) *> isTheLeader)
+      _ <- (zio.Clock.sleep(electionTimeout.millis) *> isTheLeader)
         .repeatUntil(identity)
     yield ()
 
@@ -964,7 +952,7 @@ object Raft:
   val electionTimeout = 150
   val heartbeartInterval = (electionTimeout / 2).millis
 
-  private[raft] def make[A <: Command](
+  def make[A <: Command](
       memberId: MemberId,
       peers: Peers,
       stable: Stable,
@@ -974,25 +962,24 @@ object Raft:
       stateMachine: StateMachine[A]
   ) =
     for
-      now <- zio.clock.instant.toManaged_
+      now <- zio.Clock.instant
       electionTimeout = now.plus(initialElectionTimeout)
-      snapshot <- snapshotStore.latestSnapshot.toManaged_
+      snapshot <- snapshotStore.latestSnapshot
       restoredStateMachine <-
         snapshot match
-          case None => ZManaged.succeed(stateMachine)
+          case None => ZIO.succeed(stateMachine)
           case Some(snapshot) =>
-            stateMachine.restoreFromSnapshot(snapshot.stream).toManaged_
+            stateMachine.restoreFromSnapshot(snapshot.stream)
       previousIndex = snapshot.map(_.previousIndex).getOrElse(Index.zero)
 
-      refStateMachine <- Ref.makeManaged(restoredStateMachine)
-      state <- Ref.makeManaged[State](
+      refStateMachine <- Ref.make(restoredStateMachine)
+      state <- Ref.make[State](
         State.Follower(previousIndex, previousIndex, electionTimeout, None)
       )
       commandsQueue <- Queue
-        .unbounded[StreamItem[A]]
-        .toManaged_ // TODO: should this be bounded for pack-pressure?
+        .unbounded[StreamItem[A]] // TODO: should this be bounded for pack-pressure?
 
-      pendingCommands <- PendingCommands.makeManaged
+      pendingCommands <- PendingCommands.make
       raft = new Raft(
         memberId,
         peers,
@@ -1007,7 +994,7 @@ object Raft:
       )
     yield raft
 
-  def makeManaged[A <: Command](
+  def makeScoped[A <: Command](
       memberId: MemberId,
       peers: Peers,
       stable: Stable,
@@ -1026,5 +1013,5 @@ object Raft:
         rpc,
         stateMachine
       )
-      _ <- raft.run.forkManaged
+      _ <- raft.run.forkScoped
     yield raft

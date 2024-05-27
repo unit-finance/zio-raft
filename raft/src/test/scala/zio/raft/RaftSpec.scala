@@ -1,16 +1,10 @@
 package zio.raft
 
-import zio.test.*
-import zio.raft.RequestVoteResult
-import zio.raft.HeartbeatRequest
-import zio.raft.State.Candidate
-import zio.raft.State.Follower
-import zio.raft.State.Leader
-import zio.ZIO
-import zio.raft.StreamItem.CommandMessage
-import zio.raft.Index.range
 import zio.raft.AppendEntriesResult.Success
-import zio.Scope
+import zio.raft.State.{Candidate, Follower, Leader}
+import zio.raft.StreamItem.CommandMessage
+import zio.test.*
+import zio.{Scope, ZIO}
 
 object RaftSpec extends ZIOSpecDefault:
   def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean) =

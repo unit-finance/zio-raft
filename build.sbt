@@ -5,7 +5,7 @@ lazy val zio1Version = "1.0.18"
 
 lazy val jeromqVersion = "0.5.3"
 
-lazy val scala3Version = "3.3.3"
+lazy val scala3Version = "3.4.2"
 lazy val scala213Version = "2.13.14"
 lazy val mainScalaVersion = scala3Version
 
@@ -18,6 +18,8 @@ ThisBuild / organizationName := "Unit"
 ThisBuild / organizationHomepage := Some(url("https://unit.co"))
 ThisBuild / version := "0.0.1-SNAPSHOT"
 ThisBuild / scalaVersion := mainScalaVersion
+ThisBuild / semanticdbEnabled := true
+ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
 ThisBuild / scmInfo := Some(
   ScmInfo(
@@ -60,11 +62,7 @@ lazy val raft = project
   .settings(
     name := "zio-raft",
     scalaVersion := mainScalaVersion,
-    scalacOptions ++= Seq("-indent", "-rewrite"),
-
-//    scalacOptions ++= Seq(
-//      "-source:future"
-//    ),
+    scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,      
@@ -81,7 +79,7 @@ lazy val kvstore = project
     name := "kvstore",
     publish / skip := true,
     scalaVersion := mainScalaVersion,
-    scalacOptions ++= Seq("-indent", "-rewrite"),
+    scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio1Version,
       "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
@@ -95,7 +93,7 @@ lazy val raftZmq = project
   .settings(
     name := "zio-raft-zmq",
     scalaVersion := mainScalaVersion,
-    scalacOptions ++= Seq("-indent", "-rewrite"),
+    scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
     libraryDependencies ++= Seq(      
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
@@ -109,7 +107,7 @@ lazy val zio1zmq = project
   .in(file("zio1-zmq"))
   .settings(
     name := "zio1-zmq",
-    crossScalaVersions := supportedScalaVersions,
+    crossScalaVersions := supportedScalaVersions,    
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio1Version,
       "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
@@ -126,8 +124,8 @@ lazy val zio1zmq = project
 
     scalacOptions ++= {
       CrossVersion.partialVersion(scalaVersion.value) match {
-        case Some((2, n)) => List("-Xsource:3", "-Ymacro-annotations")
-        case Some((3, n)) => List()
+        case Some((2, n)) => List("-Xsource:3", "-Ymacro-annotations", "-Wunused:imports")
+        case Some((3, n)) => List("-Wunused:imports")
         case _ => List()
       }
     },
@@ -154,8 +152,8 @@ lazy val zio2zmq = project
 
     scalacOptions ++= {
       CrossVersion.partialVersion(scalaVersion.value) match {
-        case Some((2, n)) => List("-Xsource:3", "-Ymacro-annotations")
-        case Some((3, n)) => List()
+        case Some((2, n)) => List("-Xsource:3", "-Ymacro-annotations", "-Wunused:imports")
+        case Some((3, n)) => List("-Wunused:imports")
         case _ => List()
       }
     },

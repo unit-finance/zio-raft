@@ -1,8 +1,9 @@
 package zio.zmq
 
-import org.zeromq.ZMQException
-import zio.blocking._
+import zio.blocking.*
 import zio.{Has, ZIO, ZLayer, ZManaged}
+
+import org.zeromq.ZMQException
 import zmq.Ctx
 
 class ZContext {

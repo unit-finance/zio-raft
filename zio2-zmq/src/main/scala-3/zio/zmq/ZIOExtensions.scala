@@ -1,6 +1,7 @@
 package zio.zmq
 
 import zio.ZIO
+
 import org.zeromq.ZMQException
 
 extension [R](zio: ZIO[R, ZMQException, Unit])

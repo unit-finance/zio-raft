@@ -1,8 +1,9 @@
 package zio.raft.zmq
 
-import zio.raft.{RPC, Command, MemberId, RPCMessage}
-import scodec.codecs.{discriminated, uint8, utf8_32}
+import zio.raft.{Command, MemberId, RPCMessage}
+
 import scodec.Codec
+import scodec.codecs.{discriminated, uint8, utf8_32}
 
 sealed trait ProtocolMessage[A <: Command]
 object ProtocolMessage:

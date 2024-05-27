@@ -1,8 +1,7 @@
 package zio.raft
 
 import zio.UIO
-import zio.stream.Stream
-import zio.stream.ZStream
+import zio.stream.{Stream, ZStream}
 
 sealed trait TestCommands extends Command:
   type Response = Int

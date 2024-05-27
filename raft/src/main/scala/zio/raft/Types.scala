@@ -1,10 +1,6 @@
 package zio.raft
 
-import zio.prelude.State as ZState
-import zio.Promise
-import zio.{ZIO, Chunk, Task}
-import scala.util.Try
-import zio.stream.Stream
+import zio.{Chunk, Promise}
 
 case class Term(value: Long):
   def <(other: Term) = value < other.value

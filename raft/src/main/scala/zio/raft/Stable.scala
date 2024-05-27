@@ -1,7 +1,6 @@
 package zio.raft
 
-import zio.{UIO, ZIO, URIO}
-import zio.Ref
+import zio.{Ref, UIO}
 
 trait Stable:
   def currentTerm: UIO[Term]

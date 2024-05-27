@@ -1,9 +1,9 @@
 package zio.raft.zmq
 
-import zio.test.*
 import zio.raft.*
+import zio.test.*
+
 import scodec.bits.BitVector
-import zio.Scope
 
 object MessageCodecSpec extends ZIOSpecDefault:
 

@@ -1,15 +1,14 @@
 package zio.zmq
 
 import java.nio.charset.StandardCharsets
-import org.zeromq.ZMQException
-import zio.{Chunk, ZIO, ZManaged}
-import zmq.{Msg, SocketBase, ZMQ, ZError as ZmqError}
-
 import java.util.concurrent.atomic.AtomicBoolean
-import zio.stream.ZStream
-import zio.ChunkBuilder
+
 import zio.blocking.Blocking.Service
-import zio.Has
+import zio.stream.ZStream
+import zio.{Chunk, ChunkBuilder, Has, ZIO, ZManaged}
+
+import org.zeromq.ZMQException
+import zmq.{Msg, SocketBase, ZError as ZmqError, ZMQ}
 
 class ZSocket private (
     socket: SocketBase,

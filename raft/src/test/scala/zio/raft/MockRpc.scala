@@ -1,10 +1,7 @@
 package zio.raft
 
-import zio.UIO
-
-import zio.stream
-import zio.raft.StreamItem.Message
 import zio.stream.ZStream
+import zio.{UIO, stream}
 
 class MockRpc[A <: Command](val queue: zio.Queue[(MemberId, RPCMessage[A])]) extends RPC[A]:
 

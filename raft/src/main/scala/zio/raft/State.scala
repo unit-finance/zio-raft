@@ -1,6 +1,5 @@
 package zio.raft
 
-import zio.{Ref, ZIO, UIO}
 import java.time.Instant
 
 sealed trait State:

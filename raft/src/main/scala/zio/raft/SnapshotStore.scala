@@ -1,7 +1,7 @@
 package zio.raft
 
-import zio.{UIO, Chunk, Ref, ZIO}
-import zio.stream.{ZStream, Stream}
+import zio.stream.{Stream, ZStream}
+import zio.{Chunk, Ref, UIO, ZIO}
 
 case class Snapshot(
     previousIndex: Index,

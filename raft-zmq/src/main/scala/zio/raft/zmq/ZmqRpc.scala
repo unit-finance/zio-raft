@@ -1,26 +1,12 @@
 package zio.raft.zmq
 
-import zio.raft.{RPC, Command}
-import zio.raft.RequestVoteResult
-import zio.Queue
-import zio.raft.AppendEntriesRequest
-import zio.raft.RequestVoteRequest
-import zio.UIO
-import zio.raft.RPCMessage
-import zio.raft.MemberId
-import zio.raft.Command
-import zio.raft.AppendEntriesResult
-import zio.zmq.ZSocket
-import zio.zmq.RoutingId
-import zio.ZLayer
-import scodec.bits.BitVector
-import zio.ZIO
+import zio.raft.{AppendEntriesRequest, AppendEntriesResult, Command, HeartbeatRequest, HeartbeatResponse, InstallSnapshotRequest, InstallSnapshotResult, MemberId, RPC, RPCMessage, RequestVoteRequest, RequestVoteResult}
 import zio.stream.ZStream
+import zio.zmq.ZSocket
+import zio.{UIO, ZIO}
+
 import scodec.Codec
-import zio.raft.InstallSnapshotRequest
-import zio.raft.InstallSnapshotResult
-import zio.raft.HeartbeatRequest
-import zio.raft.HeartbeatResponse
+import scodec.bits.BitVector
 
 class ZmqRpc[A <: Command](server: ZSocket, clients: Map[MemberId, ZSocket], codec: Codec[A]) extends RPC[A]:
 

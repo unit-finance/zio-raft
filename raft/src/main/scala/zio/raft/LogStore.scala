@@ -1,7 +1,6 @@
 package zio.raft
 
-import zio.{ZIO, UIO}
-import zio.Ref
+import zio.{Ref, UIO, ZIO}
 
 trait LogStore[A <: Command]:
   // def firstIndex: UIO[Index]

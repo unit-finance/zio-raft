@@ -1,6 +1,6 @@
 package zio.raft
 
-import zio.{UIO, ZIO}
+import zio.UIO
 import zio.stream.Stream
 
 trait RPC[A <: Command]:

@@ -1,7 +1,8 @@
 package zio.zmq
 
-import org.zeromq.ZMQException
 import zio.{ZIO, ZLayer}
+
+import org.zeromq.ZMQException
 import zmq.Ctx
 
 class ZContext {

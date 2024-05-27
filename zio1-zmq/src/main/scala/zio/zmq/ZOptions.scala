@@ -1,6 +1,7 @@
 package zio.zmq
 
 import zio.{Task, ZIO}
+
 import zmq.{SocketBase, ZMQ}
 
 class ZOptions(socketBase: SocketBase) {

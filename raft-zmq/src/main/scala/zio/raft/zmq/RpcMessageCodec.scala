@@ -1,13 +1,12 @@
 package zio.raft.zmq
 
-import scodec.codecs.{discriminated, uint8, int64, utf8_32, listOfN, int32, bool, variableSizeBytes, bytes, optional}
-import zio.raft.*
-import scodec.{Codec, DecodeResult}
 import zio.Chunk
-import scodec.bits.BitVector
-import scodec.Attempt
+import zio.raft.*
 import zio.raft.AppendEntriesResult.Success
+
+import scodec.Codec
 import scodec.bits.ByteVector
+import scodec.codecs.{bool, bytes, discriminated, int32, int64, listOfN, optional, uint8, utf8_32, variableSizeBytes}
 
 object RpcMessageCodec:
   def codec[A <: Command](commandCodec: Codec[A]): Codec[RPCMessage[A]] = discriminated[RPCMessage[A]]

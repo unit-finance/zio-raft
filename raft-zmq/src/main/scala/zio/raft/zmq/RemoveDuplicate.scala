@@ -1,17 +1,10 @@
 package zio.raft.zmq
 
-import zio.Ref
-import zio.Chunk
-import zio.stream.ZPipeline
-import zio.ZIO
-import zio.raft.AppendEntriesResult
-import zio.raft.Command
-import zio.raft.RPCMessage
-import zio.raft.AppendEntriesRequest
 import java.time.Instant
-import zio.raft.Raft
-import zio.raft.Index.min
-import zio.Clock
+
+import zio.raft.{AppendEntriesRequest, AppendEntriesResult, Command, RPCMessage, Raft}
+import zio.stream.ZPipeline
+import zio.{Chunk, Clock, Ref, ZIO}
 
 class RemoveDuplicate[A <: Command](
     refPreviousMessage: Ref[Option[(Instant, RPCMessage[A])]]

@@ -1,7 +1,6 @@
 package zio.raft
 
-import zio.raft.Command
-import zio.{ZIO, UIO, Ref}
+import zio.UIO
 import zio.stream.Stream
 
 trait StateMachine[A <: Command]:

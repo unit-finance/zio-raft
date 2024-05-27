@@ -1,24 +1,14 @@
 package zio.raft
 
-import zio.{Ref, ZIO, UIO, URIO}
-import zio.raft.RequestVoteResult.Granted
-import zio.raft.RequestVoteResult.Rejected
-import zio.raft.State.Candidate
-import zio.raft.State.Leader
 import java.time.Instant
-import zio.stream.ZStream
-import zio.raft.StreamItem.Tick
-import zio.raft.StreamItem.Message
-import zio.raft.StreamItem.CommandMessage
-import zio.Queue
-import zio.Promise
-import zio.raft.AppendEntriesResult.Success
-import zio.raft.AppendEntriesResult.Failure
-import zio.raft.State.Follower
-import zio.Chunk
-import zio.raft.StreamItem.Bootstrap
+
+import zio.raft.AppendEntriesResult.{Failure, Success}
 import zio.raft.Raft.electionTimeout
-import zio.durationInt
+import zio.raft.RequestVoteResult.{Granted, Rejected}
+import zio.raft.State.{Candidate, Follower, Leader}
+import zio.raft.StreamItem.{Bootstrap, CommandMessage, Message, Tick}
+import zio.stream.ZStream
+import zio.{Chunk, Promise, Queue, Ref, UIO, URIO, ZIO, durationInt}
 
 sealed trait StreamItem[A <: Command]
 object StreamItem:
@@ -470,7 +460,7 @@ class Raft[A <: Command](
       _ <- s match
         case f: State.Follower if now.isAfter(f.electionTimeout) && !currentTerm.isZero =>
           startElection
-        case c: State.Candidate if now isAfter c.electionTimeout =>
+        case c: State.Candidate if now.isAfter(c.electionTimeout) =>
           startElection
         case _ => ZIO.unit
     yield ()

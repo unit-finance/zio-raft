@@ -1,29 +1,15 @@
-import zio.raft.Command
-import zio.raft.zmq.ZmqRpc
-import zio.Chunk
-import scala.util.Try
-import zio.raft.Raft
-import zio.raft.MemberId
-import zio.raft.Stable
-import zio.raft.LogStore
-import zio.raft.StateMachine
-import scodec.Codec
-import scodec.codecs.{discriminated, fixedSizeBytes, ascii, utf8_32}
-import zio.ExitCode
-import zio.URIO
-import zio.zmq.ZContext
-import zio.http.Method.{GET, POST}
 import zio.http.*
-import zio.ZIO
-import zio.raft.Snapshot
-import zio.UIO
-import zio.raft.SnapshotStore
-import zio.raft.Index
-import zio.stream.Stream
-import zio.stream.ZStream
-import scodec.bits.BitVector
+import zio.http.Method.{GET, POST}
 import zio.http.codec.PathCodec
-import zio.ZIOAppArgs
+import zio.raft.zmq.ZmqRpc
+import zio.raft.{Command, Index, LogStore, MemberId, Raft, SnapshotStore, Stable, StateMachine}
+import zio.stream.{Stream, ZStream}
+import zio.zmq.ZContext
+import zio.{Chunk, UIO, URIO, ZIO, ZIOAppArgs}
+
+import scodec.Codec
+import scodec.bits.BitVector
+import scodec.codecs.{ascii, discriminated, fixedSizeBytes, utf8_32}
 
 sealed trait KVCommand extends Command
 

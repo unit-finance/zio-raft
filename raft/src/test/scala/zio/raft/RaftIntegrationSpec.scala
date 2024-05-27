@@ -1,16 +1,8 @@
 package zio.raft
 
-import zio.ZIO
-import zio.durationInt
 import zio.test.*
-import zio.ZLayer
-import zio.Clock
-import zio.Console
-import zio.System
-import zio.Random
-
-import zio.Scope
 import zio.test.TestAspect.withLiveClock
+import zio.{Scope, ZIO, durationInt}
 
 object RaftIntegrationSpec extends ZIOSpecDefault:
 

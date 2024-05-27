@@ -1,6 +1,6 @@
 package zio.raft
 
-import zio.{Ref, ZIO, Promise}
+import zio.{Ref, ZIO}
 
 case class PendingCommands(ref: Ref[Map[Index, Any]]):
   def complete[R](index: Index, response: R) =

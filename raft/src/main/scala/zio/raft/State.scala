@@ -17,10 +17,10 @@ sealed trait State:
     case f: State.Follower  => f.copy(lastApplied = lastApplied.plusOne)
     case f: State.Candidate => f.copy(lastApplied = lastApplied.plusOne)
     case f: State.Leader    => f.copy(lastApplied = lastApplied.plusOne)
-  
 
 object State:
-  case class Follower(commitIndex: Index, lastApplied: Index, electionTimeout: Instant, leaderId: Option[MemberId]) extends State
+  case class Follower(commitIndex: Index, lastApplied: Index, electionTimeout: Instant, leaderId: Option[MemberId])
+      extends State
   case class Candidate(
       rpcDue: RPCDue,
       voteGranted: Int,
@@ -28,11 +28,11 @@ object State:
       lastApplied: Index,
       electionTimeout: Instant
   ) extends State:
-    def addVote(peer: MemberId) = 
-        this.copy(voteGranted = voteGranted + 1)
+    def addVote(peer: MemberId) =
+      this.copy(voteGranted = voteGranted + 1)
 
-    def ackRpc(peer: MemberId) = 
-        this.copy(rpcDue = rpcDue.ack(peer))
+    def ackRpc(peer: MemberId) =
+      this.copy(rpcDue = rpcDue.ack(peer))
 
     def withRPCDue(from: MemberId, when: Instant) =
       this.copy(rpcDue = rpcDue.set(from, when))
@@ -44,8 +44,8 @@ object State:
       heartbeatDue: HeartbeatDue,
       replicationStatus: ReplicationStatus,
       commitIndex: Index,
-      lastApplied: Index      
-  ) extends State:    
+      lastApplied: Index
+  ) extends State:
 
     def withMatchIndex(from: MemberId, index: Index) =
       this.copy(matchIndex = matchIndex.set(from, index))
@@ -65,7 +65,7 @@ object State:
     def withSnaphotResponse(from: MemberId, now: Instant, responseIndex: Index, done: Boolean) =
       this.copy(replicationStatus = replicationStatus.snapshotResponse(from, now, responseIndex, done))
 
-    def withSnapshotFailure(from: MemberId, now: Instant, responseIndex: Index) = 
+    def withSnapshotFailure(from: MemberId, now: Instant, responseIndex: Index) =
       this.copy(replicationStatus = replicationStatus.snapshotFailure(from, now, responseIndex))
 
     // def withRPCDueNow(from: MemberId) =

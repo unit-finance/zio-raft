@@ -74,10 +74,8 @@ case class RequestVoteRequest[A <: Command](
 
 sealed trait RequestVoteResult[A <: Command] extends RPCMessage[A]
 object RequestVoteResult:
-  case class Granted[A <: Command](from: MemberId, term: Term)
-      extends RequestVoteResult[A]
-  case class Rejected[A <: Command](from: MemberId, term: Term)
-      extends RequestVoteResult[A]
+  case class Granted[A <: Command](from: MemberId, term: Term) extends RequestVoteResult[A]
+  case class Rejected[A <: Command](from: MemberId, term: Term) extends RequestVoteResult[A]
 
 case class AppendEntriesRequest[A <: Command](
     term: Term,
@@ -98,7 +96,8 @@ object AppendEntriesResult:
   case class Failure[A <: Command](from: MemberId, term: Term, index: Index, hint: Option[(Term, Index)])
       extends AppendEntriesResult[A]
 
-case class HeartbeatRequest[A <: Command](term: Term, leaderId: MemberId, leaderCommitIndex: Index) extends RPCMessage[A]
+case class HeartbeatRequest[A <: Command](term: Term, leaderId: MemberId, leaderCommitIndex: Index)
+    extends RPCMessage[A]
 
 case class HeartbeatResponse[A <: Command](from: MemberId, term: Term) extends RPCMessage[A]
 
@@ -107,7 +106,7 @@ case class InstallSnapshotRequest[A <: Command](
     leaderId: MemberId,
     lastIndex: Index,
     lastTerm: Term,
-    offset: Long,    
+    offset: Long,
     done: Boolean,
     data: Chunk[Byte]
 ) extends RPCMessage[A]
@@ -120,5 +119,4 @@ object InstallSnapshotResult:
       index: Index,
       done: Boolean
   ) extends InstallSnapshotResult[A]
-  case class Failure[A <: Command](from: MemberId, term: Term, index: Index)
-      extends InstallSnapshotResult[A]
+  case class Failure[A <: Command](from: MemberId, term: Term, index: Index) extends InstallSnapshotResult[A]

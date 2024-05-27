@@ -7,4 +7,4 @@ case class MatchIndex(map: Map[MemberId, Index]):
 
   def indices = map.values.toList
 object MatchIndex:
-  def apply(peers: Peers) = new MatchIndex(peers.map(_ -> Index.zero).toMap)  
+  def apply(peers: Peers) = new MatchIndex(peers.map(_ -> Index.zero).toMap)

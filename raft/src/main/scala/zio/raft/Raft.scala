@@ -51,9 +51,7 @@ class Raft[A <: Command](
       _ <- pendingCommands.reset(leaderId)
       electionTimeout <- makeElectionTimeout
 
-      _ <- state.update(s =>
-        State.Follower(s.commitIndex, s.lastApplied, electionTimeout, leaderId)
-      )
+      _ <- state.update(s => State.Follower(s.commitIndex, s.lastApplied, electionTimeout, leaderId))
       currentTerm <- stable.currentTerm
       _ <- ZIO.logDebug(
         s"memberId=${this.memberId} Following $leaderId $currentTerm"
@@ -308,8 +306,7 @@ class Raft[A <: Command](
               for
                 index <-
                   if hintTerm.isZero then ZIO.succeed(hintIndex)
-                  else
-                    logStore.findConflictByTerm(hintTerm, hintIndex).map(_._2)
+                  else logStore.findConflictByTerm(hintTerm, hintIndex).map(_._2)
                 currentNextIndex = leader.nextIndex.get(from)
 
                 // we don't want to increase the index if we already processed a failure with a lower index
@@ -471,8 +468,7 @@ class Raft[A <: Command](
       s <- state.get
       currentTerm <- stable.currentTerm
       _ <- s match
-        case f: State.Follower
-            if now.isAfter(f.electionTimeout) && !currentTerm.isZero =>
+        case f: State.Follower if now.isAfter(f.electionTimeout) && !currentTerm.isZero =>
           startElection
         case c: State.Candidate if now isAfter c.electionTimeout =>
           startElection
@@ -532,7 +528,8 @@ class Raft[A <: Command](
               _ <- ZIO.when(nTerm.contains(currentTerm))(
                 state.set(l.withCommitIndex(n))
               )
-              _ <- ZIO.logDebug(
+              _ <- ZIO
+                .logDebug(
                   s"memberId=${this.memberId} advanceCommitIndexRule $nTerm $currentTerm ${l.commitIndex} ${n}"
                 )
                 .when(nTerm == currentTerm)
@@ -544,7 +541,8 @@ class Raft[A <: Command](
   private def applyToStateMachineRule =
     for
       s <- state.get
-      _ <- ZIO.logDebug(
+      _ <- ZIO
+        .logDebug(
           s"memberId=${this.memberId} applyToStateMachineRule ${s.commitIndex} ${s.lastApplied}"
         )
         .when(s.commitIndex > s.lastApplied)
@@ -659,7 +657,8 @@ class Raft[A <: Command](
       _ <- (previousTerm, maybeEntries) match
         case (Some(previousTerm), Some(entries)) =>
           for
-            _ <- ZIO.logDebug(
+            _ <- ZIO
+              .logDebug(
                 s"memberId=${this.memberId} sendAppendEntriesRule $peer $leaderLastLogIndex $nextIndex"
               )
               .when(entries.nonEmpty)
@@ -686,7 +685,8 @@ class Raft[A <: Command](
                     )
                 )
               else
-                ZIO.logWarning(
+                ZIO
+                  .logWarning(
                     s"memberId=${this.memberId} failed to send entries to peer $peer $nextIndex $leaderLastLogIndex, pausing peer"
                   )
                   .when(!sent) *>
@@ -786,18 +786,14 @@ class Raft[A <: Command](
   private def preRules =
     for
       _ <- startNewElectionRule
-      _ <- ZIO.foreachDiscard(peers)(p =>
-        sendRequestVoteRule(p) <*> sendHeartbeatRule(p)
-      )
+      _ <- ZIO.foreachDiscard(peers)(p => sendRequestVoteRule(p) <*> sendHeartbeatRule(p))
     yield ()
 
   private def postRules =
     for
       _ <- becomeLeaderRule
       _ <- advanceCommitIndexRule
-      _ <- ZIO.foreachDiscard(peers)(p =>
-        sendAppendEntriesRule(p) <*> sendRequestVoteRule(p)
-      )
+      _ <- ZIO.foreachDiscard(peers)(p => sendAppendEntriesRule(p) <*> sendRequestVoteRule(p))
       changed <- applyToStateMachineRule
       _ <- ZIO.when(changed)(takeSnapshotRule)
     yield ()

@@ -48,7 +48,7 @@ case class TestRpc[A <: Command](
       candidateId: MemberId,
       response: RequestVoteResult[A]
   ): UIO[Unit] = peers.get
-    .flatMap(_.get(candidateId).get.offer(response))    
+    .flatMap(_.get(candidateId).get.offer(response))
     .unlessZIO(isResponding.get.map(!_))
     .unit
   override def sendAppendEntriesResponse(
@@ -56,21 +56,20 @@ case class TestRpc[A <: Command](
       response: AppendEntriesResult[A]
   ): UIO[Unit] =
     peers.get
-      .flatMap(_.get(leaderId).get.offer(response))      
+      .flatMap(_.get(leaderId).get.offer(response))
       .unlessZIO(isResponding.get.map(!_))
       .unit
   override def sendAppendEntries(
       peer: MemberId,
       request: AppendEntriesRequest[A]
   ): UIO[Boolean] =
-    for 
+    for
       isResponding <- isResponding.get
-      result <- 
-        if isResponding then 
+      result <-
+        if isResponding then
           peers.get
-            .flatMap(_.get(peer).get.offer(request))            
-        else 
-          ZIO.succeed(false)
+            .flatMap(_.get(peer).get.offer(request))
+        else ZIO.succeed(false)
     yield result
 
   override def sendRequestVote(
@@ -78,17 +77,17 @@ case class TestRpc[A <: Command](
       m: RequestVoteRequest[A]
   ): UIO[Unit] =
     peers.get
-      .flatMap(_.get(peer).get.offer(m))      
+      .flatMap(_.get(peer).get.offer(m))
       .unlessZIO(isResponding.get.map(!_))
       .unit
 
-  override def sendHeartbeat(peer: MemberId, m: HeartbeatRequest[A]): UIO[Unit] = 
+  override def sendHeartbeat(peer: MemberId, m: HeartbeatRequest[A]): UIO[Unit] =
     peers.get
       .flatMap(_.get(peer).get.offer(m))
       .unlessZIO(isResponding.get.map(!_))
       .unit
 
-  override def sendHeartbeatResponse(leaderId: MemberId, m: HeartbeatResponse[A]): UIO[Unit] = 
+  override def sendHeartbeatResponse(leaderId: MemberId, m: HeartbeatResponse[A]): UIO[Unit] =
     peers.get
       .flatMap(_.get(leaderId).get.offer(m))
       .unlessZIO(isResponding.get.map(!_))

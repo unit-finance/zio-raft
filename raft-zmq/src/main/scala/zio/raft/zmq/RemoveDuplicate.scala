@@ -31,12 +31,13 @@ class RemoveDuplicate[A <: Command](
             refPreviousMessage.set(Some((now, m))).as(true)
           case Some(timestamp, previousMessage) =>
             m match
-              case m: AppendEntriesRequest[A] if previousMessage == m && now.isBefore(timestamp.plus(minHeartbeatInterval)) =>
+              case m: AppendEntriesRequest[A]
+                  if previousMessage == m && now.isBefore(timestamp.plus(minHeartbeatInterval)) =>
                 ZIO.succeed(false)
               case _: AppendEntriesResult.Failure[A] if previousMessage == m =>
-                ZIO.succeed(false)              
+                ZIO.succeed(false)
               case _ =>
-                refPreviousMessage.set(Some((now, m))).as(true)                
+                refPreviousMessage.set(Some((now, m))).as(true)
     yield filter
 
   def apply(maybeChunk: Option[Chunk[RPCMessage[A]]]) =

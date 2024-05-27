@@ -35,8 +35,7 @@ class ReplicationStatus(val peerStatus: Map[MemberId, PeerReplicationStatus]):
       done: Boolean
   ) =
     peerStatus.get(peer) match
-      case Some(PeerReplicationStatus.Snapshot(_, snapshotIndex))
-          if responseIndex == snapshotIndex =>
+      case Some(PeerReplicationStatus.Snapshot(_, snapshotIndex)) if responseIndex == snapshotIndex =>
         if done then
           new ReplicationStatus(
             peerStatus.updated(peer, PeerReplicationStatus.Replicating(false))
@@ -52,8 +51,7 @@ class ReplicationStatus(val peerStatus: Map[MemberId, PeerReplicationStatus]):
 
   def snapshotFailure(peer: MemberId, now: Instant, responseIndex: Index) =
     peerStatus.get(peer) match
-      case Some(PeerReplicationStatus.Snapshot(_, snapshotIndex))
-          if responseIndex == snapshotIndex =>
+      case Some(PeerReplicationStatus.Snapshot(_, snapshotIndex)) if responseIndex == snapshotIndex =>
         new ReplicationStatus(
           peerStatus.updated(peer, PeerReplicationStatus.Replicating(false))
         )

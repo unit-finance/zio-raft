@@ -35,37 +35,52 @@ case class Get(key: String) extends KVCommand:
 
 val mapCodec = scodec.codecs.list(utf8_32 :: utf8_32).xmap(_.toMap, _.toList)
 
-
 class KVStateMachine(map: Map[String, String]) extends StateMachine[KVCommand]:
 
-  override def takeSnapshot: Stream[Nothing, Byte] = 
-    ZStream.fromZIO(ZIO.attempt(Chunk.fromArray(mapCodec.encode(map).require.toByteArray)).orDie).flattenChunks // TODO: we need to improve the conversion of ByteVector to Stream and Chunk
+  override def takeSnapshot: Stream[Nothing, Byte] =
+    ZStream
+      .fromZIO(ZIO.attempt(Chunk.fromArray(mapCodec.encode(map).require.toByteArray)).orDie)
+      .flattenChunks // TODO: we need to improve the conversion of ByteVector to Stream and Chunk
 
-  override def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[StateMachine[KVCommand]] = 
+  override def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[StateMachine[KVCommand]] =
     // TODO: we need to improve the conversion of Stream to BitVector
-    ZIO.scoped(    
-    stream.toInputStream.map(is => BitVector.fromInputStream(is, 1024)).map(bv => mapCodec.decodeValue(bv).require).map(m => KVStateMachine(m)))
+    ZIO.scoped(
+      stream.toInputStream
+        .map(is => BitVector.fromInputStream(is, 1024))
+        .map(bv => mapCodec.decodeValue(bv).require)
+        .map(m => KVStateMachine(m))
+    )
 
   override def shouldTakeSnapshot(lastSnaphotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean = false
-    // commitIndex.value - lastSnaphotIndex.value > 2
-  
+  // commitIndex.value - lastSnaphotIndex.value > 2
+
   override def apply(command: KVCommand): (command.Response, StateMachine[KVCommand]) =
     command match
       case Set(k, v) => (().asInstanceOf[command.Response], KVStateMachine(map.updated(k, v)))
-      case Get(k) => (map.get(k).getOrElse("").asInstanceOf[command.Response], this)
+      case Get(k)    => (map.get(k).getOrElse("").asInstanceOf[command.Response], this)
 
 class HttpServer(raft: Raft[KVCommand]):
 
   val app = Routes(
     GET / "" -> handler(ZIO.succeed(Response.text("Hello World!"))),
-    GET / string("key") -> handler((k: String, _: Request) => raft.sendCommand(Get(k)).map(r => Response.text(r)).catchAll(err => ZIO.succeed(Response.text(err.toString).status(Status.BadRequest)))),
-    POST / string("key") / string("value") -> handler((k: String, v: String, _: Request) => raft.sendCommand(Set(k, v)).map(_ => Response.text("OK")).catchAll(err => ZIO.succeed(Response.text(err.toString).status(Status.BadRequest))))
+    GET / string("key") -> handler((k: String, _: Request) =>
+      raft
+        .sendCommand(Get(k))
+        .map(r => Response.text(r))
+        .catchAll(err => ZIO.succeed(Response.text(err.toString).status(Status.BadRequest)))
+    ),
+    POST / string("key") / string("value") -> handler((k: String, v: String, _: Request) =>
+      raft
+        .sendCommand(Set(k, v))
+        .map(_ => Response.text("OK"))
+        .catchAll(err => ZIO.succeed(Response.text(err.toString).status(Status.BadRequest)))
+    )
   )
-    
+
   def run = Server.serve(app).provide(Server.defaultWithPort(8090))
 
 object KVStoreApp extends zio.ZIOAppDefault:
-  override def run =     
+  override def run =
     val program =
       for
         _ <- ZIO.unit
@@ -80,7 +95,8 @@ object KVStoreApp extends zio.ZIOAppDefault:
         getCodec = utf8_32.as[Get]
         setCodec = (utf8_32 :: utf8_32).as[Set]
 
-        commandCodec = discriminated[KVCommand].by(fixedSizeBytes(1, ascii))
+        commandCodec = discriminated[KVCommand]
+          .by(fixedSizeBytes(1, ascii))
           .typecase("S", setCodec)
           .typecase("G", getCodec)
 

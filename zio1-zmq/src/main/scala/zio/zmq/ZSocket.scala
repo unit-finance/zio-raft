@@ -80,9 +80,7 @@ class ZSocket private (
   def stream(chunkSize: Int): ZStream[Any, ZMQException, Msg] =
     ZStream
       .succeed(new AtomicBoolean(false))
-      .flatMap(canceled =>
-        ZStream.repeatEffectChunk(receiveChunk(canceled, chunkSize))
-      )
+      .flatMap(canceled => ZStream.repeatEffectChunk(receiveChunk(canceled, chunkSize)))
 
   private def receiveMsgWait(
       canceled: AtomicBoolean
@@ -121,9 +119,7 @@ class ZSocket private (
     receive.map(c => new String(c.toArray, StandardCharsets.UTF_8))
 
   def receiveStringWithRoutingId =
-    receiveMsg.map(m =>
-      (RoutingId(m.getRoutingId), new String(m.data(), StandardCharsets.UTF_8))
-    )
+    receiveMsg.map(m => (RoutingId(m.getRoutingId), new String(m.data(), StandardCharsets.UTF_8)))
 
   def receiveWithRoutingId =
     receiveMsg.map(m => (RoutingId(m.getRoutingId), Chunk.fromArray(m.data())))
@@ -272,9 +268,7 @@ object ZSocket {
           .effectBlocking(ctx.createSocket(socketType))
           .refineToOrDie[ZMQException]
 
-        _ = asType.fold(())(asType =>
-          handle.setSocketOpt(ZMQ.ZMQ_AS_TYPE, asType)
-        )
+        _ = asType.fold(())(asType => handle.setSocketOpt(ZMQ.ZMQ_AS_TYPE, asType))
         // work around ZIO cannot interrupt blocking effect
         // this will cause receive message wait up to 1 seconds even when blocking
         _ = handle.setSocketOpt(ZMQ.ZMQ_RCVTIMEO, 1000)

@@ -8,7 +8,7 @@ trait RPC[A <: Command]:
   def sendRequestVoteResponse(
       candidateId: MemberId,
       response: RequestVoteResult[A]
-  ): UIO[Unit]  
+  ): UIO[Unit]
   def sendHeartbeat(peer: MemberId, m: HeartbeatRequest[A]): UIO[Unit]
   def sendHeartbeatResponse(leaderId: MemberId, m: HeartbeatResponse[A]): UIO[Unit]
   def sendAppendEntriesResponse(
@@ -19,8 +19,7 @@ trait RPC[A <: Command]:
       peer: MemberId,
       request: AppendEntriesRequest[A]
   ): UIO[Boolean]
-  
+
   def sendInstallSnapshot(peer: MemberId, m: InstallSnapshotRequest[A]): UIO[Unit]
   def sendInstallSnapshotResponse(peer: MemberId, m: InstallSnapshotResult[A]): UIO[Unit]
   def incomingMessages: Stream[Nothing, RPCMessage[A]]
-

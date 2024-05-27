@@ -93,7 +93,7 @@ object SnapshotStore:
     override def createNewSnapshot(snapshot: Snapshot): UIO[Unit] =
       for
         // copy the stream
-        chunk <- snapshot.stream.runCollect        
+        chunk <- snapshot.stream.runCollect
         _ <- latest.set(Some(snapshot.copy(stream = ZStream.fromChunk(chunk))))
       yield ()
 

@@ -1,6 +1,19 @@
 package zio.raft.zmq
 
-import zio.raft.{AppendEntriesRequest, AppendEntriesResult, Command, HeartbeatRequest, HeartbeatResponse, InstallSnapshotRequest, InstallSnapshotResult, MemberId, RPC, RPCMessage, RequestVoteRequest, RequestVoteResult}
+import zio.raft.{
+  AppendEntriesRequest,
+  AppendEntriesResult,
+  Command,
+  HeartbeatRequest,
+  HeartbeatResponse,
+  InstallSnapshotRequest,
+  InstallSnapshotResult,
+  MemberId,
+  RPC,
+  RPCMessage,
+  RequestVoteRequest,
+  RequestVoteResult
+}
 import zio.stream.ZStream
 import zio.zmq.ZSocket
 import zio.{UIO, ZIO}

@@ -12,7 +12,6 @@ import zio.raft.Command
 import zio.raft.AppendEntriesResult
 import zio.zmq.ZSocket
 import zio.zmq.RoutingId
-import zio.managed.*
 import zio.ZLayer
 import scodec.bits.BitVector
 import zio.ZIO

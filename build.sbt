@@ -9,8 +9,7 @@ lazy val scala3Version = "3.4.2"
 lazy val scala213Version = "2.13.14"
 lazy val mainScalaVersion = scala3Version
 
-lazy val supportedScalaVersions = List(scala3Version, scala213Version) 
-
+lazy val supportedScalaVersions = List(scala3Version, scala213Version)
 
 ThisBuild / organization := "io.github.unit-finance"
 // ThisBuild / organization := "co.unit"
@@ -51,10 +50,10 @@ resolvers +=
 
 lazy val root = project
   .in(file("."))
-  .aggregate(raft, kvstore, zio1zmq, zio2zmq, raftZmq)
+  .aggregate(raft, kvstore, zio1zmq, zio2zmq, raftZmq, stores, ziolmdb)
   .settings(
     publish / skip := true,
-    crossScalaVersions := Nil,
+    crossScalaVersions := Nil
   )
 
 lazy val raft = project
@@ -65,11 +64,11 @@ lazy val raft = project
     scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     libraryDependencies ++= Seq(
-      "dev.zio" %% "zio" % zio2Version,      
+      "dev.zio" %% "zio" % zio2Version,
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
-      "dev.zio" %% "zio-prelude" % "1.0.0-RC26",
-      // "dev.zio" %% "zio-logging" % zioLoggingVersion
+      "dev.zio" %% "zio-nio" % "2.0.0",
+      "dev.zio" %% "zio-prelude" % "1.0.0-RC26",      
     )
   )
 
@@ -81,12 +80,13 @@ lazy val kvstore = project
     scalaVersion := mainScalaVersion,
     scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
     libraryDependencies ++= Seq(
-      "dev.zio" %% "zio" % zio1Version,
-      "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
-      "dev.zio" %% "zio-http" % "3.0.0-RC7"
-    )
+      "dev.zio" %% "zio" % zio2Version,
+      "dev.zio" %% "zio-prelude" % "1.0.0-RC26",
+      "dev.zio" %% "zio-http" % "3.0.0-RC8",
+    ),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
-  .dependsOn(raft, raftZmq)
+  .dependsOn(raft, raftZmq, stores)
 
 lazy val raftZmq = project
   .in(file("raft-zmq"))
@@ -94,7 +94,7 @@ lazy val raftZmq = project
     name := "zio-raft-zmq",
     scalaVersion := mainScalaVersion,
     scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
-    libraryDependencies ++= Seq(      
+    libraryDependencies ++= Seq(
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "org.scodec" %% "scodec-bits" % "1.1.37",
@@ -107,55 +107,83 @@ lazy val zio1zmq = project
   .in(file("zio1-zmq"))
   .settings(
     name := "zio1-zmq",
-    crossScalaVersions := supportedScalaVersions,    
+    crossScalaVersions := supportedScalaVersions,
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio1Version,
       "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
-      "org.zeromq" % "jeromq" % jeromqVersion,
+      "org.zeromq" % "jeromq" % jeromqVersion
     ),
-
     libraryDependencies ++= {
       CrossVersion.partialVersion(scalaVersion.value) match {
         case Some((2, n)) => Seq("io.estatico" %% "newtype" % "0.4.4")
         case Some((3, n)) => Seq()
-        case _ => Seq()
+        case _            => Seq()
       }
     },
-
     scalacOptions ++= {
       CrossVersion.partialVersion(scalaVersion.value) match {
         case Some((2, n)) => List("-Xsource:3", "-Ymacro-annotations", "-Wunused:imports")
         case Some((3, n)) => List("-Wunused:imports")
-        case _ => List()
+        case _            => List()
       }
-    },
+    }
   )
 
 lazy val zio2zmq = project
   .in(file("zio2-zmq"))
   .settings(
     name := "zio2-zmq",
+    scalaVersion := mainScalaVersion,
     crossScalaVersions := supportedScalaVersions,
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,
       "dev.zio" %% "zio-prelude" % "1.0.0-RC26",
-      "org.zeromq" % "jeromq" % jeromqVersion,
+      "org.zeromq" % "jeromq" % jeromqVersion
     ),
-
     libraryDependencies ++= {
       CrossVersion.partialVersion(scalaVersion.value) match {
         case Some((2, n)) => Seq("io.estatico" %% "newtype" % "0.4.4")
         case Some((3, n)) => Seq()
-        case _ => Seq()
+        case _            => Seq()
       }
     },
-
     scalacOptions ++= {
       CrossVersion.partialVersion(scalaVersion.value) match {
         case Some((2, n)) => List("-Xsource:3", "-Ymacro-annotations", "-Wunused:imports")
         case Some((3, n)) => List("-Wunused:imports")
-        case _ => List()
+        case _            => List()
       }
-    },
+    }
   )
 
+lazy val ziolmdb = project
+  .in(file("zio-lmdb"))
+  .settings(
+    name := "zio-lmdb",
+    scalaVersion := mainScalaVersion,
+    scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio" % zio2Version,
+      "dev.zio" %% "zio-nio" % "2.0.0",
+      "dev.zio" %% "zio-streams" % zio2Version,
+      "dev.zio" %% "zio-test" % zio2Version % Test,
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test,    
+      "org.lmdbjava" % "lmdbjava" % "0.9.0"
+    )
+  )
+
+lazy val stores = project
+  .in(file("stores"))
+  .settings(
+    name := "zio-raft-stores",
+    scalaVersion := mainScalaVersion,
+    scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio-test" % zio2Version % Test,
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
+      "org.scodec" %% "scodec-bits" % "1.1.37",
+      "org.scodec" %% "scodec-core" % "2.2.1",
+      "dev.zio" %% "zio-nio" % "2.0.0"
+    )
+  )
+  .dependsOn(raft, ziolmdb)

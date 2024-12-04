@@ -2,7 +2,7 @@ import zio.http.*
 import zio.http.Method.{GET, POST}
 import zio.http.codec.PathCodec
 import zio.raft.zmq.ZmqRpc
-import zio.raft.{Command, Index, LogStore, MemberId, Raft, SnapshotStore, Stable, StateMachine}
+import zio.raft.{Command, Index, MemberId, Raft, SnapshotStore, StateMachine}
 import zio.stream.{Stream, ZStream}
 import zio.zmq.ZContext
 import zio.{Chunk, UIO, URIO, ZIO, ZIOAppArgs}
@@ -10,6 +10,8 @@ import zio.{Chunk, UIO, URIO, ZIO, ZIOAppArgs}
 import scodec.Codec
 import scodec.bits.BitVector
 import scodec.codecs.{ascii, discriminated, fixedSizeBytes, utf8_32}
+import zio.raft.stores.FileStable
+import zio.raft.stores.segmentedlog.SegmentedLog
 
 sealed trait KVCommand extends Command
 
@@ -20,6 +22,14 @@ case class Get(key: String) extends KVCommand:
   type Response = String
 
 val mapCodec = scodec.codecs.list(utf8_32 :: utf8_32).xmap(_.toMap, _.toList)
+
+object KVCommand:
+  val getCodec = utf8_32.as[Get]
+  val setCodec = (utf8_32 :: utf8_32).as[Set]
+  given commandCodec: Codec[KVCommand] = discriminated[KVCommand]
+          .by(fixedSizeBytes(1, ascii))
+          .typecase("S", setCodec)
+          .typecase("G", getCodec)
 
 class KVStateMachine(map: Map[String, String]) extends StateMachine[KVCommand]:
 
@@ -76,23 +86,14 @@ object KVStoreApp extends zio.ZIOAppDefault:
           "peer1" -> "tcp://localhost:5555",
           "peer2" -> "tcp://localhost:5556",
           "peer3" -> "tcp://localhost:5557"
-        ).map((k, v) => MemberId(k) -> v)
-
-        getCodec = utf8_32.as[Get]
-        setCodec = (utf8_32 :: utf8_32).as[Set]
-
-        commandCodec = discriminated[KVCommand]
-          .by(fixedSizeBytes(1, ascii))
-          .typecase("S", setCodec)
-          .typecase("G", getCodec)
+        ).map((k, v) => MemberId(k) -> v)     
 
         rpc <- ZmqRpc.make[KVCommand](
           peers(memberId),
-          peers.removed(memberId),
-          commandCodec
+          peers.removed(memberId)
         )
-        stable <- Stable.makeInMemory
-        logStore <- LogStore.makeInMemory[KVCommand]
+        stable <- FileStable.make(s"/tmp/raft/${memberId.value}/")
+        logStore <- SegmentedLog.make[KVCommand](s"/tmp/raft/${memberId.value}/logstore")
         snapshotStore <- SnapshotStore.makeInMemory
 
         raft <- Raft.make(

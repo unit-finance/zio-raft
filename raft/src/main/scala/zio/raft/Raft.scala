@@ -358,7 +358,7 @@ class Raft[A <: Command](
                     InstallSnapshotResult
                       .Failure[A](memberId, currentTerm, r.lastIndex)
                   )
-                case (false, true) =>
+                case (false, true) =>                  
                   ZIO.succeed(
                     InstallSnapshotResult
                       .Success[A](memberId, currentTerm, r.lastIndex, false)
@@ -563,25 +563,20 @@ class Raft[A <: Command](
           _ <- (snapshotStore
             .createNewSnapshot(
               Snapshot(s.lastApplied, previousTerm, stream)
-            ) <*> logStore.discardLogUpTo(
-            s.lastApplied
-          )).fork // TODO: make discarding the log configurable (the user might want to control that)
+            )).fork
         yield ()
     yield ()
 
   private def applyToStateMachine(state: State): UIO[State] =
     if state.commitIndex > state.lastApplied then
-      val state1 = state.increaseLastApplied
-      for
-        logEntry <- logStore
-          .getLog(state1.lastApplied)
-          .map(_.get) // todo: Handle onot found
-        response <- stateMachine.modify(_.apply(logEntry.command))
-        _ <- state match
-          case l: Leader => pendingCommands.complete(logEntry.index, response)
-          case _         => ZIO.unit
-        state2 <- applyToStateMachine(state1)
-      yield state2
+      logStore.stream(state.lastApplied.plusOne, state.commitIndex).runFoldZIO(state)(
+        (state, logEntry) =>
+          for
+            response <- stateMachine.modify(_.apply(logEntry.command))
+            _ <- state match
+              case l: Leader => pendingCommands.complete(logEntry.index, response)
+              case _         => ZIO.unit        
+          yield state.increaseLastApplied)
     else ZIO.succeed(state)
 
   private def sendHeartbeatRule(peer: MemberId) =
@@ -913,9 +908,10 @@ class Raft[A <: Command](
 
   // User of the library would decide on what index to use for the compaction
   def compact(index: Index) =
-    for
+    for      
       s <- state.get
-      _ <- logStore.discardLogUpTo(Index.min(index, s.lastApplied))
+      latestSnapshotIndex <- snapshotStore.latestSnapshotIndex
+      _ <- logStore.discardLogUpTo(Index.min(index, latestSnapshotIndex))
     yield ()
 
   def run =
@@ -955,15 +951,26 @@ object Raft:
         snapshot match
           case None => ZIO.succeed(stateMachine)
           case Some(snapshot) =>
-            stateMachine.restoreFromSnapshot(snapshot.stream)
-      previousIndex = snapshot.map(_.previousIndex).getOrElse(Index.zero)
+            for 
+              lastIndex <- logStore.lastIndex
+
+              // If the snapshot is ahead of the log, we need to discard the log
+              // TODO: can we only delete part of the log?
+              _ <- ZIO.when(lastIndex <= snapshot.previousIndex)(
+                logStore.discardEntireLog(snapshot.previousIndex, snapshot.previousTerm))
+
+              // Restore the state machine from the snapshot  
+              restoredStateMachine <- stateMachine.restoreFromSnapshot(snapshot.stream)
+            yield restoredStateMachine
+      
+      previousIndex = snapshot.map(s => s.previousIndex).getOrElse(Index.zero)
 
       refStateMachine <- Ref.make(restoredStateMachine)
       state <- Ref.make[State](
         State.Follower(previousIndex, previousIndex, electionTimeout, None)
       )
       commandsQueue <- Queue
-        .unbounded[StreamItem[A]] // TODO: should this be bounded for pack-pressure?
+        .unbounded[StreamItem[A]] // TODO: should this be bounded for pack-pressured?
 
       pendingCommands <- PendingCommands.make
       raft = new Raft(

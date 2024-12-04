@@ -4,6 +4,7 @@ import zio.raft.*
 import zio.test.*
 
 import scodec.bits.BitVector
+import scodec.Codec
 
 object MessageCodecSpec extends ZIOSpecDefault:
 
@@ -11,7 +12,7 @@ object MessageCodecSpec extends ZIOSpecDefault:
     type Response = String
 
   object TestCommand:
-    val codec = scodec.codecs.utf8_32.as[TestCommand]
+    given codec: Codec[TestCommand] = scodec.codecs.utf8_32.as[TestCommand]
 
   override def spec = test("encode and decode append entries"):
     val appendEntries = AppendEntriesRequest(
@@ -23,7 +24,7 @@ object MessageCodecSpec extends ZIOSpecDefault:
       leaderCommitIndex = Index.zero
     )
 
-    val codec = RpcMessageCodec.codec[TestCommand](TestCommand.codec)
+    val codec = RpcMessageCodec.codec[TestCommand]
 
     val encoded = codec.encode(appendEntries).require.toByteArray
 

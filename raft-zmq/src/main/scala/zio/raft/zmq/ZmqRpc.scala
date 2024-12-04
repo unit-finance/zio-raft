@@ -21,14 +21,14 @@ import zio.{UIO, ZIO}
 import scodec.Codec
 import scodec.bits.BitVector
 
-class ZmqRpc[A <: Command](server: ZSocket, clients: Map[MemberId, ZSocket], codec: Codec[A]) extends RPC[A]:
+class ZmqRpc[A <: Command: Codec](server: ZSocket, clients: Map[MemberId, ZSocket]) extends RPC[A]:
 
   override def sendAppendEntries(
       peer: MemberId,
       request: AppendEntriesRequest[A]
   ): UIO[Boolean] =
     val client = clients(peer)
-    val message = RpcMessageCodec.codec[A](codec).encode(request).require.toByteArray
+    val message = RpcMessageCodec.codec[A].encode(request).require.toByteArray
 
     for
       sent <- client.sendImmediately(message).orElseSucceed(false)
@@ -40,7 +40,7 @@ class ZmqRpc[A <: Command](server: ZSocket, clients: Map[MemberId, ZSocket], cod
       response: RequestVoteResult[A]
   ): UIO[Unit] =
     val client = clients(candidateId)
-    val message = RpcMessageCodec.codec[A](codec).encode(response).require.toByteArray
+    val message = RpcMessageCodec.codec[A].encode(response).require.toByteArray
     client.sendImmediately(message).ignore
 
   override def sendRequestVote(
@@ -48,7 +48,7 @@ class ZmqRpc[A <: Command](server: ZSocket, clients: Map[MemberId, ZSocket], cod
       m: RequestVoteRequest[A]
   ): UIO[Unit] =
     val client = clients(peer)
-    val message = RpcMessageCodec.codec[A](codec).encode(m).require.toByteArray
+    val message = RpcMessageCodec.codec[A].encode(m).require.toByteArray
     client.sendImmediately(message).ignore
 
   override def sendAppendEntriesResponse(
@@ -56,22 +56,22 @@ class ZmqRpc[A <: Command](server: ZSocket, clients: Map[MemberId, ZSocket], cod
       response: AppendEntriesResult[A]
   ): UIO[Unit] =
     val client = clients(leaderId)
-    val message = RpcMessageCodec.codec[A](codec).encode(response).require.toByteArray
+    val message = RpcMessageCodec.codec[A].encode(response).require.toByteArray
     client.sendImmediately(message).ignore
 
   override def sendHeartbeat(peer: MemberId, m: HeartbeatRequest[A]): UIO[Unit] =
     val client = clients(peer)
-    val message = RpcMessageCodec.codec[A](codec).encode(m).require.toByteArray
+    val message = RpcMessageCodec.codec[A].encode(m).require.toByteArray
     client.sendImmediately(message).ignore
 
   override def sendHeartbeatResponse(leaderId: MemberId, m: HeartbeatResponse[A]): UIO[Unit] =
     val client = clients(leaderId)
-    val message = RpcMessageCodec.codec[A](codec).encode(m).require.toByteArray
+    val message = RpcMessageCodec.codec[A].encode(m).require.toByteArray
     client.sendImmediately(message).ignore
 
   override def sendInstallSnapshot(peer: MemberId, m: InstallSnapshotRequest[A]): UIO[Unit] =
     val client = clients(peer)
-    val message = RpcMessageCodec.codec[A](codec).encode(m).require.toByteArray
+    val message = RpcMessageCodec.codec[A].encode(m).require.toByteArray
 
     // Wait for the peer to be available when sending a snapshot, otherwise we might drop some parts of the snapshot
     // This can still happen of course (message fails in transit) but waiting improve the chances of successful delivery of snapshot
@@ -79,14 +79,14 @@ class ZmqRpc[A <: Command](server: ZSocket, clients: Map[MemberId, ZSocket], cod
 
   override def sendInstallSnapshotResponse(peer: MemberId, m: InstallSnapshotResult[A]): UIO[Unit] =
     val client = clients(peer)
-    val message = RpcMessageCodec.codec[A](codec).encode(m).require.toByteArray
+    val message = RpcMessageCodec.codec[A].encode(m).require.toByteArray
     client.sendImmediately(message).ignore
 
   override def incomingMessages =
     server.stream
       .mapZIO { message =>
         val bytes = message.data()
-        val rpcMessage = RpcMessageCodec.codec[A](codec).decodeValue(BitVector(bytes)).toEither
+        val rpcMessage = RpcMessageCodec.codec[A].decodeValue(BitVector(bytes)).toEither
         ZIO.succeed(rpcMessage)
       }
       .tap:
@@ -97,7 +97,7 @@ class ZmqRpc[A <: Command](server: ZSocket, clients: Map[MemberId, ZSocket], cod
       .catchAll(err => ZStream.die(err))
 
 object ZmqRpc:
-  def make[A <: Command](bindAddress: String, peers: Map[MemberId, String], codec: Codec[A]) =
+  def make[A <: Command : Codec](bindAddress: String, peers: Map[MemberId, String]) =
     for
       clients <- ZIO.foreach(peers)((peerId, peerAddress) =>
         for
@@ -109,4 +109,4 @@ object ZmqRpc:
 
       server <- ZSocket.server
       _ <- server.bind(bindAddress)
-    yield new ZmqRpc(server, clients.toMap, codec)
+    yield new ZmqRpc(server, clients.toMap)

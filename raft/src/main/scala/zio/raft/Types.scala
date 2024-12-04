@@ -13,6 +13,7 @@ case class Term(value: Long):
   def isZero = value == 0L
 object Term:
   val zero = Term(0L)
+  val one = Term(1L)
 
 case class Index(value: Long):
   def <(other: Index) = value < other.value
@@ -35,7 +36,7 @@ object Index:
     Index(m)
   def max(a: Index, b: Index) =
     val m = Math.max(a.value, b.value)
-    Index(m)
+    Index(m)  
 
 case class MemberId(value: String)
 type Peers = Array[MemberId]

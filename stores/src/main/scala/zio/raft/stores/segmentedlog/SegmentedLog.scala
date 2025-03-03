@@ -6,6 +6,7 @@ import zio.stream.ZStream
 import zio.{UIO, ZIO}
 import zio.raft.stores.segmentedlog.SegmentMetadataDatabase.{SegmentMetadata, SegmentStatus}
 import scodec.Codec
+import zio.Scope
 
 class SegmentedLog[A <: Command: Codec](
     logDirectory: String,
@@ -188,7 +189,7 @@ class SegmentedLog[A <: Command: Codec](
       _ <- lastTermRef.set(previousTerm)
     yield ()
 
-  private def createNextSegment() =
+  private def createNextSegment(): ZIO[Any, Nothing, Unit] =
     for {
       firstIndex <- lastIndex.map(_.plusOne)
       previousTerm <- lastTerm
@@ -220,7 +221,7 @@ object SegmentedLog:
       database: SegmentMetadataDatabase,
       firstIndex: Index,
       previousTerm: Term
-  ) =
+  ): ZIO[Any, Nothing, ZIO[Scope, Nothing, OpenSegment[A]]] =
     for
       id <- zio.Random.nextLong.map(_.abs)
       now <- zio.Clock.instant

@@ -82,6 +82,40 @@ object SegmentedLogSpec extends ZIOSpecDefault:
 
           term <- log.logTerm(Index(2))
         yield assertTrue(term.get == Term(10))
+
+      test("handles segment rollover correctly"):
+        for
+          logDirectory <- tempDirectory
+          // Set a small max size to force segment rollover
+          log <- SegmentedLog.make[TestCommand](logDirectory.toString(), maxLogFileSize = 100)
+          
+          // Create entries that will exceed the max size
+          commands <- Gen.listOfBounded(5, 10)(TestCommand.generator).runHead.someOrFail(new Exception("No commands"))
+          entries = commands.zipWithIndex.map((command, index) =>
+            LogEntry[TestCommand](command, Term.one, Index(index.toLong + 1))
+          )
+          
+          // Store entries which should trigger segment rollover
+          _ <- log.storeLogs(entries)
+          
+          // Verify we can read all entries back
+          result <- log.stream(Index.one, Index(entries.size.toLong)).runCollect
+          
+          // Verify last index and term are correct
+          lastIndex <- log.lastIndex
+          lastTerm <- log.lastTerm
+          
+          // Verify we can read entries from different parts of the log
+          firstHalf <- log.getLogs(Index.one, Index(entries.size.toLong / 2))
+          secondHalf <- log.getLogs(Index(entries.size.toLong / 2 + 1), Index(entries.size.toLong))
+        yield assertTrue(
+          entries == result.toList, // All entries are accessible
+          lastIndex == Index(entries.size.toLong), // Last index is correct
+          lastTerm == Term.one, // Last term is correct (should be constant)
+          firstHalf.isDefined && secondHalf.isDefined, // Can read from different parts
+          firstHalf.get.size + secondHalf.get.size == entries.size // All entries are accessible in parts
+        )
+
     // tests:
     // 6. get log first, last, before first, after last
     // 7. get logs from after the last index

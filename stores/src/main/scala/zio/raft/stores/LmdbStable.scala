@@ -33,7 +33,7 @@ class LmdbStable(environment: Environment, ref: Ref[(Term, Option[MemberId])], d
     yield ()
 
 object LmdbStable:
-  def make = 
+  def make: ZIO[Environment, Nothing, LmdbStable] = 
     for
         environment <- ZIO.service[Environment]
         database <- Database.open("stable").orDie

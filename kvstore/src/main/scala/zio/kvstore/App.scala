@@ -5,7 +5,7 @@ import zio.raft.zmq.ZmqRpc
 import zio.raft.{Command, Index, MemberId, Raft, SnapshotStore, StateMachine}
 import zio.stream.{Stream, ZStream}
 import zio.zmq.ZContext
-import zio.{Chunk, UIO, URIO, ZIO, ZIOAppArgs}
+import zio.{Chunk, UIO, URIO, ZIO, ZIOAppArgs, ZLayer}
 
 import scodec.Codec
 import scodec.bits.BitVector
@@ -79,7 +79,6 @@ object KVStoreApp extends zio.ZIOAppDefault:
   override def run =
     val program =
       for
-        _ <- ZIO.unit
         args <- ZIOAppArgs.getArgs
         memberId = MemberId(args(0))
         peers = Map(
@@ -111,4 +110,4 @@ object KVStoreApp extends zio.ZIOAppDefault:
         _ <- ZIO.never
       yield ()
 
-    program.exitCode.provideSomeLayer(ZContext.live.orDie)
+    program.exitCode.provideSomeLayer(ZContext.live.orDie ++ zio.lmdb.Environment.test) // TODO (eran): change test to live?

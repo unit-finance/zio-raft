@@ -1,0 +1,55 @@
+---
+title: Code Modification Practices
+description: Standards for modifying code in the ZIO Raft project
+author: Unit Engineering
+date: 2024-03-21
+status: experimental
+metrics:
+  implementations: 0
+  successful_reviews: 0
+  last_updated: 2024-03-21
+rating_thresholds:
+  beta:
+    min_implementations: 5
+    min_success_rate: 0.9
+  stable:
+    min_implementations: 15
+    min_projects: 3
+---
+
+# Code Modification Practices
+
+This rule follows the structure and progression defined in `rule_management_standards.mdc`.
+
+## Core Standards
+
+### 1. Code Changes (Rating: 3)
+- Read file contents before making changes
+- Make atomic, focused changes
+- Update tests when modifying behavior
+- Maintain backward compatibility
+- Document breaking changes
+
+### 2. Code Review Process (Rating: 2)
+- Review changes before committing
+- Address all review comments
+- Update documentation as needed
+- Ensure all tests pass
+- Follow the project's review guidelines
+
+### 3. Refactoring Guidelines (Rating: 3)
+- Keep refactoring changes separate from feature changes
+- Maintain existing behavior during refactoring
+- Update tests to reflect refactoring
+- Document significant refactoring decisions
+- Consider impact on dependent code
+
+## Scope
+
+This rule applies to all code modifications in the ZIO Raft project, including:
+- Core Raft implementation
+- Storage implementations
+- Tests and test utilities
+- Build configuration
+- Documentation
+- Generated code

@@ -1,0 +1,128 @@
+---
+title: Rule Management Standards
+description: Standards for creating and managing rules in the ZIO Raft project
+author: Unit Engineering
+date: 2024-03-21
+status: experimental
+metrics:
+  implementations: 0
+  successful_reviews: 0
+  last_updated: 2024-03-21
+rating_thresholds:
+  beta:
+    min_implementations: 5
+    min_success_rate: 0.9
+  stable:
+    min_implementations: 15
+    min_projects: 3
+---
+
+# Rule Management Standards
+
+## Rating System
+
+The rule's status is automatically managed by Cursor based on usage metrics:
+
+- 🔴 **experimental** (default): New pattern, limited validation
+- 🟡 **beta**: Current status - validated but needs monitoring
+- 🟢 **stable**: Well-established and safe for widespread use
+
+Status upgrades happen automatically when:
+- **experimental → beta**: 5+ implementations with 90%+ success rate
+- **beta → stable**: 15+ implementations across 3+ different projects
+
+## Core Standards
+
+### 1. Rule Structure (Rating: 3)
+- All rules must be MDC files with `.mdc` extension
+- Rules must be stored in `.cursor/rules` directory
+- Each rule must have:
+  - Title and description
+  - Author and date
+  - Status and metrics
+  - Rating thresholds
+  - Core standards with ratings
+  - Usage tracking section
+  - Scope definition
+
+### 2. Rating System (Rating: 3)
+- Ratings must be on a scale of 1-5:
+  - 1: Basic/Trivial
+  - 2: Standard/Common
+  - 3: Advanced/Complex
+  - 4: Expert/Specialized
+  - 5: Master/Architectural
+- Each standard must have an explicit rating
+- Ratings should reflect complexity and importance
+- Higher ratings require more validation
+
+### 3. Rule Progression (Rating: 2)
+- Rules start as experimental
+- Progress to beta after:
+  - 5+ successful implementations
+  - 90%+ success rate
+- Progress to stable after:
+  - 15+ successful implementations
+  - Used in 3+ different projects
+- Rules can be downgraded if issues are found
+
+### 4. Rule Communication (Rating: 2)
+- AI must explicitly inform when using a rule
+- Explain which specific standard is being followed
+- Provide context for rule application
+- Allow for user feedback on rule application
+- Document rule usage in tracking comments
+
+### 5. Rule Maintenance (Rating: 2)
+- Keep rules up to date with project changes
+- Review and update rules periodically
+- Document rule changes
+- Consider rule dependencies
+- Maintain rule consistency
+
+## Rule Usage Tracking
+
+The rule metrics are automatically updated through Cursor's rule engine:
+
+1. **Detection**:
+   - Cursor monitors when this rule is used in code files
+   - Detection happens when Cursor assists in implementing code changes
+   - The tracking comment is automatically inserted:
+     ```scala
+     // Implements rule: rule_management_standards
+     // Implementation #X (auto-updated by Cursor)
+     ```
+
+2. **Validation**:
+   After each rule implementation, Cursor will:
+   - Ask the engineer to confirm if the implementation is correct
+   - Request permission to update rule metrics
+   - Only record success if explicitly confirmed by the engineer
+   - Skip metric updates if the engineer indicates issues
+
+3. **Automatic Updates**:
+   When engineer confirms successful implementation:
+   - `implementations` count increases
+   - `successful_reviews` updates based on engineer confirmation
+   - `last_updated` reflects confirmation timestamp
+   - Status may upgrade based on thresholds
+
+4. **Project Tracking**:
+   - Cursor tracks rule usage across different modules/projects
+   - This affects progression to "stable" status
+   - Projects are identified by directory structure
+
+5. **Manual Override**:
+   - Users can flag incorrect implementations
+   - Rule maintainers can adjust metrics if needed
+   - Downgrade of status possible if issues found
+
+## Scope
+
+This rule applies to all rule management in the ZIO Raft project, including:
+- Rule creation and modification
+- Rule structure and format
+- Rating system implementation
+- Rule progression tracking
+- Rule communication
+- Rule maintenance

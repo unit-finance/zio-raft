@@ -1,0 +1,54 @@
+---
+title: Tool Usage Guidelines
+description: Standards for using Cursor tools in the ZIO Raft project
+author: Unit Engineering
+date: 2024-03-21
+status: experimental
+metrics:
+  implementations: 0
+  successful_reviews: 0
+  last_updated: 2024-03-21
+rating_thresholds:
+  beta:
+    min_implementations: 5
+    min_success_rate: 0.9
+  stable:
+    min_implementations: 15
+    min_projects: 3
+---
+
+# Tool Usage Guidelines
+
+This rule follows the structure and progression defined in `rule_management_standards.mdc`.
+
+## Core Standards
+
+### 1. Tool Selection (Rating: 2)
+- Choose appropriate tools for each task
+- Use tools only when necessary
+- Consider tool limitations and capabilities
+- Prefer simpler tools over complex ones
+- Document tool selection rationale
+
+### 2. Tool Execution (Rating: 2)
+- Handle background processes appropriately
+- Append `| cat` to commands that might use a pager
+- Maintain proper shell state between commands
+- Handle errors gracefully
+- Clean up resources after use
+
+### 3. Tool Output (Rating: 2)
+- Format tool output consistently
+- Handle long-running processes appropriately
+- Provide clear progress indicators
+- Log important operations
+- Handle sensitive information securely
+
+## Scope
+
+This rule applies to all tool usage in the ZIO Raft project, including:
+- Development tools
+- Build tools
+- Testing tools
+- Documentation tools
+- Code generation tools

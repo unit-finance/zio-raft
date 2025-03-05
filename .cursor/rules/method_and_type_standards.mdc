@@ -1,0 +1,54 @@
+---
+title: Method and Type Standards
+description: Standards for method signatures and type safety in the ZIO Raft project
+author: Unit Engineering
+date: 2024-03-21
+status: experimental
+metrics:
+  implementations: 0
+  successful_reviews: 0
+  last_updated: 2024-03-21
+rating_thresholds:
+  beta:
+    min_implementations: 5
+    min_success_rate: 0.9
+  stable:
+    min_implementations: 15
+    min_projects: 3
+---
+
+# Method and Type Standards
+
+This rule follows the structure and progression defined in `rule_management_standards.mdc`.
+
+## Core Standards
+
+### 1. Method Signatures (Rating: 3)
+- All methods must have explicit return types
+- No type inference for method returns
+- Use descriptive parameter names
+- Include type parameters where applicable
+- Document complex parameter types
+
+### 2. Type Safety (Rating: 3)
+- Use specific types over generic types when possible
+- Avoid type casting unless absolutely necessary
+- Leverage Scala's type system for safety
+- Use sealed traits for type hierarchies
+- Implement proper type bounds
+
+### 3. Method Design (Rating: 2)
+- Keep methods focused and single-purpose
+- Use meaningful return types
+- Handle errors explicitly
+- Consider using ZIO for effectful operations
+- Follow functional programming principles
+
+## Scope
+
+This rule applies to all method and type definitions in the ZIO Raft project, including:
+- Core Raft implementation
+- Storage implementations
+- Tests and test utilities
+- Build configuration
+- Documentation

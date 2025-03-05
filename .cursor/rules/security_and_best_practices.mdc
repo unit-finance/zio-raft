@@ -1,0 +1,58 @@
+---
+title: Security and Best Practices
+description: Standards for security and best practices in the ZIO Raft project
+author: Unit Engineering
+date: 2024-03-21
+status: experimental
+metrics:
+  implementations: 0
+  successful_reviews: 0
+  last_updated: 2024-03-21
+rating_thresholds:
+  beta:
+    min_implementations: 5
+    min_success_rate: 0.9
+  stable:
+    min_implementations: 15
+    min_projects: 3
+---
+
+# Security and Best Practices
+
+This rule follows the structure and progression defined in `rule_management_standards.mdc`.
+
+## Core Standards
+
+### 1. Security Practices (Rating: 3)
+- Handle API keys securely
+- Never commit sensitive information
+- Use environment variables for secrets
+- Implement proper access controls
+- Follow security best practices
+
+### 2. File Operations (Rating: 2)
+- Use relative paths in workspace
+- Respect file permissions
+- Handle file operations safely
+- Clean up temporary files
+- Validate file paths
+
+### 3. Error Handling (Rating: 3)
+- Handle errors explicitly
+- Provide meaningful error messages
+- Log errors appropriately
+- Implement proper recovery mechanisms
+- Consider security implications of errors
+
+## Scope
+
+This rule applies to all security and best practices in the ZIO Raft project, including:
+- Core Raft implementation
+- Storage implementations
+- Tests and test utilities
+- Build configuration
+- Documentation
+- Generated code
+- Development tools
+- Build tools
+- Testing tools

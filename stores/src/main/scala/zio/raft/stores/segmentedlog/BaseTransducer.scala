@@ -16,7 +16,7 @@ import scodec.codecs.{bits}
 import zio.raft.Index
 
 class BaseTransducer(ref: Ref[BaseTransducer.State], validateChecksum: Boolean): 
-  def apply(chunk: Option[Chunk[Byte]]) =
+  def apply(chunk: Option[Chunk[Byte]]): ZIO[Any, Throwable, Chunk[Result]] =
     ref.get.flatMap { state =>
       chunk match
         case None => ZIO.succeed(Chunk.empty) // TODO: do we allow remainder to be non-empty?
@@ -171,7 +171,7 @@ object BaseTransducer:
       crcBuilder: CrcBuilder[BitVector]
   ) extends State
 
-  def make[A](firstIndex: Index, validateChecksum: Boolean) =
+  def make[A](firstIndex: Index, validateChecksum: Boolean): ZPipeline[Any, Throwable, Byte, Result] =
     ZPipeline.fromPush(
       Ref
         .make[State](ReadFileHeader(firstIndex, BitVector.empty))

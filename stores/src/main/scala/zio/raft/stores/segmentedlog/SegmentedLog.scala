@@ -7,6 +7,7 @@ import zio.{UIO, ZIO}
 import zio.raft.stores.segmentedlog.SegmentMetadataDatabase.{SegmentMetadata, SegmentStatus}
 import scodec.Codec
 import zio.Scope
+import zio.lmdb.Environment
 
 class SegmentedLog[A <: Command: Codec](
     logDirectory: String,
@@ -233,7 +234,7 @@ object SegmentedLog:
   // Using 100mb is the default, this might be too big. However, a smaller size will cause more files to be created
   // because we are saving 6 months back, this can be more files than the OS can handle.
   // We should probably not save 6 months back, and archive tasks using other methods to allow restore
-  def make[A <: Command: Codec](logDirectory: String, maxLogFileSize: Long = 1024 * 1024 * 100 /*100 MB*/ ) =
+  def make[A <: Command: Codec](logDirectory: String, maxLogFileSize: Long = 1024 * 1024 * 100 /*100 MB*/ ): ZIO[Environment & Scope, Nothing, SegmentedLog[A]] =
     for {
       database <- SegmentMetadataDatabase.make
       segments <- database.getAll

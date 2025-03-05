@@ -83,37 +83,84 @@ object SegmentedLogSpec extends ZIOSpecDefault:
           term <- log.logTerm(Index(2))
         yield assertTrue(term.get == Term(10))
 
-      test("handles segment rollover correctly"):
+    test("handles segment rollover correctly"):
+      for
+        logDirectory <- tempDirectory
+        // Set a small max size to force segment rollover
+        log <- SegmentedLog.make[TestCommand](logDirectory.toString(), maxLogFileSize = 100)
+        
+        // Create entries that will exceed the max size
+        commands <- Gen.listOfBounded(5, 10)(TestCommand.generator).runHead.someOrFail(new Exception("No commands"))
+        entries = commands.zipWithIndex.map((command, index) =>
+          LogEntry[TestCommand](command, Term.one, Index(index.toLong + 1))
+        )
+        
+        // Store entries which should trigger segment rollover
+        _ <- log.storeLogs(entries)
+        
+        // Verify we can read all entries back
+        result <- log.stream(Index.one, Index(entries.size.toLong)).runCollect
+        
+        // Verify last index and term are correct
+        lastIndex <- log.lastIndex
+        lastTerm <- log.lastTerm
+        
+        // Verify we can read entries from different parts of the log
+        firstHalf <- log.getLogs(Index.one, Index(entries.size.toLong / 2))
+        secondHalf <- log.getLogs(Index(entries.size.toLong / 2 + 1), Index(entries.size.toLong))
+      yield assertTrue(
+        entries == result.toList, // All entries are accessible
+        lastIndex == Index(entries.size.toLong), // Last index is correct
+        lastTerm == Term.one, // Last term is correct (should be constant)
+        firstHalf.isDefined && secondHalf.isDefined, // Can read from different parts
+        firstHalf.get.size + secondHalf.get.size == entries.size // All entries are accessible in parts
+      )
+
+    suiteAll("recovery tests"):
+      test("recovers from basic crash"):
         for
           logDirectory <- tempDirectory
-          // Set a small max size to force segment rollover
           log <- SegmentedLog.make[TestCommand](logDirectory.toString(), maxLogFileSize = 100)
-          
-          // Create entries that will exceed the max size
           commands <- Gen.listOfBounded(5, 10)(TestCommand.generator).runHead.someOrFail(new Exception("No commands"))
           entries = commands.zipWithIndex.map((command, index) =>
             LogEntry[TestCommand](command, Term.one, Index(index.toLong + 1))
           )
-          
-          // Store entries which should trigger segment rollover
           _ <- log.storeLogs(entries)
+          recoveredLog <- SegmentedLog.make[TestCommand](logDirectory.toString(), maxLogFileSize = 100)
+          recoveredLastIndex <- recoveredLog.lastIndex
+          recoveredLastTerm <- recoveredLog.lastTerm
+          recoveredEntries <- recoveredLog.stream(Index.one, Index(entries.size.toLong)).runCollect
           
-          // Verify we can read all entries back
-          result <- log.stream(Index.one, Index(entries.size.toLong)).runCollect
-          
-          // Verify last index and term are correct
-          lastIndex <- log.lastIndex
-          lastTerm <- log.lastTerm
-          
-          // Verify we can read entries from different parts of the log
-          firstHalf <- log.getLogs(Index.one, Index(entries.size.toLong / 2))
-          secondHalf <- log.getLogs(Index(entries.size.toLong / 2 + 1), Index(entries.size.toLong))
+          // Verify we can read entries from different parts of the recovered log
+          recoveredFirstHalf <- recoveredLog.getLogs(Index.one, Index(entries.size.toLong / 2))
+          recoveredSecondHalf <- recoveredLog.getLogs(Index(entries.size.toLong / 2 + 1), Index(entries.size.toLong))
         yield assertTrue(
-          entries == result.toList, // All entries are accessible
-          lastIndex == Index(entries.size.toLong), // Last index is correct
-          lastTerm == Term.one, // Last term is correct (should be constant)
-          firstHalf.isDefined && secondHalf.isDefined, // Can read from different parts
-          firstHalf.get.size + secondHalf.get.size == entries.size // All entries are accessible in parts
+          recoveredLastIndex == Index(entries.size.toLong),
+          recoveredLastTerm == Term.one,
+          entries == recoveredEntries.toList,
+          recoveredFirstHalf.isDefined && recoveredSecondHalf.isDefined, // Can read from different parts
+          recoveredFirstHalf.get.size + recoveredSecondHalf.get.size == entries.size // All entries are accessible in parts
+        )
+
+      test("recovers with different segment sizes"):
+        for
+          logDirectory <- tempDirectory
+          // Create log with small segment size
+          log <- SegmentedLog.make[TestCommand](logDirectory.toString(), maxLogFileSize = 100)
+          commands <- Gen.listOfBounded(5, 10)(TestCommand.generator).runHead.someOrFail(new Exception("No commands"))
+          entries = commands.zipWithIndex.map((command, index) =>
+            LogEntry[TestCommand](command, Term.one, Index(index.toLong + 1))
+          )
+          _ <- log.storeLogs(entries)
+          // Recover with larger segment size
+          recoveredLog <- SegmentedLog.make[TestCommand](logDirectory.toString(), maxLogFileSize = 1000)
+          recoveredLastIndex <- recoveredLog.lastIndex
+          recoveredLastTerm <- recoveredLog.lastTerm
+          recoveredEntries <- recoveredLog.stream(Index.one, Index(entries.size.toLong)).runCollect
+        yield assertTrue(
+          recoveredLastIndex == Index(entries.size.toLong),
+          recoveredLastTerm == Term.one,
+          entries == recoveredEntries.toList
         )
 
     // tests:

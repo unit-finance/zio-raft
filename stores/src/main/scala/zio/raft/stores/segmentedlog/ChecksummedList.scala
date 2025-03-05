@@ -17,9 +17,9 @@ import zio.raft.stores.segmentedlog.internal.{entrySizeCodec, isEntryCodec}
 class ChecksummedList[A](codec: Codec[A])
     extends Codec[List[A]]:
 
-    def sizeBound = SizeBound.unknown
+    def sizeBound: SizeBound = SizeBound.unknown
     
-    def encode(list: List[A]) =
+    def encode(list: List[A]): Attempt[BitVector] =
       val checksumBuilder = crc32Builder
       val buf = new collection.mutable.ArrayBuffer[BitVector](list.size + 1)
       var failure: Err | Null = null
@@ -50,14 +50,14 @@ class ChecksummedList[A](codec: Codec[A])
           case 1 => buf(offset)
           case _ =>
             val half = size / 2
-            merge(offset, half) ++ merge(offset + half, half + (if size % 2 == 0 then 0 else 1))
+            merge(offset, half) ++ merge(offset + half, half + (if size % 2 == 0 then 0 else 1)) // TODO (eran): look into this merge function a bit more, need to better undertand this
         Attempt.successful(merge(0, buf.size))
       else
         Attempt.failure(
           failure.nn
         )
 
-    def decode(buffer: BitVector) = collect(buffer)
+    def decode(buffer: BitVector): Attempt[DecodeResult[List[A]]] = collect(buffer)
 
     private def entryDecoder = 
         entrySizeCodec.flatZip(size => peek(bits(size / 8))).flatMap((size, bits) => fixedSizeBytes(size, codec).map(a => (bits, a))) 

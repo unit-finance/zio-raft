@@ -1,7 +1,20 @@
 ---
+title: Core Communication Standards
 description: Basic interaction rules for communication in the ZIO Raft project
-globs: 
-alwaysApply: false
+author: Unit Engineering
+date: 2024-03-21
+status: experimental
+metrics:
+  implementations: 0
+  successful_reviews: 0
+  last_updated: 2024-03-21
+rating_thresholds:
+  beta:
+    min_implementations: 5
+    min_success_rate: 0.9
+  stable:
+    min_implementations: 15
+    min_projects: 3
 ---
 
 # Core Communication Standards
@@ -33,4 +46,4 @@ This rule applies to all communication aspects in the ZIO Raft project, includin
 - Documentation
 - Issue discussions
 - Pull request comments
-- Team communications 
+- Team communications

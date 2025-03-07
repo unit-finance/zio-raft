@@ -6,7 +6,7 @@ alwaysApply: false
 
 # Core Communication Standards
 
-This rule follows the structure and progression defined in `rule_management_standards.mdc`.
+This rule follows the structure and progression defined in `rule_management_standards.mdc`, make sure you include this rule in your context as well.
 
 ## Core Standards
 

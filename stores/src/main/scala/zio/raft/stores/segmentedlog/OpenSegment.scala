@@ -173,7 +173,7 @@ object OpenSegment:
       fileName: String,
       firstIndex: Index,
       previousTerm: Term
-  ) =
+  ): ZIO[Any, Nothing, ZIO[Scope, Nothing, OpenSegment[A]]] =
     val fullPath = Path(logDirectory, fileName)
 
     for {

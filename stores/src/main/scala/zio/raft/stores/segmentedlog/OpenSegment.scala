@@ -40,11 +40,7 @@ class OpenSegment[A <: Command: Codec](
         .drop((index.value - firstIndex.value).toInt)
         .via(decode)
         .runHead
-        .someOrFail(
-          new IllegalStateException("Index not found")
-        ) // TODO (eran): does this make sense? shouldn't it be none? or at least not use orDie?
         .orDie
-        .asSome
     else ZIO.none
 
   def getLastTermIndex[A <: Command: Codec]: ZIO[Any, Nothing, (Term, Index)] =

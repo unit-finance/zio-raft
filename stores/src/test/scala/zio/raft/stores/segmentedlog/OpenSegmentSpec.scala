@@ -199,8 +199,6 @@ object OpenSegmentSpec extends ZIOSpecDefault:
           recoveredEntries.headOption.exists(_.command.value == "batch1")
         )
 
-
-      // TODO (eran): this test fails because getEntry fail on  NotFound, TBD I think it should return None instead
       test("can recover when invalid last checksum with no previous checksum available"):
         for
           tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
@@ -217,7 +215,7 @@ object OpenSegmentSpec extends ZIOSpecDefault:
           recoveredSegment <- OpenSegment.openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
           _ <- recoveredSegment.recoverFromCrash
           fileSizeAfterRecover <- recoveredSegment.size
-          recoveredEntries <- recoveredSegment.getEntry(Index.one) // TODO (eran): we can change to getEntries but first I'd like to see if we want to return None instead
+          recoveredEntries <- recoveredSegment.getEntry(Index.one)
         yield assertTrue(
           fileSizeAfterRecover == BaseTransducer.headerSize,
           recoveredEntries.isEmpty
@@ -228,7 +226,11 @@ object OpenSegmentSpec extends ZIOSpecDefault:
         for
           tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
           segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          _ <- segment.flatMap(_.writeEntries(List(LogEntry[TestCommand](TestCommand("test"), Term.one, Index.one))))
+          _ <- segment.flatMap(_.writeEntries(List(LogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))))
+          entries2Size <- segment.flatMap(
+            _.writeEntries(List(LogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne)))
+          )
+
           fileSizeBeforeRecover <- segment.flatMap(_.size)
           _ <- segment.flatMap(_.close())
           
@@ -241,8 +243,9 @@ object OpenSegmentSpec extends ZIOSpecDefault:
           fileSizeAfterRecover <- recoveredSegment.size
           recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one)
         yield assertTrue(
-          fileSizeAfterRecover == BaseTransducer.headerSize,
-          recoveredEntries.isEmpty
+          fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
+          recoveredEntries.size == 1,
+          recoveredEntries.headOption.exists(_.command.value == "batch1")
         )
 
 end OpenSegmentSpec

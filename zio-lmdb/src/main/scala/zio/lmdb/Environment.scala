@@ -13,17 +13,23 @@ trait Environment:
     ZIO.attemptBlocking(env.openDbi(name, flags*)).map(new Database(_))
 
   def transact[R] = Environment.Transact[R](env)
-  
+
   def transactReadOnly[R] = Environment.TransactReadOnly[R](env)
-    
+
 object Environment:
   def builder = Builder()
 
-  def test = 
+  def test =
     ZLayer.scoped:
-      for 
+      for
         path <- zio.nio.file.Files.createTempFileScoped("db")
-        env <- Builder().withFlags(org.lmdbjava.EnvFlags.MDB_NOSUBDIR, org.lmdbjava.EnvFlags.MDB_NOSYNC, org.lmdbjava.EnvFlags.MDB_NOLOCK).build(path.toFile)
+        env <- Builder()
+          .withFlags(
+            org.lmdbjava.EnvFlags.MDB_NOSUBDIR,
+            org.lmdbjava.EnvFlags.MDB_NOSYNC,
+            org.lmdbjava.EnvFlags.MDB_NOLOCK
+          )
+          .build(path.toFile)
       yield env
 
   def transact[R] = TransactPartiallyApplied[R]()
@@ -84,7 +90,7 @@ object Environment:
   final class TransactPartiallyApplied[R](private val dummy: Boolean = true) extends AnyVal:
     def apply[E, A](zio: => ZIO[TransactionScope & R, E, A]): ZIO[Environment & R, E, A] =
       ZIO.service[Environment].flatMap(_.transact(zio))
-  
+
   final class TransactReadOnlyPartiallyApplied[R](private val dummy: Boolean = true) extends AnyVal:
     def apply[E, A](zio: => ZIO[TransactionScope & R, E, A]): ZIO[Environment & R, E, A] =
       ZIO.service[Environment].flatMap(_.transactReadOnly(zio))

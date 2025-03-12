@@ -8,13 +8,13 @@ trait LogStore[A <: Command]:
   def lastIndex: UIO[Index] // TODO: cache
   def lastTerm: UIO[Term] // TODO: cache
 
-  def logTerm(index: Index) : UIO[Option[Term]] 
+  def logTerm(index: Index): UIO[Option[Term]]
 
   // Should return None if the firstEntry on the store is greater than from
   def getLogs(from: Index, toInclusive: Index): UIO[Option[List[LogEntry[A]]]]
 
   // Should Die if the firstEntry on the store is greater than from
-  def stream(fromInclusive: Index, toInclusive:Index): ZStream[Any, Nothing, LogEntry[A]] 
+  def stream(fromInclusive: Index, toInclusive: Index): ZStream[Any, Nothing, LogEntry[A]]
 
   def storeLog(logEntry: LogEntry[A]): UIO[Unit]
   def storeLogs(entries: List[LogEntry[A]]): UIO[Unit]
@@ -42,7 +42,7 @@ object LogStore:
 
   class InMemoryLogStore[A <: Command](
       logs: Ref[List[LogEntry[A]]]
-  ) extends LogStore[A]:    
+  ) extends LogStore[A]:
 
     override def discardLogUpTo(index: Index): UIO[Unit] =
       logs.update(_.filter(e => e.index >= index))
@@ -52,10 +52,10 @@ object LogStore:
 
     override def lastIndex = logs.get.map(_.headOption.map(_.index).getOrElse(Index.zero))
     override def lastTerm = logs.get.map(_.headOption.map(_.term).getOrElse(Term.zero))
-    
+
     private def getLog(index: Index) = logs.get.map(_.find(_.index == index))
 
-    override def logTerm(index: Index) : UIO[Option[Term]] =
+    override def logTerm(index: Index): UIO[Option[Term]] =
       if index.isZero then ZIO.some(Term.zero)
       else getLog(index).map(_.map(_.term))
 
@@ -69,9 +69,11 @@ object LogStore:
           case _ => logs.get.map(_.filter(e => e.index >= from && e.index <= toInclusive).reverse).asSome
       yield result
 
-    override def stream(fromInclusive: Index, toInclusive: Index) = ZStream.fromZIO(getLogs(fromInclusive, toInclusive)).flatMap:
-      case None => ZStream.die(new Throwable("No logs found"))
-      case Some(value) => ZStream.fromIterable(value)
+    override def stream(fromInclusive: Index, toInclusive: Index) = ZStream
+      .fromZIO(getLogs(fromInclusive, toInclusive))
+      .flatMap:
+        case None        => ZStream.die(new Throwable("No logs found"))
+        case Some(value) => ZStream.fromIterable(value)
 
     override def storeLog(logEntry: LogEntry[A]) =
       logs.update(logEntry :: _)

@@ -36,7 +36,7 @@ object Index:
     Index(m)
   def max(a: Index, b: Index) =
     val m = Math.max(a.value, b.value)
-    Index(m)  
+    Index(m)
 
 case class MemberId(value: String)
 type Peers = Array[MemberId]

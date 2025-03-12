@@ -14,7 +14,6 @@ import zio.raft.Term
 import scodec.bits.crc.crc32Builder
 import zio.raft.stores.segmentedlog.BaseTransducer.Result
 
-
 class OpenSegment[A <: Command: Codec](
     val path: Path,
     channel: AsynchronousFileChannel,
@@ -41,31 +40,36 @@ class OpenSegment[A <: Command: Codec](
         .drop((index.value - firstIndex.value).toInt)
         .via(decode)
         .runHead
-        .someOrFail(new IllegalStateException("Index not found")) // TODO (eran): does this make sense? shouldn't it be none? or at least not use orDie?
+        .someOrFail(
+          new IllegalStateException("Index not found")
+        ) // TODO (eran): does this make sense? shouldn't it be none? or at least not use orDie?
         .orDie
         .asSome
     else ZIO.none
 
   def getLastTermIndex[A <: Command: Codec]: ZIO[Any, Nothing, (Term, Index)] =
     for {
-      last <- makeStream(channel).via(recordsOnly).run(lastAndDecode).orDie // TODO (eran): we keep calling makeStream over and over, should we store the stream?
+      last <- makeStream(channel)
+        .via(recordsOnly)
+        .run(lastAndDecode)
+        .orDie // TODO (eran): we keep calling makeStream over and over, should we store the stream?
     } yield last match
       case None    => (previousTerm, firstIndex.minusOne)
       case Some(e) => (e.term, e.index)
 
-  def writeEntry(entry: LogEntry[A]): ZIO[Any, Nothing, Unit] = writeEntries(List(entry))
+  def writeEntry(entry: LogEntry[A]): ZIO[Any, Nothing, Int] = writeEntries(List(entry))
 
   // Write entries write all of the entries, regardless if the segment size will be exceeded
   // segment size is just a recommendation at this moment.
   // TODO: we should only write entries that will fit in the segment and return the rest to be written in the next segment
-  def writeEntries(entries: List[LogEntry[A]]): ZIO[Any, Nothing, Unit] =
+  def writeEntries(entries: List[LogEntry[A]]): ZIO[Any, Nothing, Int] =
     for {
       bytes <- ZIO.attempt(entriesCodec.encode(entries).require.toByteVector).orDie
       position <- positionRef.get
       written <- channel.write(bytes, position).orDie
       _ <- channel.force(true).orDie
       _ <- positionRef.update(_ + written)
-    } yield ()
+    } yield written
 
   def deleteFrom(minInclusive: Index): ZIO[Any, Nothing, Unit] =
     for
@@ -82,15 +86,18 @@ class OpenSegment[A <: Command: Codec](
             .map(_.offset)
 
       // we need to calculate the checksum of the records that will remain after
-      maybeChecksum <- makeStream(channel).takeWhile(r => r.offset < offset).runFold(None) ((maybeCrc, record) => 
-        record match
-          case Result.Record(offset, index, payload) => Some(maybeCrc.getOrElse(crc32Builder).updated(payload))
-          case Result.Checksum(offset, matched) => None
-      ).orDie
+      maybeChecksum <- makeStream(channel)
+        .takeWhile(r => r.offset < offset)
+        .runFold(None)((maybeCrc, record) =>
+          record match
+            case Result.Record(offset, index, payload) => Some(maybeCrc.getOrElse(crc32Builder).updated(payload))
+            case Result.Checksum(offset, matched)      => None
+        )
+        .orDie
 
       _ <- maybeChecksum match
         // offset happen to be after a checksum or header
-        case None => 
+        case None =>
           for
             _ <- channel.truncate(offset).orDie
             _ <- channel.force(true).orDie
@@ -103,17 +110,21 @@ class OpenSegment[A <: Command: Codec](
           val checksumBytes = (isEntryCodec.encode(false).require ++ crc.result).toByteVector
           for
             _ <- channel.write(checksumBytes, offset).orDie
-            _ <- channel.truncate(offset + checksumBytes.length).orDie            
+            _ <- channel.truncate(offset + checksumBytes.length).orDie
             _ <- channel.force(true).orDie
             _ <- positionRef.set(offset + checksumBytes.length)
-          yield ()          
+          yield ()
     yield ()
 
   def recoverFromCrash: ZIO[Any, Nothing, Unit] =
     for
-      lastChecksum <- makeStream(channel, validateChecksum = true) // TODO (eran): we don't need to validate checksum here, we can grab the last one and only validate it, this will be more efficient
+      lastChecksum <- makeStream(
+        channel,
+        validateChecksum = true
+      ) // TODO (eran): we don't need to validate checksum here, we can grab the last one and only validate it, this will be more efficient
         .collect:
-          case c: BaseTransducer.Result.Checksum => c // TODO (eran): Do we want to optimize this by allowing the transducer to skip body decoding?
+          case c: BaseTransducer.Result.Checksum =>
+            c // TODO (eran): Do we want to optimize this by allowing the transducer to skip body decoding?
         .runLast
         .orDie
 
@@ -130,7 +141,7 @@ class OpenSegment[A <: Command: Codec](
             _ <- positionRef.set(BaseTransducer.headerSize)
           yield ()
         case Some(BaseTransducer.Result.Checksum(offset, true))
-            if currentFileSize == offset + BaseTransducer.isEntrySize + BaseTransducer.checksumSize =>  // TODO (eran): we want to verify that nothing was written after the checksum, why do we need isEntrySize?
+            if currentFileSize == offset + BaseTransducer.isEntrySize + BaseTransducer.checksumSize => // TODO (eran): we want to verify that nothing was written after the checksum, why do we need isEntrySize?
           ZIO.logInfo("SegementedLog: Checksum is valid - no recovery needed")
         case Some(BaseTransducer.Result.Checksum(offset, true)) =>
           ZIO.logWarning(
@@ -151,10 +162,10 @@ class OpenSegment[A <: Command: Codec](
               .orDie
 
             offset <- lastGoodChecksumOffset match
-              case None => 
+              case None =>
                 ZIO
-                .logInfo("SegementedLog: No valid checksum found - truncate to header")
-                .as(BaseTransducer.headerSize)
+                  .logInfo("SegementedLog: No valid checksum found - truncate to header")
+                  .as(BaseTransducer.headerSize)
               case Some(checksumOffset) =>
                 ZIO
                   .logInfo(s"SegementedLog: Truncate to last valid checksum at offset ${checksumOffset}")

@@ -1,0 +1,134 @@
+---
+description: For every discussion this pattern should be used
+globs: 
+alwaysApply: true
+---
+
+# Working Together: Core Interaction Pattern
+
+## Rating System
+
+The rule's status is automatically managed by Cursor based on usage metrics:
+
+- 🔴 **experimental** (default): New pattern, limited validation
+- 🟡 **beta**: Validated but needs monitoring
+- 🟢 **stable**: Well-established and safe for widespread use
+
+Status upgrades happen automatically when:
+- **experimental → beta**: 5+ implementations with 90%+ success rate
+- **beta → stable**: 15+ implementations across 3+ different projects
+
+The metrics in the frontmatter are automatically updated by Cursor when:
+1. A new implementation is detected (via the tracking comment)
+2. The implementation passes code review
+3. The implementation is merged to main
+
+Manual downgrades are possible by maintainers if issues are discovered.
+
+## Scope
+
+This rule applies to all interactions between users and AI assistants in Cursor, including:
+- Code modifications
+- Bug fixes
+- Feature implementations
+- Code reviews
+- Documentation updates
+
+## Context
+
+When working with an AI assistant on coding tasks, having a clear and consistent interaction pattern is crucial for effective collaboration. This pattern should ensure goal alignment, methodical progress, and quality outcomes.
+
+## Rule
+
+Every interaction between user and AI must follow this structured approach:
+
+### 1. Goal Alignment
+- The goal must be explicitly stated and verified
+- All proposed actions must be validated against this goal
+- Any deviation from the goal should be immediately identified and corrected
+
+### 2. Plan-First Approach
+Before making any changes:
+1. Assess current state (e.g., compile, run tests)
+2. Analyze issues and requirements
+3. Create a clear, structured plan
+4. Present plan for discussion and confirmation
+5. Only proceed after plan approval
+
+### 3. Scope Management
+- Stay focused on the confirmed goal
+- Additional suggestions should be:
+  - Documented separately
+  - Not mixed with current implementation
+  - Presented as future considerations
+- Avoid scope creep during implementation
+
+### 4. Verification-Driven Development
+- Start with verification of current state
+- Verify after each significant change
+- Include broader verification (e.g., test compilation) when appropriate
+- Use verification results to inform next steps
+
+### 5. Communication Standards
+For every change:
+- **Before**: Explain what will be done
+- **During**: Report significant findings
+- **After**: Summarize what was done
+- **Issues**: Present problems with proposed solutions
+
+### 6. Incremental Progress
+- Make small, verifiable changes
+- Track progress against the plan
+- Adjust approach based on findings
+- Maintain goal alignment throughout
+
+## Consequences
+
+### Positive Outcomes
+Following this pattern will:
+- Ensure consistent, goal-oriented progress
+- Prevent unnecessary work and scope creep
+- Maintain clear communication
+- Produce verifiable results
+- Enable effective collaboration
+
+### Negative Outcomes
+Not following this pattern may result in:
+- Misaligned efforts
+- Scope creep
+- Unclear communication
+- Inefficient use of resources
+- Reduced quality of outcomes
+
+## Compliance
+
+An interaction is compliant when:
+- Goal is explicitly stated and verified
+- Plan is created and confirmed before implementation
+- Changes are verified and aligned with goal
+- Communication follows the specified pattern
+- Progress is incremental and trackable
+
+## Examples
+
+### Compliant Interaction
+```
+User: I need to fix the compilation error in Node.scala
+AI: Let me help with that. First, let's verify the current state.
+[AI runs compilation]
+AI: I see the error. Before making changes, here's my plan:
+1. Analyze the error
+2. Identify the root cause
+3. Propose a fix
+4. Verify the fix
+Would you like me to proceed with this plan?
+User: Yes, please proceed.
+```
+
+### Non-Compliant Interaction
+```
+User: Fix the error in Node.scala
+AI: I'll fix it right away.
+[AI makes changes without verification or plan]
+AI: Done! I fixed the error.
+```

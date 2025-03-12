@@ -33,7 +33,7 @@ object SegmentedLogSpec extends ZIOSpecDefault:
 
     test("can write and read multiple entries"):
       check(Gen.listOfBounded(1, 1000)(TestCommand.generator)) { commands =>
-        (for          
+        (for
           logDirectory <- tempDirectory
           log <- SegmentedLog.make[TestCommand](logDirectory.toString(), maxLogFileSize = 1024)
           entries = commands.zipWithIndex.map((command, index) =>
@@ -88,23 +88,23 @@ object SegmentedLogSpec extends ZIOSpecDefault:
         logDirectory <- tempDirectory
         // Set a small max size to force segment rollover
         log <- SegmentedLog.make[TestCommand](logDirectory.toString(), maxLogFileSize = 100)
-        
+
         // Create entries that will exceed the max size
         commands <- Gen.listOfBounded(5, 10)(TestCommand.generator).runHead.someOrFail(new Exception("No commands"))
         entries = commands.zipWithIndex.map((command, index) =>
           LogEntry[TestCommand](command, Term.one, Index(index.toLong + 1))
         )
-        
+
         // Store entries which should trigger segment rollover
         _ <- log.storeLogs(entries)
-        
+
         // Verify we can read all entries back
         result <- log.stream(Index.one, Index(entries.size.toLong)).runCollect
-        
+
         // Verify last index and term are correct
         lastIndex <- log.lastIndex
         lastTerm <- log.lastTerm
-        
+
         // Verify we can read entries from different parts of the log
         firstHalf <- log.getLogs(Index.one, Index(entries.size.toLong / 2))
         secondHalf <- log.getLogs(Index(entries.size.toLong / 2 + 1), Index(entries.size.toLong))
@@ -130,7 +130,7 @@ object SegmentedLogSpec extends ZIOSpecDefault:
           recoveredLastIndex <- recoveredLog.lastIndex
           recoveredLastTerm <- recoveredLog.lastTerm
           recoveredEntries <- recoveredLog.stream(Index.one, Index(entries.size.toLong)).runCollect
-          
+
           // Verify we can read entries from different parts of the recovered log
           recoveredFirstHalf <- recoveredLog.getLogs(Index.one, Index(entries.size.toLong / 2))
           recoveredSecondHalf <- recoveredLog.getLogs(Index(entries.size.toLong / 2 + 1), Index(entries.size.toLong))

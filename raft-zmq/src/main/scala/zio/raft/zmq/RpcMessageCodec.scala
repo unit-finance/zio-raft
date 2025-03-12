@@ -9,7 +9,7 @@ import scodec.bits.ByteVector
 import scodec.codecs.{bool, bytes, discriminated, int32, int64, listOfN, optional, uint8, utf8_32, variableSizeBytes}
 
 object RpcMessageCodec:
-  def codec[A <: Command](using commandCodec: Codec[A]) : Codec[RPCMessage[A]] = discriminated[RPCMessage[A]]
+  def codec[A <: Command](using commandCodec: Codec[A]): Codec[RPCMessage[A]] = discriminated[RPCMessage[A]]
     .by(uint8)
     .typecase(0, heartbeatCodec[A])
     .typecase(1, heartbeatResponseCodec[A])

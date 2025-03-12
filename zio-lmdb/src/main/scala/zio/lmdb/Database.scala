@@ -33,10 +33,11 @@ class Database(dbi: Dbi[Array[Byte]]):
         ZStream.repeatZIOOption(
           ZIO.attemptBlocking(cursor.next()).catchAll {
             case _: ju.NoSuchElementException => ZIO.fail(None)
-            case t => ZIO.fail(Some(t))
+            case t                            => ZIO.fail(Some(t))
           }
         )
-      ).map(kv => kv.key() -> kv.`val`())
+      )
+      .map(kv => kv.key() -> kv.`val`())
 
 end Database
 

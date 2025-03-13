@@ -1,20 +1,7 @@
 ---
-title: Rule Management Standards
-description: Standards for creating and managing rules in the ZIO Raft project
-author: Unit Engineering
-date: 2024-03-21
-status: experimental
-metrics:
-  implementations: 0
-  successful_reviews: 0
-  last_updated: 2024-03-21
-rating_thresholds:
-  beta:
-    min_implementations: 5
-    min_success_rate: 0.9
-  stable:
-    min_implementations: 15
-    min_projects: 3
+description: Standards for creating and managing rules
+globs: 
+alwaysApply: false
 ---
 
 # Rule Management Standards

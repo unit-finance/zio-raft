@@ -1,7 +1,7 @@
 ---
 description: Standards for creating and managing rules
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 
 # Rule Management Standards

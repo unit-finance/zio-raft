@@ -221,7 +221,6 @@ object OpenSegmentSpec extends ZIOSpecDefault:
           recoveredEntries.isEmpty
         )
 
-      // TODO (eran): add more entries so we see it goes to the previous
       test("can recover when last checksum can't be decoded because of data corruption"):
         for
           tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)

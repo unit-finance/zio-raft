@@ -1,6 +1,5 @@
 package zio.raft.stores.segmentedlog
 
-import zio.test.*
 import zio.nio.file.Files
 import zio.nio.file.Path
 import zio.ZIO
@@ -12,6 +11,12 @@ import zio.raft.LogEntry
 import zio.nio.channels.AsynchronousFileChannel
 import java.nio.file.StandardOpenOption
 import zio.Chunk
+import zio.test.ZIOSpecDefault
+import zio.test.Gen
+import zio.test.Spec
+import zio.test.TestEnvironment
+import zio.test.check
+import zio.test.assertTrue
 
 object OpenSegmentSpec extends ZIOSpecDefault:
 
@@ -90,161 +95,284 @@ object OpenSegmentSpec extends ZIOSpecDefault:
     yield ()
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
-    suiteAll("recover from crash"):
-      test("can recover from crash when no crash"):
-        check(multipleBatchesGen)(batches =>
+    suite("OpenSegment"):
+      suite("writes") {
+        test("writeEntry correctly writes a single entry") {
           for
             tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
-            segment <- OpenSegment
-              .createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-            _ <- segment.flatMap(writeBatches(_, batches))
-            fileSizeBeforeRecover <- segment.flatMap(_.size)
-            _ <- segment.flatMap(_.recoverFromCrash)
-            fileSizeAfterRecover <- segment.flatMap(_.size)
+            segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            entry = LogEntry[TestCommand](TestCommand("test-entry"), Term.one, Index.one)
+            
+            // Write the entry
+            bytesWritten <- segment.flatMap(_.writeEntry(entry))
+            
+            // Read back the entry
+            readEntry <- segment.flatMap(_.getEntry(Index.one))
           yield assertTrue(
-            fileSizeBeforeRecover == fileSizeAfterRecover
-          ) // no recovery needed, so file size should be the same
-        )
-
-      test("can recover when file has only header"):
-        for
-          tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
-          segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          fileSizeBeforeRecover <- segment.flatMap(_.size)
-          _ <- segment.flatMap(_.close())
-
-          recoveredSegment <- OpenSegment
-            .openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          _ <- recoveredSegment.recoverFromCrash
-          fileSizeAfterRecover <- recoveredSegment.size
-        yield assertTrue(fileSizeBeforeRecover == fileSizeAfterRecover)
-
-      test("can recover when file has data but no checksum"):
-        for
-          // Create a new segment
-          tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
-          segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-
-          // Add entries to the segment - this also adds a checksum
-          entries = List(LogEntry[TestCommand](TestCommand("test"), Term.one, Index.one))
-          _ <- segment.flatMap(_.writeEntries(entries))
-          _ <- segment.flatMap(_.close())
-
-          // Get current file size and truncate to remove the checksum
-          _ <- truncateFileBySize(tempDirectory, "0.log", BaseTransducer.checksumSize)
-
-          // Open the existing segment and recover from crash
-          recoveredSegment <- OpenSegment
-            .openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          _ <- recoveredSegment.recoverFromCrash
-
-          // assert file only has header
-          fileSizeAfterRecover <- recoveredSegment.size
-        yield assertTrue(fileSizeAfterRecover == BaseTransducer.headerSize)
-
-      test("can recover when valid last checksum but data is written after it"):
-        for
-          tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
-          segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-
-          entries1 = List(LogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))
-          entries2 = List(LogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne))
-          _ <- segment.flatMap(_.writeEntries(entries1))
-          entries2Size <- segment.flatMap(_.writeEntries(entries2))
-
-          fileSizeBeforeRecover <- segment.flatMap(_.size)
-          _ <- segment.flatMap(_.close())
-
-          // Remove the last checksum so we have a valid checksum with some data after it
-          _ <- truncateFileBySize(tempDirectory, "0.log", BaseTransducer.checksumSize)
-
-          // Recover from crash
-          recoveredSegment <- OpenSegment
-            .openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          _ <- recoveredSegment.recoverFromCrash
-          fileSizeAfterRecover <- recoveredSegment.size
-          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one.plusOne)
-        yield assertTrue(
-          fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
-          recoveredEntries.size == 1,
-          recoveredEntries.headOption.exists(_.command.value == "batch1")
-        )
-
-      test("can recover when invalid last checksum with a previous valid checksum available"):
-        for
-          // Create a new segment
-          tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
-          segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-
-          // Add two batches of entries - this adds checksums after each batch
-          _ <- segment.flatMap(_.writeEntries(List(LogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))))
-          entries2Size <- segment.flatMap(
-            _.writeEntries(List(LogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne)))
+            bytesWritten > 0,
+            readEntry.isDefined,
+            readEntry.exists(e => 
+              e.command.value == "test-entry" && 
+              e.term == Term.one && 
+              e.index == Index.one
+            )
           )
-          fileSizeBeforeRecover <- segment.flatMap(_.size)
-          _ <- segment.flatMap(_.close())
+        } +
+        
+        test("writeEntries correctly writes multiple entries") {
+          for
+            tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
+            segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            entries = List(
+              LogEntry[TestCommand](TestCommand("entry1"), Term.one, Index.one),
+              LogEntry[TestCommand](TestCommand("entry2"), Term.one, Index.one.plusOne)
+            )
+            
+            // Write the entries
+            bytesWritten <- segment.flatMap(_.writeEntries(entries))
+            
+            // Read back the entries
+            readEntries <- segment.flatMap(getEntries(_, Index.one, Index.one.plusOne))
+          yield assertTrue(
+            bytesWritten > 0,
+            readEntries.size == 2,
+            readEntries(0).command.value == "entry1",
+            readEntries(1).command.value == "entry2"
+          )
+        } +
+        
+        test("positionRef is correctly updated after writing") {
+          for
+            tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
+            segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            initialPosition <- segment.flatMap(_.size)
+            entry = LogEntry[TestCommand](TestCommand("test-entry"), Term.one, Index.one)
+            
+            // Write the entry
+            bytesWritten <- segment.flatMap(_.writeEntry(entry))
+            
+            // Get the new position
+            newPosition <- segment.flatMap(_.size)
+          yield assertTrue(
+            initialPosition == BaseTransducer.headerSize, // Initial position should be the header size
+            newPosition == initialPosition + bytesWritten, // New position should be incremented by bytes written
+            bytesWritten > 0
+          )
+        } +
+        
+        test("multiple writes correctly append to the file") {
+          for
+            tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
+            segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            
+            // First write
+            entry1 = LogEntry[TestCommand](TestCommand("entry1"), Term.one, Index.one)
+            bytesWritten1 <- segment.flatMap(_.writeEntry(entry1))
+            positionAfterFirstWrite <- segment.flatMap(_.size)
+            
+            // Second write
+            entry2 = LogEntry[TestCommand](TestCommand("entry2"), Term.one, Index.one.plusOne)
+            bytesWritten2 <- segment.flatMap(_.writeEntry(entry2))
+            positionAfterSecondWrite <- segment.flatMap(_.size)
+            
+            // Read back both entries
+            readEntries <- segment.flatMap(getEntries(_, Index.one, Index.one.plusOne))
+          yield assertTrue(
+            positionAfterFirstWrite == BaseTransducer.headerSize + bytesWritten1,
+            positionAfterSecondWrite == positionAfterFirstWrite + bytesWritten2,
+            readEntries.size == 2,
+            readEntries(0).command.value == "entry1",
+            readEntries(1).command.value == "entry2"
+          )
+        } +
+        
+        test("entries written contain a valid checksum") {
+          for
+            tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
+            segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            entries = List(
+              LogEntry[TestCommand](TestCommand("entry1"), Term.one, Index.one),
+              LogEntry[TestCommand](TestCommand("entry2"), Term.one, Index.one.plusOne)
+            )
+            
+            // Write the entries
+            _ <- segment.flatMap(_.writeEntries(entries))
+            
+            // Close the segment
+            _ <- segment.flatMap(_.close())
+            
+            // Reopen the segment and recover from crash
+            reopenedSegment <- OpenSegment.openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            fileSizeBeforeRecover <- reopenedSegment.size
+            _ <- reopenedSegment.recoverFromCrash
+            fileSizeAfterRecover <- reopenedSegment.size
+            
+            // Read back the entries
+            readEntries <- getEntries(reopenedSegment, Index.one, Index.one.plusOne)
+          yield assertTrue(
+            fileSizeBeforeRecover == fileSizeAfterRecover, // No recovery needed, so file size should be the same
+            readEntries.size == 2,
+            readEntries(0).command.value == "entry1",
+            readEntries(1).command.value == "entry2"
+          )
+        }
+      } +
 
-          // Corrupt the last checksum
-          _ <- writeLastBytes(tempDirectory, "0.log", 5, Array[Byte](0xff.toByte, 0xff.toByte))
-
-          // Open the existing segment and recover from crash
-          recoveredSegment <- OpenSegment
-            .openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          _ <- recoveredSegment.recoverFromCrash
-          fileSizeAfterRecover <- recoveredSegment.size
-          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one.plusOne)
-        yield assertTrue(
-          fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
-          recoveredEntries.size == 1,
-          recoveredEntries.headOption.exists(_.command.value == "batch1")
-        )
-
-      test("can recover when invalid last checksum with no previous checksum available"):
-        for
-          tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
-          segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          entries = List(LogEntry[TestCommand](TestCommand("test"), Term.one, Index.one))
-          _ <- segment.flatMap(_.writeEntries(entries))
-          fileSizeBeforeRecover <- segment.flatMap(_.size)
-          _ <- segment.flatMap(_.close())
-          
-          // Corrupt the checksum
-          _ <- writeLastBytes(tempDirectory, "0.log", 5, Array[Byte](0xFF.toByte, 0xFF.toByte))
-          
-          // Open the existing segment and recover from crash
-          recoveredSegment <- OpenSegment.openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          _ <- recoveredSegment.recoverFromCrash
-          fileSizeAfterRecover <- recoveredSegment.size
-          recoveredEntries <- recoveredSegment.getEntry(Index.one)
-        yield assertTrue(
-          fileSizeAfterRecover == BaseTransducer.headerSize,
-          recoveredEntries.isEmpty
-        )
-
-      test("can recover when last checksum can't be decoded because of data corruption"):
-        for
-          tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
-          segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          _ <- segment.flatMap(_.writeEntries(List(LogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))))
-          entries2Size <- segment.flatMap(
-            _.writeEntries(List(LogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne)))
+      suite("recover from crash"):
+        test("can recover from crash when no crash"):
+          check(multipleBatchesGen)(batches =>
+            for
+              tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
+              segment <- OpenSegment
+                .createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+              _ <- segment.flatMap(writeBatches(_, batches))
+              fileSizeBeforeRecover <- segment.flatMap(_.size)
+              _ <- segment.flatMap(_.recoverFromCrash)
+              fileSizeAfterRecover <- segment.flatMap(_.size)
+            yield assertTrue(
+              fileSizeBeforeRecover == fileSizeAfterRecover
+            ) // no recovery needed, so file size should be the same
           )
 
-          fileSizeBeforeRecover <- segment.flatMap(_.size)
-          _ <- segment.flatMap(_.close())
-          
-          // Truncate half of the checksum to make it undecodable
-          _ <- truncateFileBySize(tempDirectory, "0.log", BaseTransducer.checksumSize / 2)
-          
-          // Open the existing segment and recover from crash
-          recoveredSegment <- OpenSegment.openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          _ <- recoveredSegment.recoverFromCrash
-          fileSizeAfterRecover <- recoveredSegment.size
-          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one)
-        yield assertTrue(
-          fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
-          recoveredEntries.size == 1,
-          recoveredEntries.headOption.exists(_.command.value == "batch1")
-        )
+        test("can recover when file has only header"):
+          for
+            tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
+            segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            fileSizeBeforeRecover <- segment.flatMap(_.size)
+            _ <- segment.flatMap(_.close())
 
+            recoveredSegment <- OpenSegment
+              .openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            _ <- recoveredSegment.recoverFromCrash
+            fileSizeAfterRecover <- recoveredSegment.size
+          yield assertTrue(fileSizeBeforeRecover == fileSizeAfterRecover)
+
+        test("can recover when file has data but no checksum"):
+          for
+            // Create a new segment
+            tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
+            segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+
+            // Add entries to the segment - this also adds a checksum
+            entries = List(LogEntry[TestCommand](TestCommand("test"), Term.one, Index.one))
+            _ <- segment.flatMap(_.writeEntries(entries))
+            _ <- segment.flatMap(_.close())
+
+            // Get current file size and truncate to remove the checksum
+            _ <- truncateFileBySize(tempDirectory, "0.log", BaseTransducer.checksumSize)
+
+            // Open the existing segment and recover from crash
+            recoveredSegment <- OpenSegment
+              .openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            _ <- recoveredSegment.recoverFromCrash
+
+            // assert file only has header
+            fileSizeAfterRecover <- recoveredSegment.size
+          yield assertTrue(fileSizeAfterRecover == BaseTransducer.headerSize)
+
+        test("can recover when valid last checksum but data is written after it"):
+          for
+            tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
+            segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+
+            entries1 = List(LogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))
+            entries2 = List(LogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne))
+            _ <- segment.flatMap(_.writeEntries(entries1))
+            entries2Size <- segment.flatMap(_.writeEntries(entries2))
+
+            fileSizeBeforeRecover <- segment.flatMap(_.size)
+            _ <- segment.flatMap(_.close())
+
+            // Remove the last checksum so we have a valid checksum with some data after it
+            _ <- truncateFileBySize(tempDirectory, "0.log", BaseTransducer.checksumSize)
+
+            // Recover from crash
+            recoveredSegment <- OpenSegment
+              .openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            _ <- recoveredSegment.recoverFromCrash
+            fileSizeAfterRecover <- recoveredSegment.size
+            recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one.plusOne)
+          yield assertTrue(
+            fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
+            recoveredEntries.size == 1,
+            recoveredEntries.headOption.exists(_.command.value == "batch1")
+          )
+
+        test("can recover when invalid last checksum with a previous valid checksum available"):
+          for
+            // Create a new segment
+            tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
+            segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+
+            // Add two batches of entries - this adds checksums after each batch
+            _ <- segment.flatMap(_.writeEntries(List(LogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))))
+            entries2Size <- segment.flatMap(
+              _.writeEntries(List(LogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne)))
+            )
+            fileSizeBeforeRecover <- segment.flatMap(_.size)
+            _ <- segment.flatMap(_.close())
+
+            // Corrupt the last checksum
+            _ <- writeLastBytes(tempDirectory, "0.log", 5, Array[Byte](0xff.toByte, 0xff.toByte))
+
+            // Open the existing segment and recover from crash
+            recoveredSegment <- OpenSegment
+              .openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            _ <- recoveredSegment.recoverFromCrash
+            fileSizeAfterRecover <- recoveredSegment.size
+            recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one.plusOne)
+          yield assertTrue(
+            fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
+            recoveredEntries.size == 1,
+            recoveredEntries.headOption.exists(_.command.value == "batch1")
+          )
+
+        test("can recover when invalid last checksum with no previous checksum available"):
+          for
+            tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
+            segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            entries = List(LogEntry[TestCommand](TestCommand("test"), Term.one, Index.one))
+            _ <- segment.flatMap(_.writeEntries(entries))
+            fileSizeBeforeRecover <- segment.flatMap(_.size)
+            _ <- segment.flatMap(_.close())
+            
+            // Corrupt the checksum
+            _ <- writeLastBytes(tempDirectory, "0.log", 5, Array[Byte](0xFF.toByte, 0xFF.toByte))
+            
+            // Open the existing segment and recover from crash
+            recoveredSegment <- OpenSegment.openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            _ <- recoveredSegment.recoverFromCrash
+            fileSizeAfterRecover <- recoveredSegment.size
+            recoveredEntries <- recoveredSegment.getEntry(Index.one)
+          yield assertTrue(
+            fileSizeAfterRecover == BaseTransducer.headerSize,
+            recoveredEntries.isEmpty
+          )
+
+        test("can recover when last checksum can't be decoded because of data corruption"):
+          for
+            tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
+            segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            _ <- segment.flatMap(_.writeEntries(List(LogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))))
+            entries2Size <- segment.flatMap(
+              _.writeEntries(List(LogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne)))
+            )
+
+            fileSizeBeforeRecover <- segment.flatMap(_.size)
+            _ <- segment.flatMap(_.close())
+            
+            // Truncate half of the checksum to make it undecodable
+            _ <- truncateFileBySize(tempDirectory, "0.log", BaseTransducer.checksumSize / 2)
+            
+            // Open the existing segment and recover from crash
+            recoveredSegment <- OpenSegment.openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+            _ <- recoveredSegment.recoverFromCrash
+            fileSizeAfterRecover <- recoveredSegment.size
+            recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one)
+          yield assertTrue(
+            fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
+            recoveredEntries.size == 1,
+            recoveredEntries.headOption.exists(_.command.value == "batch1")
+          )
+      }
 end OpenSegmentSpec

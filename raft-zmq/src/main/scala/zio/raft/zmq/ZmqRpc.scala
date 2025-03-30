@@ -97,7 +97,7 @@ class ZmqRpc[A <: Command: Codec](server: ZSocket, clients: Map[MemberId, ZSocke
       .catchAll(err => ZStream.die(err))
 
 object ZmqRpc:
-  def make[A <: Command : Codec](bindAddress: String, peers: Map[MemberId, String]) =
+  def make[A <: Command: Codec](bindAddress: String, peers: Map[MemberId, String]) =
     for
       clients <- ZIO.foreach(peers)((peerId, peerAddress) =>
         for

@@ -5,7 +5,7 @@ import zio.raft.zmq.ZmqRpc
 import zio.raft.{Command, Index, MemberId, Raft, SnapshotStore, StateMachine}
 import zio.stream.{Stream, ZStream}
 import zio.zmq.ZContext
-import zio.{Chunk, UIO, URIO, ZIO, ZIOAppArgs}
+import zio.{Chunk, UIO, URIO, ZIO, ZIOAppArgs, ZLayer}
 
 import scodec.Codec
 import scodec.bits.BitVector
@@ -27,9 +27,9 @@ object KVCommand:
   val getCodec = utf8_32.as[Get]
   val setCodec = (utf8_32 :: utf8_32).as[Set]
   given commandCodec: Codec[KVCommand] = discriminated[KVCommand]
-          .by(fixedSizeBytes(1, ascii))
-          .typecase("S", setCodec)
-          .typecase("G", getCodec)
+    .by(fixedSizeBytes(1, ascii))
+    .typecase("S", setCodec)
+    .typecase("G", getCodec)
 
 class KVStateMachine(map: Map[String, String]) extends StateMachine[KVCommand]:
 
@@ -79,14 +79,13 @@ object KVStoreApp extends zio.ZIOAppDefault:
   override def run =
     val program =
       for
-        _ <- ZIO.unit
         args <- ZIOAppArgs.getArgs
         memberId = MemberId(args(0))
         peers = Map(
           "peer1" -> "tcp://localhost:5555",
           "peer2" -> "tcp://localhost:5556",
           "peer3" -> "tcp://localhost:5557"
-        ).map((k, v) => MemberId(k) -> v)     
+        ).map((k, v) => MemberId(k) -> v)
 
         rpc <- ZmqRpc.make[KVCommand](
           peers(memberId),
@@ -111,4 +110,6 @@ object KVStoreApp extends zio.ZIOAppDefault:
         _ <- ZIO.never
       yield ()
 
-    program.exitCode.provideSomeLayer(ZContext.live.orDie)
+    program.exitCode.provideSomeLayer(
+      ZContext.live.orDie ++ zio.lmdb.Environment.test
+    ) // TODO (eran): change test to live?

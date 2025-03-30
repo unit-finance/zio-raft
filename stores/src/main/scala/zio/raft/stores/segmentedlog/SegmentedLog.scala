@@ -6,6 +6,8 @@ import zio.stream.ZStream
 import zio.{UIO, ZIO}
 import zio.raft.stores.segmentedlog.SegmentMetadataDatabase.{SegmentMetadata, SegmentStatus}
 import scodec.Codec
+import zio.Scope
+import zio.lmdb.Environment
 
 class SegmentedLog[A <: Command: Codec](
     logDirectory: String,
@@ -20,7 +22,7 @@ class SegmentedLog[A <: Command: Codec](
 
   override def lastTerm: UIO[Term] = lastTermRef.get
 
-  private def previousTermIndexOfEntireLog = 
+  private def previousTermIndexOfEntireLog =
     for firstSegment <- segmentMetadataDatabase.firstSegment
     yield (firstSegment.previousTerm, firstSegment.firstIndex.minusOne)
 
@@ -31,22 +33,20 @@ class SegmentedLog[A <: Command: Codec](
         lastIndexValue <- this.lastIndex
         term <-
           if lastIndexValue == index then lastTermRef.get.asSome
-          else 
+          else
             getLog(index).flatMap:
               case Some(entry) => ZIO.some(entry.term)
-              case None => 
+              case None =>
                 for (previousTerm, previousIndex) <- previousTermIndexOfEntireLog
-                yield if index == previousIndex then Some(previousTerm) else None                  
+                yield if index == previousIndex then Some(previousTerm) else None
       yield term
 
   private def getLog(index: Index): UIO[Option[LogEntry[A]]] =
     for
       current <- currentSegment.get
-      segment <- 
-        if index >= current.firstIndex then 
-          ZIO.some[Segment[A]](current)
-        else 
-          listSegments.map(_.find(_.isInSegment(index)))
+      segment <-
+        if index >= current.firstIndex then ZIO.some[Segment[A]](current)
+        else listSegments.map(_.find(_.isInSegment(index)))
       entry <- segment match
         case None          => ZIO.none
         case Some(segment) => segment.getEntry(index)
@@ -147,7 +147,7 @@ class SegmentedLog[A <: Command: Codec](
         yield ()
       )
     yield ()
-      
+
   override def deleteFrom(minInclusive: Index): UIO[Unit] =
     val previousIndex = minInclusive.minusOne
     for
@@ -188,7 +188,7 @@ class SegmentedLog[A <: Command: Codec](
       _ <- lastTermRef.set(previousTerm)
     yield ()
 
-  private def createNextSegment() =
+  private def createNextSegment(): ZIO[Any, Nothing, Unit] =
     for {
       firstIndex <- lastIndex.map(_.plusOne)
       previousTerm <- lastTerm
@@ -220,7 +220,7 @@ object SegmentedLog:
       database: SegmentMetadataDatabase,
       firstIndex: Index,
       previousTerm: Term
-  ) =
+  ): ZIO[Any, Nothing, ZIO[Scope, Nothing, OpenSegment[A]]] =
     for
       id <- zio.Random.nextLong.map(_.abs)
       now <- zio.Clock.instant
@@ -232,7 +232,10 @@ object SegmentedLog:
   // Using 100mb is the default, this might be too big. However, a smaller size will cause more files to be created
   // because we are saving 6 months back, this can be more files than the OS can handle.
   // We should probably not save 6 months back, and archive tasks using other methods to allow restore
-  def make[A <: Command: Codec](logDirectory: String, maxLogFileSize: Long = 1024 * 1024 * 100 /*100 MB*/ ) =
+  def make[A <: Command: Codec](
+      logDirectory: String,
+      maxLogFileSize: Long = 1024 * 1024 * 100 /*100 MB*/
+  ): ZIO[Environment & Scope, Nothing, SegmentedLog[A]] =
     for {
       database <- SegmentMetadataDatabase.make
       segments <- database.getAll
@@ -248,13 +251,13 @@ object SegmentedLog:
               lastSegment.firstIndex,
               lastSegment.previousTerm
             )
-          ) // TODO: recover the last segment
+          )
 
       currentFile <- CurrentSegment.make[A](openSegment)
 
       // Recover the open segment from crash
       _ <- currentFile.get.flatMap(_.recoverFromCrash)
-      
+
       (lastTerm, lastIndex) <- currentFile.get.flatMap(_.getLastTermIndex)
       lastIndexRef <- LocalLongRef.make(lastIndex.value).map(_.dimap[Index](Index(_), _.value))
       lastTermRef <- LocalLongRef.make(lastTerm.value).map(_.dimap[Term](Term(_), _.value))

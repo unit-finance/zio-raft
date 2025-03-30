@@ -358,7 +358,7 @@ class Raft[A <: Command](
                     InstallSnapshotResult
                       .Failure[A](memberId, currentTerm, r.lastIndex)
                   )
-                case (false, true) =>                  
+                case (false, true) =>
                   ZIO.succeed(
                     InstallSnapshotResult
                       .Success[A](memberId, currentTerm, r.lastIndex, false)
@@ -457,8 +457,10 @@ class Raft[A <: Command](
       now <- zio.Clock.instant
       s <- state.get
       currentTerm <- stable.currentTerm
+      // TODO (eran): can we instead just do state.startElection and pass the logic to the state machine? this way no need for match-case with all states, code is simpler
       _ <- s match
-        case f: State.Follower if now.isAfter(f.electionTimeout) && !currentTerm.isZero =>
+        case f: State.Follower
+            if now.isAfter(f.electionTimeout) && !currentTerm.isZero => // TODO (eran): why !currentTerm.isZero ?
           startElection
         case c: State.Candidate if now.isAfter(c.electionTimeout) =>
           startElection
@@ -563,20 +565,23 @@ class Raft[A <: Command](
           _ <- (snapshotStore
             .createNewSnapshot(
               Snapshot(s.lastApplied, previousTerm, stream)
-            )).fork
+            ))
+            .fork
         yield ()
     yield ()
 
   private def applyToStateMachine(state: State): UIO[State] =
     if state.commitIndex > state.lastApplied then
-      logStore.stream(state.lastApplied.plusOne, state.commitIndex).runFoldZIO(state)(
-        (state, logEntry) =>
+      logStore
+        .stream(state.lastApplied.plusOne, state.commitIndex)
+        .runFoldZIO(state)((state, logEntry) =>
           for
             response <- stateMachine.modify(_.apply(logEntry.command))
             _ <- state match
               case l: Leader => pendingCommands.complete(logEntry.index, response)
-              case _         => ZIO.unit        
-          yield state.increaseLastApplied)
+              case _         => ZIO.unit
+          yield state.increaseLastApplied
+        )
     else ZIO.succeed(state)
 
   private def sendHeartbeatRule(peer: MemberId) =
@@ -669,7 +674,7 @@ class Raft[A <: Command](
                       now.plus(Raft.heartbeartInterval)
                     )
                 )
-              else
+              else // TODO (Eran): where do we handle log inconsistency? where we decrement nextIndex and send again?
                 ZIO
                   .logWarning(
                     s"memberId=${this.memberId} failed to send entries to peer $peer $nextIndex $leaderLastLogIndex, pausing peer"
@@ -748,7 +753,11 @@ class Raft[A <: Command](
       s <- state.get
       now <- zio.Clock.instant
       _ <- s match
-        case c: Candidate if c.rpcDue.due(now, peer) =>
+        case c: Candidate
+            if c.rpcDue.due(
+              now,
+              peer
+            ) => // TODO (Eran): why do we need RPCDue? isn't this covered by electionTimeout? won't this create redundant messages with a lower term?
           for
             currentTerm <- stable.currentTerm
             lastLogIndex <- logStore.lastIndex
@@ -771,14 +780,18 @@ class Raft[A <: Command](
   private def preRules =
     for
       _ <- startNewElectionRule
-      _ <- ZIO.foreachDiscard(peers)(p => sendRequestVoteRule(p) <*> sendHeartbeatRule(p))
+      _ <- ZIO.foreachDiscard(peers)(p =>
+        sendRequestVoteRule(p) <*> sendHeartbeatRule(p)
+      ) // TODO (eran): Extract to broadcast function?
     yield ()
 
-  private def postRules =
+  private def postRules = // TODO (eran): how do we make sure one rule doesn't block the other? for example, sending a snapshot will impact request votes?
     for
       _ <- becomeLeaderRule
       _ <- advanceCommitIndexRule
-      _ <- ZIO.foreachDiscard(peers)(p => sendAppendEntriesRule(p) <*> sendRequestVoteRule(p))
+      _ <- ZIO.foreachDiscard(peers)(p =>
+        sendAppendEntriesRule(p) <*> sendRequestVoteRule(p)
+      ) // TODO (eran): Extract to broadcast function?
       changed <- applyToStateMachineRule
       _ <- ZIO.when(changed)(takeSnapshotRule)
     yield ()
@@ -853,7 +866,7 @@ class Raft[A <: Command](
 
   private[raft] def handleStreamItem(item: StreamItem[A]) =
     item match
-      case Tick() =>
+      case Tick() => // TODO (eran): is this a heartbeat? or maybe this is the random timeout?
         preRules <*> postRules
       case Message(message) =>
         for
@@ -908,7 +921,7 @@ class Raft[A <: Command](
 
   // User of the library would decide on what index to use for the compaction
   def compact(index: Index) =
-    for      
+    for
       s <- state.get
       latestSnapshotIndex <- snapshotStore.latestSnapshotIndex
       _ <- logStore.discardLogUpTo(Index.min(index, latestSnapshotIndex))
@@ -921,7 +934,11 @@ class Raft[A <: Command](
     val commandMessage =
       ZStream.fromQueue(this.commandsQueue)
     ZStream
-      .mergeAllUnbounded(16)(tick, messages, commandMessage)
+      .mergeAllUnbounded(16)(
+        tick,
+        messages,
+        commandMessage
+      ) // TODO (eran): doesn't this mean a load of commands will impact RPC and ticks processing?
       .foreach(handleStreamItem)
 
   override def toString(): String =
@@ -951,18 +968,19 @@ object Raft:
         snapshot match
           case None => ZIO.succeed(stateMachine)
           case Some(snapshot) =>
-            for 
+            for
               lastIndex <- logStore.lastIndex
 
               // If the snapshot is ahead of the log, we need to discard the log
               // TODO: can we only delete part of the log?
               _ <- ZIO.when(lastIndex <= snapshot.previousIndex)(
-                logStore.discardEntireLog(snapshot.previousIndex, snapshot.previousTerm))
+                logStore.discardEntireLog(snapshot.previousIndex, snapshot.previousTerm)
+              )
 
-              // Restore the state machine from the snapshot  
+              // Restore the state machine from the snapshot
               restoredStateMachine <- stateMachine.restoreFromSnapshot(snapshot.stream)
             yield restoredStateMachine
-      
+
       previousIndex = snapshot.map(s => s.previousIndex).getOrElse(Index.zero)
 
       refStateMachine <- Ref.make(restoredStateMachine)

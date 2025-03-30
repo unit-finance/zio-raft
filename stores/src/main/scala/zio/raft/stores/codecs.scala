@@ -9,7 +9,6 @@ object codecs:
   val indexCodec = int64.as[Index]
   val memberIdCodec = utf8_32.as[MemberId]
 
-
   val stableCodec = (termCodec :: optional(bool(8), memberIdCodec)).as[(Term, Option[MemberId])]
-  val stableCodecWithChucksum = 
+  val stableCodecWithChucksum =
     checksummed(stableCodec, scodec.bits.crc.crc32, variableSizeBytes(int32, bits) :: bits(32))

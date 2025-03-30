@@ -15,8 +15,8 @@ import scodec.bits.crc.CrcBuilder
 import scodec.codecs.{bits}
 import zio.raft.Index
 
-class BaseTransducer(ref: Ref[BaseTransducer.State], validateChecksum: Boolean): 
-  def apply(chunk: Option[Chunk[Byte]]) =
+class BaseTransducer(ref: Ref[BaseTransducer.State], validateChecksum: Boolean):
+  def apply(chunk: Option[Chunk[Byte]]): ZIO[Any, Throwable, Chunk[Result]] =
     ref.get.flatMap { state =>
       chunk match
         case None => ZIO.succeed(Chunk.empty) // TODO: do we allow remainder to be non-empty?
@@ -33,7 +33,10 @@ class BaseTransducer(ref: Ref[BaseTransducer.State], validateChecksum: Boolean):
       case ReadFileHeader(index, bits) =>
         fileHeaderCodec.decode(bits) match
           case Successful(decodeResult) =>
-            process(results, ReadRecordType(headerSize, index, decodeResult.remainder, ChunkBuilder.make(), crc32Builder))
+            process(
+              results,
+              ReadRecordType(headerSize, index, decodeResult.remainder, ChunkBuilder.make(), crc32Builder)
+            )
           case Failure(e: Err.InsufficientBits) =>
             ref.set(ReadFileHeader(index, bits)).as(results)
           case Failure(comp: Err.Composite) if comp.errs.exists(_.isInstanceOf[Err.InsufficientBits]) =>
@@ -47,9 +50,9 @@ class BaseTransducer(ref: Ref[BaseTransducer.State], validateChecksum: Boolean):
               process(results, ReadSize(offset, index, decodeResult.remainder, chunkBuilder, crcBuilder))
             else process(results, ReadChecksum(offset, index, decodeResult.remainder, chunkBuilder, crcBuilder))
           case Failure(e: Err.InsufficientBits) =>
-            ref.set(ReadRecordType(offset, index,bits, chunkBuilder, crcBuilder)).as(results)
+            ref.set(ReadRecordType(offset, index, bits, chunkBuilder, crcBuilder)).as(results)
           case Failure(comp: Err.Composite) if comp.errs.exists(_.isInstanceOf[Err.InsufficientBits]) =>
-            ref.set(ReadRecordType(offset,index, bits, chunkBuilder, crcBuilder)).as(results)
+            ref.set(ReadRecordType(offset, index, bits, chunkBuilder, crcBuilder)).as(results)
           case f: Failure =>
             ZIO.fail(new Throwable(s"Error decoding segment record type: ${f.cause.messageWithContext}"))
       case ReadSize(offset, index, bits, chunkBuilder, crcBuilder) =>
@@ -72,7 +75,7 @@ class BaseTransducer(ref: Ref[BaseTransducer.State], validateChecksum: Boolean):
               results,
               ReadRecordType(
                 offset + isEntrySize + sizeSize + size,
-                index.plusOne, 
+                index.plusOne,
                 result.remainder,
                 chunkBuilder.addOne(BaseTransducer.Result.Record(offset, index, result.value)),
                 if validateChecksum then crcBuilder.updated(result.value) else crcBuilder
@@ -92,17 +95,35 @@ class BaseTransducer(ref: Ref[BaseTransducer.State], validateChecksum: Boolean):
               if actual == decodeResult.value then
                 process(
                   results.addAll(chunkBuilder.addOne(BaseTransducer.Result.Checksum(offset, true)).result()),
-                  ReadRecordType(offset + isEntrySize + checksumSize, index, decodeResult.remainder, ChunkBuilder.make(), crc32Builder)
+                  ReadRecordType(
+                    offset + isEntrySize + checksumSize,
+                    index,
+                    decodeResult.remainder,
+                    ChunkBuilder.make(),
+                    crc32Builder
+                  )
                 )
               else
                 process(
                   results.addAll(chunkBuilder.addOne(BaseTransducer.Result.Checksum(offset, false)).result()),
-                  ReadRecordType(offset + isEntrySize + checksumSize, index, decodeResult.remainder, ChunkBuilder.make(), crc32Builder)
+                  ReadRecordType(
+                    offset + isEntrySize + checksumSize,
+                    index,
+                    decodeResult.remainder,
+                    ChunkBuilder.make(),
+                    crc32Builder
+                  )
                 )
             else
               process(
                 results.addAll(chunkBuilder.addOne(BaseTransducer.Result.Checksum(offset, true)).result()),
-                ReadRecordType(offset + isEntrySize + checksumSize, index, decodeResult.remainder, ChunkBuilder.make(), crc32Builder)
+                ReadRecordType(
+                  offset + isEntrySize + checksumSize,
+                  index,
+                  decodeResult.remainder,
+                  ChunkBuilder.make(),
+                  crc32Builder
+                )
               )
           case Failure(e: Err.InsufficientBits) =>
             ref.set(ReadChecksum(offset, index, bitsVector, chunkBuilder, crcBuilder)).as(results)
@@ -114,7 +135,7 @@ object BaseTransducer:
   val headerSize = fileHeaderCodec.sizeBound.exact.get / 8
   val sizeSize = entrySizeCodec.sizeBound.exact.get / 8
   val isEntrySize = isEntryCodec.sizeBound.exact.get / 8
-  val checksumSize = 4  
+  val checksumSize = 4
 
   sealed trait Result:
     val offset: Long
@@ -130,14 +151,14 @@ object BaseTransducer:
     def withNewBits(newBits: BitVector): State =
       this match
         case ReadFileHeader(index, remainder) => ReadFileHeader(index, remainder ++ newBits)
-        case ReadRecordType(offset, index,remainder, chunkBuilder, crcBuilder) =>
-          ReadRecordType(offset, index,remainder ++ newBits, chunkBuilder, crcBuilder)
-        case ReadSize(offset, index,remainder, chunkBuilder, crcBuilder) =>
-          ReadSize(offset, index,remainder ++ newBits, chunkBuilder, crcBuilder)
-        case ReadBody(offset, index,remainder, size, chunkBuilder, crcBuilder) =>
-          ReadBody(offset, index,remainder ++ newBits, size, chunkBuilder, crcBuilder)
-        case ReadChecksum(offset, index,remainder, chunkBuilder, crcBuilder) =>
-          ReadChecksum(offset, index,remainder ++ newBits, chunkBuilder, crcBuilder)
+        case ReadRecordType(offset, index, remainder, chunkBuilder, crcBuilder) =>
+          ReadRecordType(offset, index, remainder ++ newBits, chunkBuilder, crcBuilder)
+        case ReadSize(offset, index, remainder, chunkBuilder, crcBuilder) =>
+          ReadSize(offset, index, remainder ++ newBits, chunkBuilder, crcBuilder)
+        case ReadBody(offset, index, remainder, size, chunkBuilder, crcBuilder) =>
+          ReadBody(offset, index, remainder ++ newBits, size, chunkBuilder, crcBuilder)
+        case ReadChecksum(offset, index, remainder, chunkBuilder, crcBuilder) =>
+          ReadChecksum(offset, index, remainder ++ newBits, chunkBuilder, crcBuilder)
 
   case class ReadFileHeader(index: Index, remainder: BitVector) extends State:
     val offset: Long = 0L
@@ -171,7 +192,7 @@ object BaseTransducer:
       crcBuilder: CrcBuilder[BitVector]
   ) extends State
 
-  def make[A](firstIndex: Index, validateChecksum: Boolean) =
+  def make[A](firstIndex: Index, validateChecksum: Boolean): ZPipeline[Any, Throwable, Byte, Result] =
     ZPipeline.fromPush(
       Ref
         .make[State](ReadFileHeader(firstIndex, BitVector.empty))

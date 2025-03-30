@@ -47,11 +47,13 @@ class SegmentMetadataDatabase(environment: Environment, database: Database):
       .orDie
 
   def firstSegment: ZIO[Any, Nothing, SegmentMetadata] =
-    environment.transact(database.stream.runHead).flatMap {
-      case Some((_, value)) =>
-        ZIO.attempt(segmentMetadataCodec.decodeValue(BitVector(value)).require).orDie
-      case None => ZIO.fail(new Exception("No segment metadata found"))
-    }.orDie
+    environment
+      .transact(database.stream.runHead)
+      .flatMap:
+        case Some((_, value)) =>
+          ZIO.attempt(segmentMetadataCodec.decodeValue(BitVector(value)).require).orDie
+        case None => ZIO.fail(new Exception("No segment metadata found"))
+      .orDie
 
   def delete(firstIndex: Index) =
     for

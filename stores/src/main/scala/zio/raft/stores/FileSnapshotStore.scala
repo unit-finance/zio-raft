@@ -237,8 +237,8 @@ object FileSnapshotStore:
         )
         .orDie
       ref <- Ref.make(latest)
-      // TODO: we can end up with partial snapshots, we need to clean them up
-      // TODO: we can end up with snapshots files without entries in the database, we need to clean them up
+    // TODO: we can end up with partial snapshots, we need to clean them up
+    // TODO: we can end up with snapshots files without entries in the database, we need to clean them up
     yield FileSnapshotStore(environment, database, directory, ref)
 
   enum SnapshotStatus:

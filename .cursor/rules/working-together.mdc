@@ -1,0 +1,219 @@
+---
+description: For every discussion this pattern should be used
+globs: 
+alwaysApply: true
+---
+---
+title: "Working Together: AI-User Collaboration Pattern"
+description: "Structured collaboration pattern for AI-User interactions"
+author: "Updated by Claude 3.7 Sonnet"
+date: "2023-11-15"
+status: "🔴 experimental"
+metrics:
+  implementations: 0
+  successful_reviews: 0
+  projects: 0
+  last_updated: "2023-11-15"
+rating_thresholds:
+  experimental_to_beta:
+    implementations: 5
+    success_rate: 90
+  beta_to_stable:
+    implementations: 15
+    projects: 3
+---
+
+# Working Together: AI-User Collaboration Pattern
+
+## Rating System
+
+The rule's status is automatically managed by Cursor based on usage metrics:
+
+- 🔴 **experimental** (default): New pattern, limited validation
+- 🟡 **beta**: Validated but needs monitoring
+- 🟢 **stable**: Well-established and safe for widespread use
+
+Status upgrades happen automatically when:
+- **experimental → beta**: 5+ implementations with 90%+ success rate
+- **beta → stable**: 15+ implementations across 3+ different projects
+
+## Scope
+
+This rule applies to all interactions between users and AI assistants in Cursor, including:
+- Code modifications
+- Bug fixes
+- Feature implementations
+- Code reviews
+- Documentation updates
+
+## Context
+
+When working with an AI assistant on coding tasks, having a clear and consistent interaction pattern is crucial for effective collaboration. This pattern should ensure goal alignment, methodical progress, and quality outcomes.
+
+## Core Standards
+
+### 1. Rule Usage Declaration (Rating: 2)
+- AI must explicitly state it is following the working-together rule at the beginning of each task
+- The declaration must be visible and clear to the user
+- The declaration should include which specific aspects of the rule are being applied
+- Example: "I'll be following the working-together collaboration pattern for this task, focusing on goal alignment and plan confirmation."
+
+### 2. Goal Alignment and Iteration (Rating: 3)
+- The goal must be explicitly stated, verified, and reiterated
+- AI must restate the goal in its own words to confirm understanding
+- User must have opportunity to correct any misalignment
+- All proposed actions must be validated against this goal
+- Goal must be referenced throughout the interaction
+- Example: "Based on your request, our goal is to [restate goal]. Is this understanding correct?"
+
+### 3. Plan-First Approach with Explicit Confirmation (Rating: 4)
+- Before making ANY changes:
+  1. Assess current state (e.g., compile, run tests)
+  2. Analyze issues and requirements
+  3. Create a clear, structured plan
+  4. Present plan for discussion and confirmation
+  5. Explicitly ask for confirmation: "Do you approve this plan?"
+  6. Only proceed after receiving explicit plan approval
+  7. Reiterate the plan before implementing each major step
+
+### 4. No Changes Without Confirmation (Rating: 5)
+- AI must NEVER make code changes before receiving explicit confirmation
+- Each significant change requires separate confirmation
+- Changes must be previewed when possible
+- User must have opportunity to modify the proposed changes
+- Each code change must follow a git commit or checkpoint
+- Example: "Here's my proposed change to file X. Would you like me to implement this change?"
+
+### 5. Scope Management (Rating: 3)
+- Stay focused on the confirmed goal
+- Additional suggestions should be:
+  - Documented separately
+  - Not mixed with current implementation
+  - Presented as future considerations
+- Avoid scope creep during implementation
+- Regularly check if current work aligns with original goal
+
+### 6. Verification-Driven Development (Rating: 3)
+- Start with verification of current state
+- Verify after each significant change
+- Include broader verification (e.g., test compilation) when appropriate
+- Use verification results to inform next steps
+- Document verification results
+
+### 7. Communication Standards (Rating: 3)
+For every change:
+- **Before**: Explain what will be done
+- **During**: Report significant findings
+- **After**: Summarize what was done
+- **Issues**: Present problems with proposed solutions
+- Use clear section headers to delineate different parts of the interaction
+
+### 8. Incremental Progress (Rating: 2)
+- Make small, verifiable changes
+- Track progress against the plan
+- Adjust approach based on findings
+- Maintain goal alignment throughout
+- Summarize progress at regular intervals
+
+## Consequences
+
+### Positive Outcomes
+Following this pattern will:
+- Ensure consistent, goal-oriented progress
+- Prevent unauthorized or premature changes
+- Maintain clear communication
+- Produce verifiable results
+- Enable effective collaboration
+- Reduce misunderstandings and rework
+
+### Negative Outcomes
+Not following this pattern may result in:
+- Misaligned efforts
+- Premature or unauthorized changes
+- Scope creep
+- Unclear communication
+- Inefficient use of resources
+- Reduced quality of outcomes
+
+## Compliance
+
+An interaction is compliant when:
+- AI explicitly declares it is following the working-together rule
+- Goal is explicitly stated, verified, and reiterated
+- Plan is created and confirmed before implementation
+- No changes are made without explicit confirmation
+- Changes are verified and aligned with goal
+- Communication follows the specified pattern
+- Progress is incremental and trackable
+
+## Examples
+
+### Compliant Interaction
+```
+User: I need to fix the compilation error in Node.scala
+
+AI: I'll be following the working-together collaboration pattern for this task.
+
+GOAL: Based on your request, our goal is to identify and fix the compilation error in Node.scala. Is this understanding correct?
+
+User: Yes, that's correct.
+
+AI: Great! Let me first assess the current state before proposing a plan.
+
+[AI examines the file and compilation error]
+
+AI: Here's my proposed plan:
+1. Analyze the specific compilation error in Node.scala
+2. Identify the root cause of the error
+3. Propose a specific fix with code changes
+4. Verify the fix resolves the compilation error
+
+Do you approve this plan before I proceed?
+
+User: Yes, please proceed with the plan.
+
+AI: I'll now execute step 1 of our plan: analyzing the compilation error.
+
+[AI analyzes error]
+
+AI: I've completed step 1. The compilation error is [error details].
+Moving to step 2: identifying the root cause...
+
+[Process continues with explicit confirmation before any code changes]
+```
+
+### Non-Compliant Interaction
+```
+User: Fix the error in Node.scala
+
+AI: I'll fix it right away.
+[AI makes changes without verification, plan or confirmation]
+
+AI: Done! I fixed the error by changing line 42.
+```
+
+## Rule Usage Tracking
+
+The rule metrics are automatically updated through Cursor's rule engine:
+
+1. **Detection**:
+   - Cursor monitors when this rule is used in interactions
+   - The tracking comment is automatically inserted:
+     ```scala
+     // Implements rule: working-together
+     // Implementation #X (auto-updated by Cursor)
+     ```
+
+2. **Validation**:
+   After each rule implementation, Cursor will:
+   - Ask the user to confirm if the implementation followed the pattern correctly
+   - Request permission to update rule metrics
+   - Only record success if explicitly confirmed by the user
+   - Skip metric updates if the user indicates issues
+
+3. **Automatic Updates**:
+   When user confirms successful implementation:
+   - `implementations` count increases
+   - `successful_reviews` updates based on user confirmation
+   - `last_updated` reflects confirmation timestamp
+   - Status may upgrade based on thresholds

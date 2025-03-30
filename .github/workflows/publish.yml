@@ -11,6 +11,8 @@ jobs:
       with:
         distribution: 'adopt'
         java-version: '21'
+    - name: Setup sbt launcher
+      uses: sbt/setup-sbt@v1    
     - name: Extract version from release tag
       id: extract_version
       run: |

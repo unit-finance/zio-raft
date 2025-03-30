@@ -251,7 +251,7 @@ object SegmentedLog:
               lastSegment.firstIndex,
               lastSegment.previousTerm
             )
-          ) // TODO: recover the last segment
+          )
 
       currentFile <- CurrentSegment.make[A](openSegment)
 

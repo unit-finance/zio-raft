@@ -81,6 +81,7 @@ When working with an AI assistant on coding tasks, having a clear and consistent
 - Each significant change requires separate confirmation
 - Changes must be previewed when possible
 - User must have opportunity to modify the proposed changes
+- Each code change must follow a git commit or checkpoint
 - Example: "Here's my proposed change to file X. Would you like me to implement this change?"
 
 ### 5. Scope Management (Rating: 3)

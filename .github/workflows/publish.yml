@@ -22,9 +22,9 @@ jobs:
       run: |
         sed -i "s/ThisBuild \/ version := .*/ThisBuild \/ version := \"$VERSION\"/" build.sbt
     - name: Compile
-      run: sbt compile
+      run: sbt +compile
     - name: Publish
       env:
         SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
         SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-      run: sbt publish
+      run: sbt +publish

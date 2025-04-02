@@ -20,6 +20,10 @@ ThisBuild / scalaVersion := mainScalaVersion
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
+ThisBuild / licenses := List(
+  "MPL 2.0" -> new URL("https://www.mozilla.org/en-US/MPL/2.0/")
+)
+
 ThisBuild / scmInfo := Some(
   ScmInfo(
     url("https://github.com/unit-finance/zio-raft"),

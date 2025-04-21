@@ -47,6 +47,15 @@ ThisBuild / credentials += Credentials(
   sys.env.getOrElse("SONATYPE_PASSWORD", "")
 )
 
+ThisBuild / developers := List(
+  Developer(
+    id = "somdoron",
+    name = "Doron Somech",
+    email = "doron@unit.co",
+    url = url("https://github.com/somdoron")
+  )
+)
+
 scalaVersion := mainScalaVersion
 
 resolvers +=

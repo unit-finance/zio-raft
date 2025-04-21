@@ -3,8 +3,8 @@
 
 // This plugin enables semantic information to be produced by sbt.
 // It also adds support for debugging using the Debug Adapter Protocol
-
-addSbtPlugin("org.scalameta" % "sbt-metals" % "1.5.2")
+resolvers += "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots"
+addSbtPlugin("org.scalameta" % "sbt-metals" % "1.5.2+55-f382d3af-SNAPSHOT")
 
 // This plugin adds the BSP debug capability to sbt server.
 

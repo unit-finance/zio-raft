@@ -1,5 +1,6 @@
 lazy val zio2Version = "2.1.1"
 lazy val zioLoggingVersion = "2.2.4"
+lazy val zioPreludeVersion = "1.0.0-RC41"
 
 lazy val zio1Version = "1.0.18"
 
@@ -21,7 +22,7 @@ ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
 ThisBuild / licenses := List(
-  "MPL 2.0" -> new URL("https://www.mozilla.org/en-US/MPL/2.0/")
+  "MPL 2.0" -> url("https://www.mozilla.org/en-US/MPL/2.0/")
 )
 
 ThisBuild / scmInfo := Some(
@@ -81,7 +82,7 @@ lazy val raft = project
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "dev.zio" %% "zio-nio" % "2.0.0",
-      "dev.zio" %% "zio-prelude" % "1.0.0-RC26",      
+      "dev.zio" %% "zio-prelude" % zioPreludeVersion,      
     )
   )
 
@@ -94,7 +95,7 @@ lazy val kvstore = project
     scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,
-      "dev.zio" %% "zio-prelude" % "1.0.0-RC26",
+      "dev.zio" %% "zio-prelude" % zioPreludeVersion,
       "dev.zio" %% "zio-http" % "3.0.0-RC8",
     ),
     excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
@@ -123,7 +124,7 @@ lazy val zio1zmq = project
     crossScalaVersions := supportedScalaVersions,
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio1Version,
-      "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
+      "dev.zio" %% "zio-prelude" % "1.0.0-RC5", // latest version for zio 1.0.18
       "org.zeromq" % "jeromq" % jeromqVersion
     ),
     libraryDependencies ++= {
@@ -150,7 +151,7 @@ lazy val zio2zmq = project
     crossScalaVersions := supportedScalaVersions,
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,
-      "dev.zio" %% "zio-prelude" % "1.0.0-RC26",
+      "dev.zio" %% "zio-prelude" % zioPreludeVersion,
       "org.zeromq" % "jeromq" % jeromqVersion
     ),
     libraryDependencies ++= {

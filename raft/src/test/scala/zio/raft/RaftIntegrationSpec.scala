@@ -7,10 +7,10 @@ import zio.{Scope, ZIO, durationInt}
 object RaftIntegrationSpec extends ZIOSpecDefault:
 
   private def findTheNewLeader(
-      currentLeader: Raft[TestCommands],
-      raft1: Raft[TestCommands],
-      raft2: Raft[TestCommands],
-      raft3: Raft[TestCommands]
+      currentLeader: Raft[Int, Nothing, TestCommands],
+      raft1: Raft[Int, Nothing, TestCommands],
+      raft2: Raft[Int, Nothing, TestCommands],
+      raft3: Raft[Int, Nothing, TestCommands]
   ) =
     for
       r1IsLeader <- raft1.isTheLeader
@@ -23,10 +23,10 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
       else None
 
   private def waitForNewLeader(
-      currentLeader: Raft[TestCommands],
-      raft1: Raft[TestCommands],
-      raft2: Raft[TestCommands],
-      raft3: Raft[TestCommands]
+      currentLeader: Raft[Int, Nothing, TestCommands],
+      raft1: Raft[Int, Nothing, TestCommands],
+      raft2: Raft[Int, Nothing, TestCommands],
+      raft3: Raft[Int, Nothing, TestCommands]
   ) =
     findTheNewLeader(currentLeader, raft1, raft2, raft3)
       .tap:
@@ -62,7 +62,8 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         logStore1,
         snapshotStore1,
         rpc(0)._1,
-        stateMachine1
+        stateMachine1,
+        0
       )
       raft2 <- Raft.makeScoped(
         MemberId("peer2"),
@@ -71,7 +72,8 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         logStore2,
         snapshotStore2,
         rpc(1)._1,
-        stateMachine2
+        stateMachine2,
+        0
       )
       raft3 <- Raft.makeScoped(
         MemberId("peer3"),
@@ -80,7 +82,8 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         logStore3,
         snapshotStore3,
         rpc(2)._1,
-        stateMachine3
+        stateMachine3,
+        0
       )
       _ <- raft1.bootstrap
     yield (

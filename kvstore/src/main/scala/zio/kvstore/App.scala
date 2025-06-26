@@ -6,6 +6,7 @@ import zio.raft.{Command, Index, MemberId, Raft, SnapshotStore, StateMachine}
 import zio.stream.{Stream, ZStream}
 import zio.zmq.ZContext
 import zio.{Chunk, UIO, URIO, ZIO, ZIOAppArgs, ZLayer}
+import zio.prelude.EState
 
 import scodec.Codec
 import scodec.bits.BitVector
@@ -31,31 +32,30 @@ object KVCommand:
     .typecase("S", setCodec)
     .typecase("G", getCodec)
 
-class KVStateMachine(map: Map[String, String]) extends StateMachine[KVCommand]:
+class KVStateMachine(map: Map[String, String]) extends StateMachine[Map[String, String], Nothing, KVCommand]:
 
   override def takeSnapshot: Stream[Nothing, Byte] =
     ZStream
       .fromZIO(ZIO.attempt(Chunk.fromArray(mapCodec.encode(map).require.toByteArray)).orDie)
       .flattenChunks // TODO: we need to improve the conversion of ByteVector to Stream and Chunk
 
-  override def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[StateMachine[KVCommand]] =
+  override def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[Map[String, String]] =
     // TODO: we need to improve the conversion of Stream to BitVector
     ZIO.scoped(
       stream.toInputStream
         .map(is => BitVector.fromInputStream(is, 1024))
         .map(bv => mapCodec.decodeValue(bv).require)
-        .map(m => KVStateMachine(m))
     )
 
   override def shouldTakeSnapshot(lastSnaphotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean = false
   // commitIndex.value - lastSnaphotIndex.value > 2
 
-  override def apply(command: KVCommand): (command.Response, StateMachine[KVCommand]) =
+  override def apply(command: KVCommand): EState[Map[String, String], Nothing, Any] =
     command match
-      case Set(k, v) => (().asInstanceOf[command.Response], KVStateMachine(map.updated(k, v)))
-      case Get(k)    => (map.get(k).getOrElse("").asInstanceOf[command.Response], this)
+      case Set(k, v) => EState.succeed(((), map.updated(k, v)))
+      case Get(k)    => EState.succeed(((), map.get(k).getOrElse("")))
 
-class HttpServer(raft: Raft[KVCommand]):
+class HttpServer(raft: Raft[Map[String, String], Nothing, KVCommand]):
 
   val app = Routes(
     GET / "" -> handler(ZIO.succeed(Response.text("Hello World!"))),
@@ -102,7 +102,8 @@ object KVStoreApp extends zio.ZIOAppDefault:
           logStore,
           snapshotStore,
           rpc,
-          new KVStateMachine(Map.empty)
+          new KVStateMachine(Map.empty),
+          Map.empty
         )
 
         _ <- raft.run.forkScoped

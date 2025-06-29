@@ -457,10 +457,10 @@ class Raft[S, E, A <: Command](
       now <- zio.Clock.instant
       s <- raftState.get
       currentTerm <- stable.currentTerm
-      // TODO (eran): can we instead just do state.startElection and pass the logic to the state machine? this way no need for match-case with all states, code is simpler
+      
       _ <- s match
         case f: State.Follower
-            if now.isAfter(f.electionTimeout) && !currentTerm.isZero => // TODO (eran): why !currentTerm.isZero ?
+            if now.isAfter(f.electionTimeout) && !currentTerm.isZero => 
           startElection
         case c: State.Candidate if now.isAfter(c.electionTimeout) =>
           startElection
@@ -568,14 +568,14 @@ class Raft[S, E, A <: Command](
         yield ()
     yield ()
 
-  private def applyToStateMachine(state: State): UIO[State] =
+  private def applyToStateMachine(state: State): ZIO[Any, E, State] =
     if state.commitIndex > state.lastApplied then
       logStore
         .stream(state.lastApplied.plusOne, state.commitIndex)
         .runFoldZIO(state)((state, logEntry) =>
           for
             appState <- appStateRef.get
-            (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState).orDieWith(e => new RuntimeException(s"Failed to apply command ${logEntry.command} to state machine: $e")) // TODO (Eran): Remove orDie, we should propagate the error instead
+            (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState)
             _ <- appStateRef.set(newState)
 
             _ <- state match
@@ -675,7 +675,7 @@ class Raft[S, E, A <: Command](
                       now.plus(Raft.heartbeartInterval)
                     )
                 )
-              else // TODO (Eran): where do we handle log inconsistency? where we decrement nextIndex and send again?
+              else
                 ZIO
                   .logWarning(
                     s"memberId=${this.memberId} failed to send entries to peer $peer $nextIndex $leaderLastLogIndex, pausing peer"
@@ -758,7 +758,7 @@ class Raft[S, E, A <: Command](
             if c.rpcDue.due(
               now,
               peer
-            ) => // TODO (Eran): why do we need RPCDue? isn't this covered by electionTimeout? won't this create redundant messages with a lower term?
+            ) => 
           for
             currentTerm <- stable.currentTerm
             lastLogIndex <- logStore.lastIndex
@@ -783,16 +783,16 @@ class Raft[S, E, A <: Command](
       _ <- startNewElectionRule
       _ <- ZIO.foreachDiscard(peers)(p =>
         sendRequestVoteRule(p) <*> sendHeartbeatRule(p)
-      ) // TODO (eran): Extract to broadcast function?
+      )
     yield ()
 
-  private def postRules = // TODO (eran): how do we make sure one rule doesn't block the other? for example, sending a snapshot will impact request votes?
+  private def postRules = 
     for
       _ <- becomeLeaderRule
       _ <- advanceCommitIndexRule
       _ <- ZIO.foreachDiscard(peers)(p =>
         sendAppendEntriesRule(p) <*> sendRequestVoteRule(p)
-      ) // TODO (eran): Extract to broadcast function?
+      )
       changed <- applyToStateMachineRule
       _ <- ZIO.when(changed)(takeSnapshotRule)
     yield ()
@@ -867,7 +867,7 @@ class Raft[S, E, A <: Command](
 
   private[raft] def handleStreamItem(item: StreamItem[A]) =
     item match
-      case Tick() => // TODO (eran): is this a heartbeat? or maybe this is the random timeout?
+      case Tick() =>
         preRules <*> postRules
       case Message(message) =>
         for
@@ -939,7 +939,7 @@ class Raft[S, E, A <: Command](
         tick,
         messages,
         commandMessage
-      ) // TODO (eran): doesn't this mean a load of commands will impact RPC and ticks processing?
+      )
       .foreach(handleStreamItem)
 
   override def toString(): String =
@@ -959,8 +959,7 @@ object Raft:
       logStore: LogStore[A],
       snapshotStore: SnapshotStore,
       rpc: RPC[A],
-      stateMachine: StateMachine[S, E, A],
-      initialState: S // TODO (eran): can't we just have StateMachine.emptyState? like we have restoreSnapshot?
+      stateMachine: StateMachine[S, E, A]
   ) =
     for
       now <- zio.Clock.instant
@@ -968,7 +967,7 @@ object Raft:
       snapshot <- snapshotStore.latestSnapshot
       restoredState <-
         snapshot match
-          case None => ZIO.succeed(initialState)
+          case None => ZIO.succeed(stateMachine.emptyState)
           case Some(snapshot) =>
             for
               lastIndex <- logStore.lastIndex
@@ -1013,8 +1012,7 @@ object Raft:
       logStore: LogStore[A],
       snapshotStore: SnapshotStore,
       rpc: RPC[A],
-      stateMachine: StateMachine[S, E, A],
-      initialState: S
+      stateMachine: StateMachine[S, E, A]
   ) =
     for
       raft <- make(
@@ -1024,8 +1022,7 @@ object Raft:
         logStore,
         snapshotStore,
         rpc,
-        stateMachine,
-        initialState
+        stateMachine
       )
       _ <- raft.run.forkScoped
     yield raft

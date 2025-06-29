@@ -62,8 +62,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         logStore1,
         snapshotStore1,
         rpc(0)._1,
-        stateMachine1,
-        0
+        stateMachine1
       )
       raft2 <- Raft.makeScoped(
         MemberId("peer2"),
@@ -72,8 +71,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         logStore2,
         snapshotStore2,
         rpc(1)._1,
-        stateMachine2,
-        0
+        stateMachine2
       )
       raft3 <- Raft.makeScoped(
         MemberId("peer3"),
@@ -82,8 +80,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         logStore3,
         snapshotStore3,
         rpc(2)._1,
-        stateMachine3,
-        0
+        stateMachine3
       )
       _ <- raft1.bootstrap
     yield (

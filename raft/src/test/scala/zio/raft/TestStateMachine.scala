@@ -10,6 +10,8 @@ case object Increase extends TestCommands
 case object Get extends TestCommands
 
 case class TestStateMachine(state: Int, enableSnapshot: Boolean) extends StateMachine[Int, Nothing, TestCommands]:
+  override def emptyState: Int = 0
+
   def apply(command: TestCommands): EState[Int, Nothing, command.Response] =
     (command match
       case Increase => EState.succeed(((), state + 1))

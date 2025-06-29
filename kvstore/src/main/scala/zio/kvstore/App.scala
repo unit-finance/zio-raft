@@ -34,6 +34,8 @@ object KVCommand:
 
 class KVStateMachine(map: Map[String, String]) extends StateMachine[Map[String, String], Nothing, KVCommand]:
 
+  override def emptyState: Map[String, String] = Map.empty
+
   override def takeSnapshot: Stream[Nothing, Byte] =
     ZStream
       .fromZIO(ZIO.attempt(Chunk.fromArray(mapCodec.encode(map).require.toByteArray)).orDie)
@@ -103,8 +105,7 @@ object KVStoreApp extends zio.ZIOAppDefault:
           logStore,
           snapshotStore,
           rpc,
-          new KVStateMachine(Map.empty),
-          Map.empty
+          new KVStateMachine(Map.empty)
         )
 
         _ <- raft.run.forkScoped

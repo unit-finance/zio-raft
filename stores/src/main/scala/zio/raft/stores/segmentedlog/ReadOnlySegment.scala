@@ -12,7 +12,7 @@ import java.nio.file.StandardOpenOption
 class ReadOnlySegment[A <: Command: Codec](
     val path: Path,
     val firstIndex: Index,
-    val lastIndexExclusive: Option[Index] // TODO (eran): why is this option? isn't None equal to OpenSegment?
+    val lastIndexExclusive: Option[Index]
 ) extends Segment:
   def stream(startInclusive: Index, toInclusive: Index) =
     val stream =

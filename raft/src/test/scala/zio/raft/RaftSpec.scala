@@ -6,7 +6,7 @@ import zio.test.*
 import zio.{Scope, ZIO}
 
 object RaftSpec extends ZIOSpecDefault:
-  def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean) =
+  def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean): ZIO[Any, Nothing, (Raft[Int, Nothing, TestCommands], MockRpc[TestCommands])] =
     (for
       stable <- Stable.makeInMemory
       logStore <- LogStore.makeInMemory[TestCommands]
@@ -21,8 +21,7 @@ object RaftSpec extends ZIOSpecDefault:
         logStore,
         snapshotStore,
         rpc,
-        new TestStateMachine(0, enableSnapshot),
-        0
+        new TestStateMachine(0, enableSnapshot)
       )
     yield (raft, rpc))
 

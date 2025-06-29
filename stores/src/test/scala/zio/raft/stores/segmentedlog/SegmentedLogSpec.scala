@@ -2,13 +2,11 @@ package zio.raft.stores.segmentedlog
 
 import zio.test.*
 import zio.nio.file.Files
-import zio.Scope
 import zio.test.Gen
 import zio.raft.LogEntry
 import zio.raft.Term
 import zio.raft.Index
 import zio.raft.Command
-import zio.ZIO
 
 object SegmentedLogSpec extends ZIOSpecDefault:
   val tempDirectory = Files.createTempDirectory(Some("logs"), Iterable.empty)

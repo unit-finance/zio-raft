@@ -14,7 +14,6 @@ object internal:
   private def termCodec = int64.xmap(Term(_), _.value)
   private def indexCodec = int64.xmap(Index(_), _.value)
 
-  // TODO (eran): add marker and version before codec, TBD if we need "EndMarker", this might be useful for forward compatibility
   def entryCodec[A <: Command](using codec: Codec[A]): Codec[LogEntry[A]] =
     (codec :: termCodec :: indexCodec).as[LogEntry[A]]
   def entriesCodec[A <: Command: Codec]: ChecksummedList[LogEntry[A]] =

@@ -2,20 +2,24 @@ package zio.raft
 
 import zio.UIO
 import zio.stream.{Stream, ZStream}
+import zio.prelude.EState
 
 sealed trait TestCommands extends Command:
   type Response = Int
 case object Increase extends TestCommands
 case object Get extends TestCommands
 
-case class TestStateMachine(state: Int, enableSnapshot: Boolean) extends StateMachine[TestCommands]:
-  def apply(command: TestCommands): (command.Response, StateMachine[TestCommands]) =
-    command match
-      case Increase => (state + 1, TestStateMachine(state + 1, enableSnapshot))
-      case Get      => (state, TestStateMachine(state, enableSnapshot))
+case class TestStateMachine(state: Int, enableSnapshot: Boolean) extends StateMachine[Int, Nothing, TestCommands]:
+  override def emptyState: Int = 0
 
-  override def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[StateMachine[TestCommands]] =
-    stream.runCollect.map(b => TestStateMachine(new String(b.toArray).toInt, enableSnapshot))
+  def apply(command: TestCommands): EState[Int, Nothing, command.Response] =
+    (command match
+      case Increase => EState.succeed(((), state + 1))
+      case Get      => EState.succeed(((), state))
+    ).map(_.asInstanceOf[command.Response])
+
+  override def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[Int] =
+    stream.runCollect.map(b => new String(b.toArray).toInt)
 
   override def shouldTakeSnapshot(lastSnaphotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
     enableSnapshot

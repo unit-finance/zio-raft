@@ -10,7 +10,6 @@ import zio.raft.{
   InstallSnapshotResult,
   MemberId,
   RPC,
-  RPCMessage,
   RequestVoteRequest,
   RequestVoteResult
 }

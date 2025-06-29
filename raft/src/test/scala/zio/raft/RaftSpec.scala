@@ -1,6 +1,5 @@
 package zio.raft
 
-import zio.raft.AppendEntriesResult.Success
 import zio.raft.State.{Candidate, Follower, Leader}
 import zio.raft.StreamItem.CommandMessage
 import zio.test.*

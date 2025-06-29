@@ -5,7 +5,7 @@ import zio.raft.zmq.ZmqRpc
 import zio.raft.{Command, Index, MemberId, Raft, SnapshotStore, StateMachine}
 import zio.stream.{Stream, ZStream}
 import zio.zmq.ZContext
-import zio.{Chunk, UIO, URIO, ZIO, ZIOAppArgs, ZLayer}
+import zio.{Chunk, UIO, ZIO, ZIOAppArgs, ZLayer}
 import zio.prelude.EState
 
 import scodec.Codec

@@ -2,7 +2,7 @@ package zio.raft
 
 import zio.test.*
 import zio.test.TestAspect.withLiveClock
-import zio.{Scope, ZIO, durationInt}
+import zio.{ZIO, durationInt}
 
 object RaftIntegrationSpec extends ZIOSpecDefault:
 

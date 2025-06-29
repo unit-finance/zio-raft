@@ -4,7 +4,7 @@ import java.time.Instant
 
 import zio.raft.AppendEntriesResult.{Failure, Success}
 import zio.raft.Raft.electionTimeout
-import zio.raft.RequestVoteResult.{Granted, Rejected}
+import zio.raft.RequestVoteResult.Rejected
 import zio.raft.State.{Candidate, Follower, Leader}
 import zio.raft.StreamItem.{Bootstrap, CommandMessage, Message, Tick}
 import zio.stream.ZStream
@@ -552,7 +552,7 @@ class Raft[S, E, A <: Command](
       )
       _ <- ZIO.when(shouldTakeSnapshot):
         for
-          stream <- ZIO.succeed(stateMachine.takeSnapshot)
+          stream = stateMachine.takeSnapshot
 
           // The last applied should term be in the log
           previousTerm <- logStore

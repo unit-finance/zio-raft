@@ -83,7 +83,8 @@ lazy val raft = project
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "dev.zio" %% "zio-nio" % "2.0.0",
       "dev.zio" %% "zio-prelude" % zioPreludeVersion,      
-    )
+    ),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
 
 lazy val kvstore = project
@@ -113,7 +114,8 @@ lazy val raftZmq = project
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "org.scodec" %% "scodec-bits" % "1.1.37",
       "org.scodec" %% "scodec-core" % "2.2.1"
-    )
+    ),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
   .dependsOn(raft, zio2zmq)
 
@@ -198,6 +200,7 @@ lazy val stores = project
       "org.scodec" %% "scodec-bits" % "1.1.37",
       "org.scodec" %% "scodec-core" % "2.2.1",
       "dev.zio" %% "zio-nio" % "2.0.0"
-    )
+    ),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
   .dependsOn(raft, ziolmdb)

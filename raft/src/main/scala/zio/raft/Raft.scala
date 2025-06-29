@@ -381,7 +381,6 @@ class Raft[S, E, A <: Command](
                             snapshot.previousTerm
                           )
 
-                          // TODO (Eran): do we need to restore from initial state or assume always from scratch? if we need inital state it means we need EState instead of UIO for the method or change the function to receive the initial state
                           newState <- stateMachine.restoreFromSnapshot(snapshot.stream)
                           _ <- appStateRef.set(newState)
 

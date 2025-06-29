@@ -50,10 +50,11 @@ class KVStateMachine(map: Map[String, String]) extends StateMachine[Map[String, 
   override def shouldTakeSnapshot(lastSnaphotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean = false
   // commitIndex.value - lastSnaphotIndex.value > 2
 
-  override def apply(command: KVCommand): EState[Map[String, String], Nothing, Any] =
-    command match
+  override def apply(command: KVCommand): EState[Map[String, String], Nothing, command.Response] =
+    (command match
       case Set(k, v) => EState.succeed(((), map.updated(k, v)))
       case Get(k)    => EState.succeed(((), map.get(k).getOrElse("")))
+    ).map(_.asInstanceOf[command.Response])
 
 class HttpServer(raft: Raft[Map[String, String], Nothing, KVCommand]):
 
@@ -113,4 +114,4 @@ object KVStoreApp extends zio.ZIOAppDefault:
 
     program.exitCode.provideSomeLayer(
       ZContext.live.orDie ++ zio.lmdb.Environment.test
-    ) // TODO (eran): change test to live?
+    )

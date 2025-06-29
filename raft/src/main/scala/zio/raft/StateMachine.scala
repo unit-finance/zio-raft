@@ -5,7 +5,7 @@ import zio.stream.Stream
 import zio.prelude.EState
 
 trait StateMachine[S, E, A <: Command]:
-  def apply(command: A): EState[S, E, Any] // TODO (eran): can Any be replaced with command.Response ? 
+  def apply(command: A): EState[S, E, command.Response]
 
   def takeSnapshot: Stream[Nothing, Byte]
 

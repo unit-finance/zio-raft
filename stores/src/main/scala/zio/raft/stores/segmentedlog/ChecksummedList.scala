@@ -52,7 +52,7 @@ class ChecksummedList[A](codec: Codec[A]) extends Codec[List[A]]:
           merge(offset, half) ++ merge(
             offset + half,
             half + (if size % 2 == 0 then 0 else 1)
-          ) 
+          )
       Attempt.successful(merge(0, buf.size))
     else
       Attempt.failure(

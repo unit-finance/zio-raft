@@ -93,20 +93,20 @@ class ZSocket private (
         }
         .refineToOrDie[ZMQException]
 
-      msg <- if (msg != null) ZIO.succeed(msg)
-                  else {
-                    zio
-                      .ZIO
-                      .attemptBlockingCancelable {
-                        val msg = socket.recv(0, canceled)
-                        if (msg != null) Right(msg)
-                        else Left(new ZMQException(socket.errno()))
-                      }(ZIO.attempt(socket.cancel(canceled)).orDie)
-                      .absolve
-                      .refineToOrDie[ZMQException]
-                      .retryWhile(_.getErrorCode() == ZmqError.EAGAIN)
-                  }
-          } yield msg
+      msg <-
+        if (msg != null) ZIO.succeed(msg)
+        else {
+          zio.ZIO
+            .attemptBlockingCancelable {
+              val msg = socket.recv(0, canceled)
+              if (msg != null) Right(msg)
+              else Left(new ZMQException(socket.errno()))
+            }(ZIO.attempt(socket.cancel(canceled)).orDie)
+            .absolve
+            .refineToOrDie[ZMQException]
+            .retryWhile(_.getErrorCode() == ZmqError.EAGAIN)
+        }
+    } yield msg
 
   def receiveMsg: ZIO[Any, ZMQException, Msg] = receiveMsgWait(
     new AtomicBoolean(false)

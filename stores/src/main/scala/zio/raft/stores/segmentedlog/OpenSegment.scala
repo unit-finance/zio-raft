@@ -48,7 +48,7 @@ class OpenSegment[A <: Command: Codec](
       last <- makeStream(channel)
         .via(recordsOnly)
         .run(lastAndDecode)
-        .orDie 
+        .orDie
     } yield last match
       case None    => (previousTerm, firstIndex.minusOne)
       case Some(e) => (e.term, e.index)
@@ -118,8 +118,8 @@ class OpenSegment[A <: Command: Codec](
         channel,
         validateChecksum = true
       ).collect:
-          case c: BaseTransducer.Result.Checksum => c 
-        .runLast
+        case c: BaseTransducer.Result.Checksum => c
+      .runLast
         .orDie
 
       currentFileSize <- channel.size.orDie
@@ -135,7 +135,7 @@ class OpenSegment[A <: Command: Codec](
             _ <- positionRef.set(BaseTransducer.headerSize)
           yield ()
         case Some(BaseTransducer.Result.Checksum(offset, true))
-            if currentFileSize == offset + BaseTransducer.isEntrySize + BaseTransducer.checksumSize => 
+            if currentFileSize == offset + BaseTransducer.isEntrySize + BaseTransducer.checksumSize =>
           ZIO.logInfo("SegementedLog: Checksum is valid - no recovery needed")
         case Some(BaseTransducer.Result.Checksum(offset, true)) =>
           ZIO.logWarning(

@@ -7,10 +7,10 @@ import zio.{ZIO, durationInt}
 object RaftIntegrationSpec extends ZIOSpecDefault:
 
   private def findTheNewLeader(
-      currentLeader: Raft[Int, Nothing, TestCommands],
-      raft1: Raft[Int, Nothing, TestCommands],
-      raft2: Raft[Int, Nothing, TestCommands],
-      raft3: Raft[Int, Nothing, TestCommands]
+      currentLeader: Raft[Int, TestCommands],
+      raft1: Raft[Int, TestCommands],
+      raft2: Raft[Int, TestCommands],
+      raft3: Raft[Int, TestCommands]
   ) =
     for
       r1IsLeader <- raft1.isTheLeader
@@ -23,10 +23,10 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
       else None
 
   private def waitForNewLeader(
-      currentLeader: Raft[Int, Nothing, TestCommands],
-      raft1: Raft[Int, Nothing, TestCommands],
-      raft2: Raft[Int, Nothing, TestCommands],
-      raft3: Raft[Int, Nothing, TestCommands]
+      currentLeader: Raft[Int, TestCommands],
+      raft1: Raft[Int, TestCommands],
+      raft2: Raft[Int, TestCommands],
+      raft3: Raft[Int, TestCommands]
   ) =
     findTheNewLeader(currentLeader, raft1, raft2, raft3)
       .tap:

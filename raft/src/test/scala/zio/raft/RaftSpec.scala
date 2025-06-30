@@ -6,7 +6,7 @@ import zio.test.*
 import zio.{Scope, ZIO}
 
 object RaftSpec extends ZIOSpecDefault:
-  def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean): ZIO[Any, Nothing, (Raft[Int, Nothing, TestCommands], MockRpc[TestCommands])] =
+  def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean): ZIO[Any, Nothing, (Raft[Int, TestCommands], MockRpc[TestCommands])] =
     (for
       stable <- Stable.makeInMemory
       logStore <- LogStore.makeInMemory[TestCommands]
@@ -21,24 +21,24 @@ object RaftSpec extends ZIOSpecDefault:
         logStore,
         snapshotStore,
         rpc,
-        new TestStateMachine(0, enableSnapshot)
+        new TestStateMachine(enableSnapshot)
       )
     yield (raft, rpc))
 
-  def isCandidate(raft: Raft[Int, Nothing, TestCommands]) =
+  def isCandidate(raft: Raft[Int, TestCommands]) =
     for s <- raft.raftState.get
     yield if s.isInstanceOf[Candidate] then true else false
 
-  def isFollower(raft: Raft[Int, Nothing, TestCommands]) =
+  def isFollower(raft: Raft[Int, TestCommands]) =
     for s <- raft.raftState.get
     yield if s.isInstanceOf[Follower] then true else false
 
-  def expectFollower(raft: Raft[Int, Nothing, TestCommands]) =
+  def expectFollower(raft: Raft[Int, TestCommands]) =
     raft.raftState.get.flatMap:
       case f: Follower => ZIO.succeed(f)
       case _           => ZIO.die(new Exception("Expected follower"))
 
-  def getLeader(raft: Raft[Int, Nothing, TestCommands]) =
+  def getLeader(raft: Raft[Int, TestCommands]) =
     for s <- raft.raftState.get
     yield s match
       case Follower(commitIndex, lastApplied, electionTimeout, leaderId) =>
@@ -55,7 +55,7 @@ object RaftSpec extends ZIOSpecDefault:
         Some(raft.memberId)
 
   def handleHeartbeat(
-      raft: Raft[Int, Nothing, TestCommands],
+      raft: Raft[Int, TestCommands],
       term: Term,
       leaderId: MemberId,
       commitIndex: Index
@@ -67,7 +67,7 @@ object RaftSpec extends ZIOSpecDefault:
     )
 
   def handleVoteGranted(
-      raft: Raft[Int, Nothing, TestCommands],
+      raft: Raft[Int, TestCommands],
       term: Term,
       memberId: MemberId
   ) =
@@ -78,7 +78,7 @@ object RaftSpec extends ZIOSpecDefault:
     )
 
   def handelAppendEntries(
-      raft: Raft[Int, Nothing, TestCommands],
+      raft: Raft[Int, TestCommands],
       term: Term,
       leaderId: MemberId,
       previousIndex: Index,
@@ -99,13 +99,13 @@ object RaftSpec extends ZIOSpecDefault:
       )
     )
 
-  def handleBootstrap(raft: Raft[Int, Nothing, TestCommands]) =
+  def handleBootstrap(raft: Raft[Int, TestCommands]) =
     raft.handleStreamItem(StreamItem.Bootstrap[TestCommands]())
 
-  def handleTick(raft: Raft[Int, Nothing, TestCommands]) =
+  def handleTick(raft: Raft[Int, TestCommands]) =
     raft.handleStreamItem(StreamItem.Tick[TestCommands]())
 
-  def sendCommand(raft: Raft[Int, Nothing, TestCommands], commandArg: TestCommands) =
+  def sendCommand(raft: Raft[Int, TestCommands], commandArg: TestCommands) =
     for
       promiseArg <- zio.Promise.make[NotALeaderError, Int]
       _ <- raft.handleStreamItem(new CommandMessage[TestCommands] {
@@ -114,7 +114,7 @@ object RaftSpec extends ZIOSpecDefault:
       })
     yield ()
 
-  def bootstrap(raft: Raft[Int, Nothing, TestCommands]) =
+  def bootstrap(raft: Raft[Int, TestCommands]) =
     for
       _ <- handleBootstrap(raft)
       _ <- handleVoteGranted(raft, Term(1), MemberId("peer2"))

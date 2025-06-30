@@ -19,7 +19,7 @@ object StreamItem:
     val command: A
     val promise: CommandPromise[command.Response]
 
-class Raft[S, E, A <: Command](
+class Raft[S, A <: Command](
     val memberId: MemberId,
     peers: Peers,
     private[raft] val raftState: Ref[State],
@@ -28,7 +28,7 @@ class Raft[S, E, A <: Command](
     logStore: LogStore[A],
     snapshotStore: SnapshotStore,
     rpc: RPC[A],
-    stateMachine: StateMachine[S, E, A],
+    stateMachine: StateMachine[S, A],
     pendingCommands: PendingCommands, // This should be part of leader state?
     appStateRef: Ref[S]
 ):
@@ -457,10 +457,9 @@ class Raft[S, E, A <: Command](
       now <- zio.Clock.instant
       s <- raftState.get
       currentTerm <- stable.currentTerm
-      
+
       _ <- s match
-        case f: State.Follower
-            if now.isAfter(f.electionTimeout) && !currentTerm.isZero => 
+        case f: State.Follower if now.isAfter(f.electionTimeout) && !currentTerm.isZero =>
           startElection
         case c: State.Candidate if now.isAfter(c.electionTimeout) =>
           startElection
@@ -552,7 +551,8 @@ class Raft[S, E, A <: Command](
       )
       _ <- ZIO.when(shouldTakeSnapshot):
         for
-          stream = stateMachine.takeSnapshot
+          appState <- appStateRef.get
+          (_, stream) <- stateMachine.takeSnapshot.toZIOWithState(appState)
 
           // The last applied should term be in the log
           previousTerm <- logStore
@@ -568,7 +568,7 @@ class Raft[S, E, A <: Command](
         yield ()
     yield ()
 
-  private def applyToStateMachine(state: State): ZIO[Any, E, State] =
+  private def applyToStateMachine(state: State): ZIO[Any, Nothing, State] =
     if state.commitIndex > state.lastApplied then
       logStore
         .stream(state.lastApplied.plusOne, state.commitIndex)
@@ -579,8 +579,9 @@ class Raft[S, E, A <: Command](
             _ <- appStateRef.set(newState)
 
             _ <- state match
-              case l: Leader => pendingCommands.complete(logEntry.index, response.asInstanceOf[logEntry.command.Response])
-              case _         => ZIO.unit
+              case l: Leader =>
+                pendingCommands.complete(logEntry.index, response.asInstanceOf[logEntry.command.Response])
+              case _ => ZIO.unit
           yield state.increaseLastApplied
         )
     else ZIO.succeed(state)
@@ -758,7 +759,7 @@ class Raft[S, E, A <: Command](
             if c.rpcDue.due(
               now,
               peer
-            ) => 
+            ) =>
           for
             currentTerm <- stable.currentTerm
             lastLogIndex <- logStore.lastIndex
@@ -781,18 +782,14 @@ class Raft[S, E, A <: Command](
   private def preRules =
     for
       _ <- startNewElectionRule
-      _ <- ZIO.foreachDiscard(peers)(p =>
-        sendRequestVoteRule(p) <*> sendHeartbeatRule(p)
-      )
+      _ <- ZIO.foreachDiscard(peers)(p => sendRequestVoteRule(p) <*> sendHeartbeatRule(p))
     yield ()
 
-  private def postRules = 
+  private def postRules =
     for
       _ <- becomeLeaderRule
       _ <- advanceCommitIndexRule
-      _ <- ZIO.foreachDiscard(peers)(p =>
-        sendAppendEntriesRule(p) <*> sendRequestVoteRule(p)
-      )
+      _ <- ZIO.foreachDiscard(peers)(p => sendAppendEntriesRule(p) <*> sendRequestVoteRule(p))
       changed <- applyToStateMachineRule
       _ <- ZIO.when(changed)(takeSnapshotRule)
     yield ()
@@ -952,14 +949,14 @@ object Raft:
   val electionTimeout = 150
   val heartbeartInterval = (electionTimeout / 2).millis
 
-  def make[S, E, A <: Command](
+  def make[S, A <: Command](
       memberId: MemberId,
       peers: Peers,
       stable: Stable,
       logStore: LogStore[A],
       snapshotStore: SnapshotStore,
       rpc: RPC[A],
-      stateMachine: StateMachine[S, E, A]
+      stateMachine: StateMachine[S, A]
   ) =
     for
       now <- zio.Clock.instant
@@ -990,7 +987,7 @@ object Raft:
       commandsQueue <- Queue.unbounded[StreamItem[A]] // TODO: should this be bounded for back-pressure?
 
       pendingCommands <- PendingCommands.make
-      raft = new Raft[S, E, A](
+      raft = new Raft[S, A](
         memberId,
         peers,
         state,
@@ -1005,14 +1002,14 @@ object Raft:
       )
     yield raft
 
-  def makeScoped[S, E, A <: Command](
+  def makeScoped[S, A <: Command](
       memberId: MemberId,
       peers: Peers,
       stable: Stable,
       logStore: LogStore[A],
       snapshotStore: SnapshotStore,
       rpc: RPC[A],
-      stateMachine: StateMachine[S, E, A]
+      stateMachine: StateMachine[S, A]
   ) =
     for
       raft <- make(

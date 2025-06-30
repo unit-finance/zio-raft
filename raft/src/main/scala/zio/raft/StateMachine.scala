@@ -2,12 +2,16 @@ package zio.raft
 
 import zio.UIO
 import zio.stream.Stream
+import zio.prelude.State
 
-trait StateMachine[A <: Command]:
-  def apply(command: A): (command.Response, StateMachine[A]) // TODO: should we use zpure here?
+trait StateMachine[S, A <: Command]:
 
-  def takeSnapshot: Stream[Nothing, Byte]
+  def emptyState: S
 
-  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[StateMachine[A]]
+  def apply(command: A): State[S, command.Response]
+
+  def takeSnapshot(state: S): Stream[Nothing, Byte]
+
+  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[S]
 
   def shouldTakeSnapshot(lastSnaphotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean

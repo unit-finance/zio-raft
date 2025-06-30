@@ -2,15 +2,15 @@ package zio.raft
 
 import zio.test.*
 import zio.test.TestAspect.withLiveClock
-import zio.{Scope, ZIO, durationInt}
+import zio.{ZIO, durationInt}
 
 object RaftIntegrationSpec extends ZIOSpecDefault:
 
   private def findTheNewLeader(
-      currentLeader: Raft[TestCommands],
-      raft1: Raft[TestCommands],
-      raft2: Raft[TestCommands],
-      raft3: Raft[TestCommands]
+      currentLeader: Raft[Int, TestCommands],
+      raft1: Raft[Int, TestCommands],
+      raft2: Raft[Int, TestCommands],
+      raft3: Raft[Int, TestCommands]
   ) =
     for
       r1IsLeader <- raft1.isTheLeader
@@ -23,10 +23,10 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
       else None
 
   private def waitForNewLeader(
-      currentLeader: Raft[TestCommands],
-      raft1: Raft[TestCommands],
-      raft2: Raft[TestCommands],
-      raft3: Raft[TestCommands]
+      currentLeader: Raft[Int, TestCommands],
+      raft1: Raft[Int, TestCommands],
+      raft2: Raft[Int, TestCommands],
+      raft3: Raft[Int, TestCommands]
   ) =
     findTheNewLeader(currentLeader, raft1, raft2, raft3)
       .tap:

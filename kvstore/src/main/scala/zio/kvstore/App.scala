@@ -1,3 +1,5 @@
+package zio.kvstore
+
 import zio.http.*
 import zio.http.Method.{GET, POST}
 import zio.http.codec.PathCodec
@@ -5,7 +7,8 @@ import zio.raft.zmq.ZmqRpc
 import zio.raft.{Command, Index, MemberId, Raft, SnapshotStore, StateMachine}
 import zio.stream.{Stream, ZStream}
 import zio.zmq.ZContext
-import zio.{Chunk, UIO, URIO, ZIO, ZIOAppArgs, ZLayer}
+import zio.{Chunk, UIO, ZIO, ZIOAppArgs, ZLayer}
+import zio.prelude.State
 
 import scodec.Codec
 import scodec.bits.BitVector
@@ -31,31 +34,31 @@ object KVCommand:
     .typecase("S", setCodec)
     .typecase("G", getCodec)
 
-class KVStateMachine(map: Map[String, String]) extends StateMachine[KVCommand]:
+class KVStateMachine extends StateMachine[Map[String, String], KVCommand]:
 
-  override def takeSnapshot: Stream[Nothing, Byte] =
-    ZStream
-      .fromZIO(ZIO.attempt(Chunk.fromArray(mapCodec.encode(map).require.toByteArray)).orDie)
-      .flattenChunks // TODO: we need to improve the conversion of ByteVector to Stream and Chunk
+  override def emptyState: Map[String, String] = Map.empty
 
-  override def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[StateMachine[KVCommand]] =
+  override def takeSnapshot(state: Map[String, String]): Stream[Nothing, Byte] =
+    ZStream.fromChunk(Chunk.fromArray(mapCodec.encode(state).require.toByteArray))
+
+  override def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[Map[String, String]] =
     // TODO: we need to improve the conversion of Stream to BitVector
     ZIO.scoped(
       stream.toInputStream
         .map(is => BitVector.fromInputStream(is, 1024))
         .map(bv => mapCodec.decodeValue(bv).require)
-        .map(m => KVStateMachine(m))
     )
 
   override def shouldTakeSnapshot(lastSnaphotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean = false
   // commitIndex.value - lastSnaphotIndex.value > 2
 
-  override def apply(command: KVCommand): (command.Response, StateMachine[KVCommand]) =
-    command match
-      case Set(k, v) => (().asInstanceOf[command.Response], KVStateMachine(map.updated(k, v)))
-      case Get(k)    => (map.get(k).getOrElse("").asInstanceOf[command.Response], this)
+  override def apply(command: KVCommand): State[Map[String, String], command.Response] =
+    (command match
+      case Set(k, v) => State.update((map: Map[String, String]) => map.updated(k, v))
+      case Get(k)    => State.get.map((map: Map[String, String]) => map.get(k).getOrElse(""))
+    ).map(_.asInstanceOf[command.Response])
 
-class HttpServer(raft: Raft[KVCommand]):
+class HttpServer(raft: Raft[Map[String, String], KVCommand]):
 
   val app = Routes(
     GET / "" -> handler(ZIO.succeed(Response.text("Hello World!"))),
@@ -102,7 +105,7 @@ object KVStoreApp extends zio.ZIOAppDefault:
           logStore,
           snapshotStore,
           rpc,
-          new KVStateMachine(Map.empty)
+          new KVStateMachine
         )
 
         _ <- raft.run.forkScoped
@@ -112,4 +115,4 @@ object KVStoreApp extends zio.ZIOAppDefault:
 
     program.exitCode.provideSomeLayer(
       ZContext.live.orDie ++ zio.lmdb.Environment.test
-    ) // TODO (eran): change test to live?
+    )

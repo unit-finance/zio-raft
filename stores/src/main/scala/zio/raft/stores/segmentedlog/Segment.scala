@@ -41,11 +41,13 @@ trait Segment[A <: Command: Codec]:
     )
 
   def lastAndDecode: ZSink[Any, Throwable, Result.Record, Result.Record, Option[LogEntry[A]]] =
-    ZSink.last[BaseTransducer.Result.Record].mapZIO:
-      case Some(record) =>
-        ZIO
-          .attemptBlocking(entryCodec[A].decodeValue(record.payload))
-          .flatMap:
-            case Attempt.Successful(value) => ZIO.some(value)
-            case Attempt.Failure(f)        => ZIO.fail(new Throwable(s"Error occurred: ${f.messageWithContext}"))
-      case None => ZIO.none
+    ZSink
+      .last[BaseTransducer.Result.Record]
+      .mapZIO:
+        case Some(record) =>
+          ZIO
+            .attemptBlocking(entryCodec[A].decodeValue(record.payload))
+            .flatMap:
+              case Attempt.Successful(value) => ZIO.some(value)
+              case Attempt.Failure(f)        => ZIO.fail(new Throwable(s"Error occurred: ${f.messageWithContext}"))
+        case None => ZIO.none

@@ -48,7 +48,7 @@ class OpenSegment[A <: Command: Codec](
       last <- makeStream(channel)
         .via(recordsOnly)
         .run(lastAndDecode)
-        .orDie // TODO (eran): we keep calling makeStream over and over, should we store the stream?
+        .orDie
     } yield last match
       case None    => (previousTerm, firstIndex.minusOne)
       case Some(e) => (e.term, e.index)
@@ -117,11 +117,9 @@ class OpenSegment[A <: Command: Codec](
       lastChecksum <- makeStream(
         channel,
         validateChecksum = true
-      ) // TODO (eran): we don't need to validate checksum here, we can grab the last one and only validate it, this will be more efficient
-        .collect:
-          case c: BaseTransducer.Result.Checksum =>
-            c // TODO (eran): Do we want to optimize this by allowing the transducer to skip body decoding?
-        .runLast
+      ).collect:
+        case c: BaseTransducer.Result.Checksum => c
+      .runLast
         .orDie
 
       currentFileSize <- channel.size.orDie
@@ -137,7 +135,7 @@ class OpenSegment[A <: Command: Codec](
             _ <- positionRef.set(BaseTransducer.headerSize)
           yield ()
         case Some(BaseTransducer.Result.Checksum(offset, true))
-            if currentFileSize == offset + BaseTransducer.isEntrySize + BaseTransducer.checksumSize => // TODO (eran): we want to verify that nothing was written after the checksum, why do we need isEntrySize?
+            if currentFileSize == offset + BaseTransducer.isEntrySize + BaseTransducer.checksumSize =>
           ZIO.logInfo("SegementedLog: Checksum is valid - no recovery needed")
         case Some(BaseTransducer.Result.Checksum(offset, true)) =>
           ZIO.logWarning(

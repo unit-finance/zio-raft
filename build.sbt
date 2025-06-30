@@ -1,11 +1,12 @@
 lazy val zio2Version = "2.1.1"
 lazy val zioLoggingVersion = "2.2.4"
+lazy val zioPreludeVersion = "1.0.0-RC41"
 
 lazy val zio1Version = "1.0.18"
 
 lazy val jeromqVersion = "0.5.3"
 
-lazy val scala3Version = "3.4.2"
+lazy val scala3Version = "3.7.1"
 lazy val scala213Version = "2.13.14"
 lazy val mainScalaVersion = scala3Version
 
@@ -21,7 +22,7 @@ ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
 ThisBuild / licenses := List(
-  "MPL 2.0" -> new URL("https://www.mozilla.org/en-US/MPL/2.0/")
+  "MPL 2.0" -> url("https://www.mozilla.org/en-US/MPL/2.0/")
 )
 
 ThisBuild / scmInfo := Some(
@@ -61,6 +62,11 @@ scalaVersion := mainScalaVersion
 resolvers +=
   "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots"
 
+ThisBuild / scalacOptions ++= Seq(
+  "-Wunused:imports",
+  "-preview" // enabling for-comprehension improvements for scala 3.7.1 (in >3.8 no need for this flag anymore)
+  )
+
 lazy val root = project
   .in(file("."))
   .aggregate(raft, kvstore, zio1zmq, zio2zmq, raftZmq, stores, ziolmdb)
@@ -74,15 +80,15 @@ lazy val raft = project
   .settings(
     name := "zio-raft",
     scalaVersion := mainScalaVersion,
-    scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "dev.zio" %% "zio-nio" % "2.0.0",
-      "dev.zio" %% "zio-prelude" % "1.0.0-RC26",      
-    )
+      "dev.zio" %% "zio-prelude" % zioPreludeVersion,      
+    ),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
 
 lazy val kvstore = project
@@ -91,10 +97,9 @@ lazy val kvstore = project
     name := "kvstore",
     publish / skip := true,
     scalaVersion := mainScalaVersion,
-    scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,
-      "dev.zio" %% "zio-prelude" % "1.0.0-RC26",
+      "dev.zio" %% "zio-prelude" % zioPreludeVersion,
       "dev.zio" %% "zio-http" % "3.0.0-RC8",
     ),
     excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
@@ -106,13 +111,13 @@ lazy val raftZmq = project
   .settings(
     name := "zio-raft-zmq",
     scalaVersion := mainScalaVersion,
-    scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "org.scodec" %% "scodec-bits" % "1.1.37",
       "org.scodec" %% "scodec-core" % "2.2.1"
-    )
+    ),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
   .dependsOn(raft, zio2zmq)
 
@@ -123,7 +128,7 @@ lazy val zio1zmq = project
     crossScalaVersions := supportedScalaVersions,
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio1Version,
-      "dev.zio" %% "zio-prelude" % "1.0.0-RC5",
+      "dev.zio" %% "zio-prelude" % "1.0.0-RC5", // latest version for zio 1.0.18
       "org.zeromq" % "jeromq" % jeromqVersion
     ),
     libraryDependencies ++= {
@@ -150,7 +155,7 @@ lazy val zio2zmq = project
     crossScalaVersions := supportedScalaVersions,
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,
-      "dev.zio" %% "zio-prelude" % "1.0.0-RC26",
+      "dev.zio" %% "zio-prelude" % zioPreludeVersion,
       "org.zeromq" % "jeromq" % jeromqVersion
     ),
     libraryDependencies ++= {
@@ -174,7 +179,6 @@ lazy val ziolmdb = project
   .settings(
     name := "zio-lmdb",
     scalaVersion := mainScalaVersion,
-    scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,
       "dev.zio" %% "zio-nio" % "2.0.0",
@@ -190,13 +194,13 @@ lazy val stores = project
   .settings(
     name := "zio-raft-stores",
     scalaVersion := mainScalaVersion,
-    scalacOptions ++= Seq("-indent", "-rewrite", "-Wunused:imports"),
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "org.scodec" %% "scodec-bits" % "1.1.37",
       "org.scodec" %% "scodec-core" % "2.2.1",
       "dev.zio" %% "zio-nio" % "2.0.0"
-    )
+    ),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
   .dependsOn(raft, ziolmdb)

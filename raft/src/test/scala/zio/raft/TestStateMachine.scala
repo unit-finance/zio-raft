@@ -23,7 +23,7 @@ case class TestStateMachine(enableSnapshot: Boolean) extends StateMachine[Int, T
   override def shouldTakeSnapshot(lastSnaphotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
     enableSnapshot
 
-  override def takeSnapshot: State[Int, Stream[Nothing, Byte]] = State.get.map(s => ZStream.fromIterable(s.toString().getBytes()))
+  override def takeSnapshot(state: Int): Stream[Nothing, Byte] = ZStream.fromIterable(state.toString().getBytes())
 
 object TestStateMachine:
   def make(enableSnapshot: Boolean) = TestStateMachine(enableSnapshot)

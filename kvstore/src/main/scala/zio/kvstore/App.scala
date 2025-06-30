@@ -38,8 +38,8 @@ class KVStateMachine extends StateMachine[Map[String, String], KVCommand]:
 
   override def emptyState: Map[String, String] = Map.empty
 
-  override def takeSnapshot: State[Map[String, String], Stream[Nothing, Byte]] =
-    State.get.map(map => ZStream.fromChunk(Chunk.fromArray(mapCodec.encode(map).require.toByteArray)))
+  override def takeSnapshot(state: Map[String, String]): Stream[Nothing, Byte] =
+    ZStream.fromChunk(Chunk.fromArray(mapCodec.encode(state).require.toByteArray))
 
   override def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[Map[String, String]] =
     // TODO: we need to improve the conversion of Stream to BitVector

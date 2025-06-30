@@ -10,7 +10,7 @@ trait StateMachine[S, A <: Command]:
 
   def apply(command: A): State[S, command.Response]
 
-  def takeSnapshot: State[S, Stream[Nothing, Byte]]
+  def takeSnapshot(state: S): Stream[Nothing, Byte]
 
   def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[S]
 

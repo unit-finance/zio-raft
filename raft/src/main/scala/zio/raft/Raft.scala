@@ -552,7 +552,7 @@ class Raft[S, A <: Command](
       _ <- ZIO.when(shouldTakeSnapshot):
         for
           appState <- appStateRef.get
-          (_, stream) <- stateMachine.takeSnapshot.toZIOWithState(appState)
+          stream = stateMachine.takeSnapshot(appState)
 
           // The last applied should term be in the log
           previousTerm <- logStore

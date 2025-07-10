@@ -95,7 +95,7 @@ class Raft[S, A <: Command](
     yield now.plus(interval)
 
   private def setCommitIndex(commitIndex: Index): UIO[Unit] =
-    raftState.update(s => s.withCommitIndex(commitIndex))
+    raftState.update(s => s.withCommitIndex(commitIndex).asInstanceOf[State[S]])
 
   private def handleRequestVoteRequest(m: RequestVoteRequest[A]) =
     for
@@ -135,9 +135,9 @@ class Raft[S, A <: Command](
         case candidate: State.Candidate[S] if currentTerm == m.term =>
           m match
             case m: RequestVoteResult.Rejected[A] =>
-              raftState.set(candidate.ackRpc(m.from))
+              raftState.set(candidate.ackRpc(m.from).asInstanceOf[State[S]])
             case m: RequestVoteResult.Granted[A] =>
-              raftState.set(candidate.addVote(m.from).ackRpc(m.from))
+              raftState.set(candidate.addVote(m.from).ackRpc(m.from).asInstanceOf[State[S]])
         case _ => ZIO.unit
     yield ()
 
@@ -435,19 +435,11 @@ class Raft[S, A <: Command](
 
   private def startElection =
     for
-      _ <- stable.nextTerm
-      _ <- stable.voteFor(memberId)
       currentTerm <- stable.currentTerm
-      lastTerm <- logStore.lastTerm
-      lastIndex <- logStore.lastIndex
-      requests = peers.map: peer =>
-        peer -> RequestVoteRequest[A](
-          currentTerm,
-          memberId,
-          lastIndex,
-          lastTerm
-        )
-      _ <- rpc.sendManyRequestVoteRequests(requests.toList)
+      _ <- ZIO.logDebug(
+        s"memberId=${this.memberId} start new election term ${currentTerm.plusOne}"
+      )
+      _ <- stable.newTerm(currentTerm.plusOne, Some(memberId))
       electionTimeout <- makeElectionTimeout
       _ <- raftState.update(s =>
         State.Candidate[S](
@@ -526,7 +518,7 @@ class Raft[S, A <: Command](
             for
               nTerm <- logStore.logTerm(n)
               _ <- ZIO.when(nTerm.contains(currentTerm))(
-                raftState.set(l.withCommitIndex(n))
+                raftState.set(l.withCommitIndex(n).asInstanceOf[State[S]])
               )
               _ <- ZIO
                 .logDebug(
@@ -587,11 +579,15 @@ class Raft[S, A <: Command](
             (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState)
             _ <- appStateRef.set(newState)
 
-            _ <- state match
+            newRaftState <- state match
               case l: Leader[S] =>
-                pendingCommands.complete(logEntry.index, response.asInstanceOf[logEntry.command.Response])
-              case _ => ZIO.unit
-          yield state.increaseLastApplied
+                for
+                  _ <- pendingCommands.complete(logEntry.index, response.asInstanceOf[logEntry.command.Response])
+                  // Complete pending reads with the new state after this write
+                  updatedLeader = l.withCompletedReads(logEntry.index, newState)
+                yield updatedLeader.increaseLastApplied
+              case _ => ZIO.succeed(state.increaseLastApplied)
+          yield newRaftState
         )
     else ZIO.succeed(state)
 
@@ -771,19 +767,16 @@ class Raft[S, A <: Command](
             ) =>
           for
             currentTerm <- stable.currentTerm
-            lastLogIndex <- logStore.lastIndex
-            lastLogTerm <- logStore.lastTerm
-
-            _ <- raftState.set(c.withRPCDue(peer, now.plus(rpcTimeout)))
-            _ <- rpc.sendRequestVote(
-              peer,
-              RequestVoteRequest[A](
-                currentTerm,
-                memberId,
-                lastLogIndex,
-                lastLogTerm
-              )
+            lastTerm <- logStore.lastTerm
+            lastIndex <- logStore.lastIndex
+            request = RequestVoteRequest[A](
+              currentTerm,
+              memberId,
+              lastIndex,
+              lastTerm
             )
+            _ <- rpc.sendRequestVote(peer, request)
+            _ <- raftState.set(c.withRPCDue(peer, now.plus(rpcTimeout)).asInstanceOf[State[S]])
           yield ()
         case _ => ZIO.unit
     yield ()
@@ -912,10 +905,29 @@ class Raft[S, A <: Command](
       promiseArg <- Promise.make[NotALeaderError, commandArg.Response]
       _ <- commandsQueue.offer(new CommandMessage {
         val command = commandArg
-        val promise = promiseArg.asInstanceOf
+        val promise = promiseArg.asInstanceOf[CommandPromise[command.Response]]
       })
       res <- promiseArg.await
     yield (res)
+
+  def readState: ZIO[Any, NotALeaderError, S] =
+    for
+      s <- raftState.get
+      result <- s match
+        case l: Leader[S] =>
+          for
+            promise <- Promise.make[NotALeaderError, S]
+            now <- zio.Clock.instant
+            lastApplied <- logStore.lastIndex
+            entry = PendingReadEntry[S](promise, lastApplied, now)
+            _ <- raftState.set(l.withPendingRead(entry))
+            result <- promise.await
+          yield result
+        case f: Follower[S] =>
+          ZIO.fail(NotALeaderError(f.leaderId))
+        case c: Candidate[S] =>
+          ZIO.fail(NotALeaderError(None))
+    yield result
 
   // bootstrap the node and wait until the node would become the leader, only works when the current term is zero
   def bootstrap =

@@ -27,24 +27,24 @@ object RaftSpec extends ZIOSpecDefault:
 
   def isCandidate(raft: Raft[Int, TestCommands]) =
     for s <- raft.raftState.get
-    yield if s.isInstanceOf[Candidate] then true else false
+    yield if s.isInstanceOf[State.Candidate[Int]] then true else false
 
   def isFollower(raft: Raft[Int, TestCommands]) =
     for s <- raft.raftState.get
-    yield if s.isInstanceOf[Follower] then true else false
+    yield if s.isInstanceOf[State.Follower[Int]] then true else false
 
   def expectFollower(raft: Raft[Int, TestCommands]) =
     raft.raftState.get.flatMap:
-      case f: Follower => ZIO.succeed(f)
-      case _           => ZIO.die(new Exception("Expected follower"))
+      case f: State.Follower[Int] => ZIO.succeed(f)
+      case _                      => ZIO.die(new Exception("Expected follower"))
 
   def getLeader(raft: Raft[Int, TestCommands]) =
     for s <- raft.raftState.get
     yield s match
-      case Follower(commitIndex, lastApplied, electionTimeout, leaderId) =>
+      case State.Follower(commitIndex, lastApplied, electionTimeout, leaderId) =>
         leaderId
-      case _: Candidate => None
-      case Leader(
+      case _: State.Candidate[Int] => None
+      case State.Leader(
             nextIndex,
             matchIndex,
             heartbeatDue,

@@ -50,7 +50,8 @@ object RaftSpec extends ZIOSpecDefault:
             heartbeatDue,
             replicationStatus,
             commitIndex,
-            lastApplied
+            lastApplied,
+            pendingReads
           ) =>
         Some(raft.memberId)
 

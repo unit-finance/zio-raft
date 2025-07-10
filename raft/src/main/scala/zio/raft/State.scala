@@ -2,31 +2,31 @@ package zio.raft
 
 import java.time.Instant
 
-sealed trait State:
+sealed trait State[S]:
   val commitIndex: Index
   val lastApplied: Index
 
   def withCommitIndex(commitIndex: Index) =
     this match
-      case f: State.Follower  => f.copy(commitIndex = commitIndex)
-      case f: State.Candidate => f.copy(commitIndex = commitIndex)
-      case f: State.Leader    => f.copy(commitIndex = commitIndex)
+      case f: State.Follower[S]  => f.copy(commitIndex = commitIndex)
+      case f: State.Candidate[S] => f.copy(commitIndex = commitIndex)
+      case f: State.Leader[S]    => f.copy(commitIndex = commitIndex)
 
-  def increaseLastApplied: State = this match
-    case f: State.Follower  => f.copy(lastApplied = lastApplied.plusOne)
-    case f: State.Candidate => f.copy(lastApplied = lastApplied.plusOne)
-    case f: State.Leader    => f.copy(lastApplied = lastApplied.plusOne)
+  def increaseLastApplied: State[S] = this match
+    case f: State.Follower[S]  => f.copy(lastApplied = lastApplied.plusOne)
+    case f: State.Candidate[S] => f.copy(lastApplied = lastApplied.plusOne)
+    case f: State.Leader[S]    => f.copy(lastApplied = lastApplied.plusOne)
 
 object State:
-  case class Follower(commitIndex: Index, lastApplied: Index, electionTimeout: Instant, leaderId: Option[MemberId])
-      extends State
-  case class Candidate(
+  case class Follower[S](commitIndex: Index, lastApplied: Index, electionTimeout: Instant, leaderId: Option[MemberId])
+      extends State[S]
+  case class Candidate[S](
       rpcDue: RPCDue,
       voteGranted: Int,
       commitIndex: Index,
       lastApplied: Index,
       electionTimeout: Instant
-  ) extends State:
+  ) extends State[S]:
     def addVote(peer: MemberId) =
       this.copy(voteGranted = voteGranted + 1)
 
@@ -36,7 +36,7 @@ object State:
     def withRPCDue(from: MemberId, when: Instant) =
       this.copy(rpcDue = rpcDue.set(from, when))
 
-  case class Leader(
+  case class Leader[S](
       nextIndex: NextIndex,
       matchIndex: MatchIndex,
       // rpcDue: RPCDue,
@@ -44,8 +44,8 @@ object State:
       replicationStatus: ReplicationStatus,
       commitIndex: Index,
       lastApplied: Index,
-      pendingReads: PendingReads[Command]
-  ) extends State:
+      pendingReads: PendingReads[S]
+  ) extends State[S]:
 
     def withMatchIndex(from: MemberId, index: Index) =
       this.copy(matchIndex = matchIndex.set(from, index))
@@ -78,12 +78,11 @@ object State:
       this.copy(heartbeatDue = heartbeatDue.set(from, when))
 
     // Pending reads management methods
-    def withPendingRead(entry: PendingReadEntry[Command]): Leader =
+    def withPendingRead(entry: PendingReadEntry[S]): Leader[S] =
       this.copy(pendingReads = pendingReads.enqueue(entry))
 
-    def withCompletedReads(upToIndex: Index): (List[PendingReadEntry[Command]], Leader) =
-      val (completed, remaining) = pendingReads.dequeue(upToIndex)
-      (completed, this.copy(pendingReads = remaining))
+    def withCompletedReads(upToIndex: Index, state: S): Leader[S] =
+      this.copy(pendingReads = pendingReads.complete(upToIndex, state))
 
-    def getPendingReadsUpToIndex(index: Index): List[PendingReadEntry[Command]] =
+    def getPendingReadsUpToIndex(index: Index): List[PendingReadEntry[S]] =
       pendingReads.filterByIndex(index)

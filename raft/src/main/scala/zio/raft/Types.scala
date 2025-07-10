@@ -1,6 +1,7 @@
 package zio.raft
 
 import zio.{Chunk, Promise}
+import java.time.Instant
 
 case class Term(value: Long):
   def <(other: Term) = value < other.value
@@ -55,6 +56,31 @@ trait Command:
 case class NotALeaderError(leaderId: Option[MemberId])
 
 type CommandPromise[A] = Promise[NotALeaderError, A]
+
+// Pending Reads Queue types for linearizable reads
+case class PendingReadEntry[A <: Command](
+    promise: Promise[NotALeaderError, A#Response],
+    enqueuedAtIndex: Index,
+    timestamp: Instant
+)
+
+case class PendingReads[A <: Command](entries: List[PendingReadEntry[A]]):
+  def enqueue(entry: PendingReadEntry[A]): PendingReads[A] =
+    PendingReads(entries :+ entry)
+
+  def dequeue(upToIndex: Index): (List[PendingReadEntry[A]], PendingReads[A]) =
+    val (completed, remaining) = entries.partition(_.enqueuedAtIndex <= upToIndex)
+    (completed, PendingReads(remaining))
+
+  def filterByIndex(index: Index): List[PendingReadEntry[A]] =
+    entries.filter(_.enqueuedAtIndex <= index)
+
+  def isEmpty: Boolean = entries.isEmpty
+
+  def size: Int = entries.size
+
+object PendingReads:
+  def empty[A <: Command]: PendingReads[A] = PendingReads(List.empty)
 
 case class EntryKey(term: Term, index: Index)
 case class LogEntry[A <: Command](command: A, term: Term, index: Index)

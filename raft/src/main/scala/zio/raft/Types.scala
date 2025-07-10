@@ -59,7 +59,7 @@ type CommandPromise[A] = Promise[NotALeaderError, A]
 
 // Pending Reads Queue types for linearizable reads
 case class PendingReadEntry[A <: Command](
-    promise: Promise[NotALeaderError, A#Response],
+    promise: Promise[NotALeaderError, Any],
     enqueuedAtIndex: Index,
     timestamp: Instant
 )

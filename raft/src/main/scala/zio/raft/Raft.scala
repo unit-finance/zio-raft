@@ -490,7 +490,8 @@ class Raft[S, A <: Command](
             HeartbeatDue.empty,
             ReplicationStatus(peers),
             c.commitIndex,
-            c.lastApplied
+            c.lastApplied,
+            PendingReads.empty
           )
         )
       yield ()
@@ -843,7 +844,8 @@ class Raft[S, A <: Command](
             heartbeatDue,
             replicationStatus,
             commintIndex,
-            lastApplied
+            lastApplied,
+            pendingReads
           ) =>
         for
           lastIndex <- logStore.lastIndex

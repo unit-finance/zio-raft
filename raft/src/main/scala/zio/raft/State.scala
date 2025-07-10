@@ -43,7 +43,8 @@ object State:
       heartbeatDue: HeartbeatDue,
       replicationStatus: ReplicationStatus,
       commitIndex: Index,
-      lastApplied: Index
+      lastApplied: Index,
+      pendingReads: PendingReads[Command]
   ) extends State:
 
     def withMatchIndex(from: MemberId, index: Index) =
@@ -75,3 +76,14 @@ object State:
 
     def withHeartbeatDue(from: MemberId, when: Instant) =
       this.copy(heartbeatDue = heartbeatDue.set(from, when))
+
+    // Pending reads management methods
+    def withPendingRead(entry: PendingReadEntry[Command]): Leader =
+      this.copy(pendingReads = pendingReads.enqueue(entry))
+
+    def withCompletedReads(upToIndex: Index): (List[PendingReadEntry[Command]], Leader) =
+      val (completed, remaining) = pendingReads.dequeue(upToIndex)
+      (completed, this.copy(pendingReads = remaining))
+
+    def getPendingReadsUpToIndex(index: Index): List[PendingReadEntry[Command]] =
+      pendingReads.filterByIndex(index)

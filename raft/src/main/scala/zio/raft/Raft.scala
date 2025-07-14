@@ -38,10 +38,10 @@ class Raft[S, A <: Command](
   private def stepDown(newTerm: Term, leaderId: Option[MemberId]) =
     for
       _ <- stable.newTerm(newTerm, None)
-      // Reset pending commands only if we're currently a leader
+      // Reset pending operations only if we're currently a leader
       currentState <- raftState.get
       _ <- currentState match
-        case l: Leader[S] => l.pendingCommands.reset(leaderId)
+        case l: Leader[S] => l.resetOperations(leaderId).unit
         case _ => ZIO.unit
       electionTimeout <- makeElectionTimeout
 
@@ -588,10 +588,8 @@ class Raft[S, A <: Command](
             newRaftState <- state match
               case l: Leader[S] =>
                 for
-                  // Complete pending commands with the specific command response
-                  _ <- l.pendingCommands.complete(logEntry.index, response)
-                  // Complete pending reads with the new state after this write
-                  updatedLeader = l.withCompletedReads(logEntry.index, newState)
+                  // Complete pending operations (both commands and reads) with the response and new state
+                  updatedLeader <- l.completeOperations(logEntry.index, response, newState)
                 yield updatedLeader.increaseLastApplied
               case _ => ZIO.succeed(state.increaseLastApplied)
           yield newRaftState
@@ -848,16 +846,7 @@ class Raft[S, A <: Command](
       promise: CommandPromise[command.Response]
   ): ZIO[Any, Nothing, Unit] =
     raftState.get.flatMap:
-      case Leader[S](
-            nextIndex,
-            matchIndex,
-            heartbeatDue,
-            replicationStatus,
-            commintIndex,
-            lastApplied,
-            pendingReads,
-            pendingCommands
-          ) =>
+      case l: Leader[S] =>
         for
           lastIndex <- logStore.lastIndex
           currentTerm <- stable.currentTerm
@@ -868,7 +857,7 @@ class Raft[S, A <: Command](
           )
           _ <- ZIO.logDebug(s"memberId=${this.memberId} handleCommand $entry")
           _ <- logStore.storeLog(entry)
-          _ <- pendingCommands.add(entry.index, promise)
+          _ <- l.addPendingCommand(entry.index, promise)
         yield ()
       case f: Follower[S] =>
         promise.fail(NotALeaderError(f.leaderId)).unit

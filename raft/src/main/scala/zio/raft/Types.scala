@@ -80,6 +80,10 @@ case class PendingReads[S](entries: List[PendingReadEntry[S]]):
   def filterByIndex(index: Index): List[PendingReadEntry[S]] =
     entries.filter(_.enqueuedAtIndex <= index)
 
+  def reset(leaderId: Option[MemberId]): PendingReads[S] =
+    entries.foreach(_.promise.fail(NotALeaderError(leaderId)))
+    PendingReads(List.empty)
+
   def isEmpty: Boolean = entries.isEmpty
 
   def size: Int = entries.size

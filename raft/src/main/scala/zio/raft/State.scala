@@ -1,6 +1,7 @@
 package zio.raft
 
 import java.time.Instant
+import zio.ZIO
 
 sealed trait State[S]:
   val commitIndex: Index
@@ -82,8 +83,23 @@ object State:
     def withPendingRead(entry: PendingReadEntry[S]): Leader[S] =
       this.copy(pendingReads = pendingReads.enqueue(entry))
 
-    def withCompletedReads(upToIndex: Index, state: S): Leader[S] =
-      this.copy(pendingReads = pendingReads.complete(upToIndex, state))
 
-    def getPendingReadsUpToIndex(index: Index): List[PendingReadEntry[S]] =
-      pendingReads.filterByIndex(index)
+
+
+
+    // Pending commands management methods
+    def addPendingCommand[R](index: Index, promise: CommandPromise[R]): ZIO[Any, Nothing, Unit] =
+      pendingCommands.add(index, promise)
+
+    // Unified operations management methods
+    def resetOperations(leaderId: Option[MemberId]): ZIO[Any, Nothing, Leader[S]] =
+      for 
+        _ <- pendingCommands.reset(leaderId)
+        updatedReads = pendingReads.reset(leaderId)
+      yield this.copy(pendingReads = updatedReads)
+
+    def completeOperations[R](index: Index, commandResponse: R, readState: S): ZIO[Any, Nothing, Leader[S]] =
+      for
+        _ <- pendingCommands.complete(index, commandResponse)
+        updatedReads = pendingReads.complete(index, readState)
+      yield this.copy(pendingReads = updatedReads)

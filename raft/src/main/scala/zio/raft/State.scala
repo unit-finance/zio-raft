@@ -6,7 +6,7 @@ sealed trait State[S]:
   val commitIndex: Index
   val lastApplied: Index
 
-  def withCommitIndex(commitIndex: Index) =
+  def withCommitIndex(commitIndex: Index): State[S] =
     this match
       case f: State.Follower[S]  => f.copy(commitIndex = commitIndex)
       case f: State.Candidate[S] => f.copy(commitIndex = commitIndex)
@@ -27,13 +27,13 @@ object State:
       lastApplied: Index,
       electionTimeout: Instant
   ) extends State[S]:
-    def addVote(peer: MemberId) =
+    def addVote(peer: MemberId): Candidate[S] =
       this.copy(voteGranted = voteGranted + 1)
 
-    def ackRpc(peer: MemberId) =
+    def ackRpc(peer: MemberId): Candidate[S] =
       this.copy(rpcDue = rpcDue.ack(peer))
 
-    def withRPCDue(from: MemberId, when: Instant) =
+    def withRPCDue(from: MemberId, when: Instant): Candidate[S] =
       this.copy(rpcDue = rpcDue.set(from, when))
 
   case class Leader[S](
@@ -47,25 +47,25 @@ object State:
       pendingReads: PendingReads[S]
   ) extends State[S]:
 
-    def withMatchIndex(from: MemberId, index: Index) =
+    def withMatchIndex(from: MemberId, index: Index): Leader[S] =
       this.copy(matchIndex = matchIndex.set(from, index))
 
-    def withNextIndex(from: MemberId, index: Index) =
+    def withNextIndex(from: MemberId, index: Index): Leader[S] =
       this.copy(nextIndex = nextIndex.set(from, index))
 
-    def withPause(from: MemberId) =
+    def withPause(from: MemberId): Leader[S] =
       this.copy(replicationStatus = replicationStatus.pause(from))
 
-    def withResume(from: MemberId) =
+    def withResume(from: MemberId): Leader[S] =
       this.copy(replicationStatus = replicationStatus.resume(from))
 
-    def withSnapshot(from: MemberId, now: Instant, index: Index) =
+    def withSnapshot(from: MemberId, now: Instant, index: Index): Leader[S] =
       this.copy(replicationStatus = replicationStatus.snapshot(from, now, index))
 
-    def withSnaphotResponse(from: MemberId, now: Instant, responseIndex: Index, done: Boolean) =
+    def withSnaphotResponse(from: MemberId, now: Instant, responseIndex: Index, done: Boolean): Leader[S] =
       this.copy(replicationStatus = replicationStatus.snapshotResponse(from, now, responseIndex, done))
 
-    def withSnapshotFailure(from: MemberId, now: Instant, responseIndex: Index) =
+    def withSnapshotFailure(from: MemberId, now: Instant, responseIndex: Index): Leader[S] =
       this.copy(replicationStatus = replicationStatus.snapshotFailure(from, now, responseIndex))
 
     // def withRPCDueNow(from: MemberId) =
@@ -74,7 +74,7 @@ object State:
     // def withRPCDue(from: MemberId, when: Instant) =
     //   this.copy(rpcDue = rpcDue.set(from, when))
 
-    def withHeartbeatDue(from: MemberId, when: Instant) =
+    def withHeartbeatDue(from: MemberId, when: Instant): Leader[S] =
       this.copy(heartbeatDue = heartbeatDue.set(from, when))
 
     // Pending reads management methods

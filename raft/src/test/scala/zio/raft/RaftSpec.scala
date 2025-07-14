@@ -1,6 +1,6 @@
 package zio.raft
 
-import zio.raft.State.{Candidate, Follower, Leader}
+import zio.raft.State.{Follower, Leader}
 import zio.raft.StreamItem.CommandMessage
 import zio.test.*
 import zio.{Scope, ZIO}

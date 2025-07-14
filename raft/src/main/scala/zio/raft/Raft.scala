@@ -95,7 +95,7 @@ class Raft[S, A <: Command](
     yield now.plus(interval)
 
   private def setCommitIndex(commitIndex: Index): UIO[Unit] =
-    raftState.update(s => s.withCommitIndex(commitIndex).asInstanceOf[State[S]])
+    raftState.update(s => s.withCommitIndex(commitIndex))
 
   private def handleRequestVoteRequest(m: RequestVoteRequest[A]) =
     for
@@ -135,9 +135,9 @@ class Raft[S, A <: Command](
         case candidate: State.Candidate[S] if currentTerm == m.term =>
           m match
             case m: RequestVoteResult.Rejected[A] =>
-              raftState.set(candidate.ackRpc(m.from).asInstanceOf[State[S]])
+              raftState.set(candidate.ackRpc(m.from))
             case m: RequestVoteResult.Granted[A] =>
-              raftState.set(candidate.addVote(m.from).ackRpc(m.from).asInstanceOf[State[S]])
+              raftState.set(candidate.addVote(m.from).ackRpc(m.from))
         case _ => ZIO.unit
     yield ()
 
@@ -518,7 +518,7 @@ class Raft[S, A <: Command](
             for
               nTerm <- logStore.logTerm(n)
               _ <- ZIO.when(nTerm.contains(currentTerm))(
-                raftState.set(l.withCommitIndex(n).asInstanceOf[State[S]])
+                raftState.set(l.withCommitIndex(n))
               )
               _ <- ZIO
                 .logDebug(
@@ -575,6 +575,7 @@ class Raft[S, A <: Command](
         .stream(state.lastApplied.plusOne, state.commitIndex)
         .runFoldZIO(state)((state, logEntry) =>
           for
+            // TODO (eran): is this safe? should we switch so it happens in one go? maybe with Ref.Synchronized?
             appState <- appStateRef.get
             (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState)
             _ <- appStateRef.set(newState)
@@ -582,7 +583,7 @@ class Raft[S, A <: Command](
             newRaftState <- state match
               case l: Leader[S] =>
                 for
-                  _ <- pendingCommands.complete(logEntry.index, response.asInstanceOf[logEntry.command.Response])
+                  _ <- pendingCommands.complete(logEntry.index, response)
                   // Complete pending reads with the new state after this write
                   updatedLeader = l.withCompletedReads(logEntry.index, newState)
                 yield updatedLeader.increaseLastApplied
@@ -769,14 +770,16 @@ class Raft[S, A <: Command](
             currentTerm <- stable.currentTerm
             lastTerm <- logStore.lastTerm
             lastIndex <- logStore.lastIndex
-            request = RequestVoteRequest[A](
-              currentTerm,
-              memberId,
-              lastIndex,
-              lastTerm
+            _ <- raftState.set(c.withRPCDue(peer, now.plus(rpcTimeout)))
+            _ <- rpc.sendRequestVote(
+              peer,
+              RequestVoteRequest[A](
+                currentTerm,
+                memberId,
+                lastIndex,
+                lastTerm
+              )
             )
-            _ <- rpc.sendRequestVote(peer, request)
-            _ <- raftState.set(c.withRPCDue(peer, now.plus(rpcTimeout)).asInstanceOf[State[S]])
           yield ()
         case _ => ZIO.unit
     yield ()
@@ -905,7 +908,7 @@ class Raft[S, A <: Command](
       promiseArg <- Promise.make[NotALeaderError, commandArg.Response]
       _ <- commandsQueue.offer(new CommandMessage {
         val command = commandArg
-        val promise = promiseArg.asInstanceOf[CommandPromise[command.Response]]
+        val promise = promiseArg.asInstanceOf
       })
       res <- promiseArg.await
     yield (res)

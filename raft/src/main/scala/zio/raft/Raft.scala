@@ -29,7 +29,6 @@ class Raft[S, A <: Command](
     snapshotStore: SnapshotStore,
     rpc: RPC[A],
     stateMachine: StateMachine[S, A],
-    pendingCommands: PendingCommands, // This should be part of leader state?
     appStateRef: Ref[S]
 ):
   val rpcTimeout = 50.millis
@@ -39,7 +38,11 @@ class Raft[S, A <: Command](
   private def stepDown(newTerm: Term, leaderId: Option[MemberId]) =
     for
       _ <- stable.newTerm(newTerm, None)
-      _ <- pendingCommands.reset(leaderId)
+      // Reset pending commands only if we're currently a leader
+      currentState <- raftState.get
+      _ <- currentState match
+        case l: Leader[S] => l.pendingCommands.reset(leaderId)
+        case _ => ZIO.unit
       electionTimeout <- makeElectionTimeout
 
       _ <- raftState.update(s => State.Follower[S](s.commitIndex, s.lastApplied, electionTimeout, leaderId))
@@ -483,6 +486,7 @@ class Raft[S, A <: Command](
           s"memberId=${this.memberId} become leader ${currentTerm}"
         )
         lastLogIndex <- logStore.lastIndex
+        newPendingCommands <- PendingCommands.make
         _ <- raftState.set(
           Leader[S](
             NextIndex(lastLogIndex.plusOne),
@@ -491,7 +495,8 @@ class Raft[S, A <: Command](
             ReplicationStatus(peers),
             c.commitIndex,
             c.lastApplied,
-            PendingReads.empty[S]
+            PendingReads.empty[S],
+            newPendingCommands
           )
         )
       yield ()
@@ -583,7 +588,8 @@ class Raft[S, A <: Command](
             newRaftState <- state match
               case l: Leader[S] =>
                 for
-                  _ <- pendingCommands.complete(logEntry.index, response)
+                  // Complete pending commands with the specific command response
+                  _ <- l.pendingCommands.complete(logEntry.index, response)
                   // Complete pending reads with the new state after this write
                   updatedLeader = l.withCompletedReads(logEntry.index, newState)
                 yield updatedLeader.increaseLastApplied
@@ -849,7 +855,8 @@ class Raft[S, A <: Command](
             replicationStatus,
             commintIndex,
             lastApplied,
-            pendingReads
+            pendingReads,
+            pendingCommands
           ) =>
         for
           lastIndex <- logStore.lastIndex
@@ -1011,7 +1018,6 @@ object Raft:
       )
       commandsQueue <- Queue.unbounded[StreamItem[A]] // TODO: should this be bounded for back-pressure?
 
-      pendingCommands <- PendingCommands.make
       raft = new Raft[S, A](
         memberId,
         peers,
@@ -1022,7 +1028,6 @@ object Raft:
         snapshotStore,
         rpc,
         stateMachine,
-        pendingCommands,
         restoredStateRef
       )
     yield raft

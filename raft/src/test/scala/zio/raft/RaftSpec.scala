@@ -51,7 +51,8 @@ object RaftSpec extends ZIOSpecDefault:
             replicationStatus,
             commitIndex,
             lastApplied,
-            pendingReads
+            pendingReads,
+            pendingCommands
           ) =>
         Some(raft.memberId)
 

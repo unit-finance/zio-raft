@@ -44,7 +44,8 @@ object State:
       replicationStatus: ReplicationStatus,
       commitIndex: Index,
       lastApplied: Index,
-      pendingReads: PendingReads[S]
+      pendingReads: PendingReads[S],
+      pendingCommands: PendingCommands
   ) extends State[S]:
 
     def withMatchIndex(from: MemberId, index: Index): Leader[S] =

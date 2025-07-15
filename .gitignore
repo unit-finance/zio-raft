@@ -8,3 +8,4 @@ project/project
 .bloop
 .bsp
 .DS_Store
+.cursor/mcp.json

@@ -1,7 +1,7 @@
 package zio.raft
 
 import java.time.Instant
-import zio.ZIO
+import zio.UIO
 
 sealed trait State[S]:
   val commitIndex: Index
@@ -79,27 +79,20 @@ object State:
     def withHeartbeatDue(from: MemberId, when: Instant): Leader[S] =
       this.copy(heartbeatDue = heartbeatDue.set(from, when))
 
-    // Pending reads management methods
     def withPendingRead(entry: PendingReadEntry[S]): Leader[S] =
       this.copy(pendingReads = pendingReads.enqueue(entry))
 
+    def addPendingCommand[R](index: Index, promise: CommandPromise[R]): Leader[S] =
+      this.copy(pendingCommands = pendingCommands.add(index, promise))
 
-
-
-
-    // Pending commands management methods
-    def addPendingCommand[R](index: Index, promise: CommandPromise[R]): ZIO[Any, Nothing, Unit] =
-      pendingCommands.add(index, promise)
-
-    // Unified operations management methods
-    def resetOperations(leaderId: Option[MemberId]): ZIO[Any, Nothing, Leader[S]] =
-      for 
-        _ <- pendingCommands.reset(leaderId)
-        updatedReads = pendingReads.reset(leaderId)
-      yield this.copy(pendingReads = updatedReads)
-
-    def completeOperations[R](index: Index, commandResponse: R, readState: S): ZIO[Any, Nothing, Leader[S]] =
+    def resetOperations(leaderId: Option[MemberId]): UIO[Leader[S]] =
       for
-        _ <- pendingCommands.complete(index, commandResponse)
-        updatedReads = pendingReads.complete(index, readState)
-      yield this.copy(pendingReads = updatedReads)
+        pendingReads <- pendingReads.reset(leaderId)
+        pendingCommands <- pendingCommands.reset(leaderId)
+      yield this.copy(pendingReads = pendingReads, pendingCommands = pendingCommands)
+
+    def completeOperations[R](index: Index, commandResponse: R, readState: S): UIO[Leader[S]] =
+      for
+        pendingCommands <- pendingCommands.complete(index, commandResponse)
+        pendingReads <- pendingReads.complete(index, readState)
+      yield this.copy(pendingCommands = pendingCommands, pendingReads = pendingReads)

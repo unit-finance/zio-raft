@@ -38,11 +38,12 @@ class Raft[S, A <: Command](
   private def stepDown(newTerm: Term, leaderId: Option[MemberId]) =
     for
       _ <- stable.newTerm(newTerm, None)
-      // Reset pending operations only if we're currently a leader
+
+      // Reset commands and reads if we are a leader before we transition to Follower
       currentState <- raftState.get
       _ <- currentState match
-        case l: Leader[S] => l.resetOperations(leaderId).unit
-        case _ => ZIO.unit
+        case l: Leader[S] => l.resetOperations(leaderId) // Called for side effects, so we ignore the new state
+        case _            => ZIO.unit
       electionTimeout <- makeElectionTimeout
 
       _ <- raftState.update(s => State.Follower[S](s.commitIndex, s.lastApplied, electionTimeout, leaderId))
@@ -486,7 +487,6 @@ class Raft[S, A <: Command](
           s"memberId=${this.memberId} become leader ${currentTerm}"
         )
         lastLogIndex <- logStore.lastIndex
-        newPendingCommands <- PendingCommands.make
         _ <- raftState.set(
           Leader[S](
             NextIndex(lastLogIndex.plusOne),
@@ -496,7 +496,7 @@ class Raft[S, A <: Command](
             c.commitIndex,
             c.lastApplied,
             PendingReads.empty[S],
-            newPendingCommands
+            PendingCommands.empty
           )
         )
       yield ()
@@ -586,13 +586,9 @@ class Raft[S, A <: Command](
             _ <- appStateRef.set(newState)
 
             newRaftState <- state match
-              case l: Leader[S] =>
-                for
-                  // Complete pending operations (both commands and reads) with the response and new state
-                  updatedLeader <- l.completeOperations(logEntry.index, response, newState)
-                yield updatedLeader.increaseLastApplied
-              case _ => ZIO.succeed(state.increaseLastApplied)
-          yield newRaftState
+              case l: Leader[S] => l.completeOperations(logEntry.index, response, newState)
+              case _            => ZIO.succeed(state)
+          yield newRaftState.increaseLastApplied
         )
     else ZIO.succeed(state)
 
@@ -857,7 +853,8 @@ class Raft[S, A <: Command](
           )
           _ <- ZIO.logDebug(s"memberId=${this.memberId} handleCommand $entry")
           _ <- logStore.storeLog(entry)
-          _ <- l.addPendingCommand(entry.index, promise)
+
+          _ <- raftState.set(l.addPendingCommand(entry.index, promise))
         yield ()
       case f: Follower[S] =>
         promise.fail(NotALeaderError(f.leaderId)).unit
@@ -870,13 +867,14 @@ class Raft[S, A <: Command](
         preRules <*> postRules
       case Message(message) =>
         for
+          _ <- ZIO.logDebug(s"[Message] memberId=${this.memberId} $message")
           _ <- preRules
           _ <- handleMessage(message)
           _ <- postRules
         yield ()
       case commandMessage: CommandMessage[A] =>
         for
-          _ <- ZIO.logDebug(s"memberId=${this.memberId} ${commandMessage.command}")
+          _ <- ZIO.logDebug(s"[CommandMessage] memberId=${this.memberId} ${commandMessage.command}")
           _ <- preRules
           _ <- handleRequestFromClient(
             commandMessage.command,
@@ -886,6 +884,7 @@ class Raft[S, A <: Command](
         yield ()
       case Bootstrap() =>
         for
+          _ <- ZIO.logDebug(s"[Bootstrap] memberId=${this.memberId}")
           _ <- preRules
           _ <- handleBootstrap
           _ <- postRules

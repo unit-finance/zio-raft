@@ -13,10 +13,16 @@ case class PendingReadEntry[S](
 
 case class PendingReads[S](entries: List[PendingReadEntry[S]]):
   def withAdded(entry: PendingReadEntry[S]): PendingReads[S] =
-    PendingReads(entries :+ entry)
+    // Optimize for the common case: new entry has higher index than all existing entries
+    if (entries.isEmpty || entry.enqueuedAtIndex >= entries.last.enqueuedAtIndex) then
+      PendingReads(entries :+ entry)
+    else
+      // Find the correct insertion point to maintain sorted order
+      val (before, after) = entries.span(_.enqueuedAtIndex <= entry.enqueuedAtIndex)
+      PendingReads(before ++ (entry :: after))
 
   def withCompleted(upToIndex: Index, state: S): UIO[PendingReads[S]] =
-    entries.partition(_.enqueuedAtIndex <= upToIndex) match
+    entries.span(_.enqueuedAtIndex <= upToIndex) match
       case (completed, remaining) =>
         ZIO
           .foreach(completed)(_.promise.succeed(state))

@@ -913,12 +913,20 @@ class Raft[S, A <: Command](
       now <- zio.Clock.instant
       peersRequiringHeartbeat = peers.filter(peer => leader.heartbeatDue.due(now, peer))
       
+      _ <- ZIO.logDebug(
+        s"memberId=${this.memberId} validateLeadership: ${peersRequiringHeartbeat.length}/${peers.length} peers requiring heartbeat"
+      )
+      
       // If majority of peers don't require heartbeat, leadership is likely valid
       _ <- if peersRequiringHeartbeat.length <= numberOfServers / 2 then
-        ZIO.unit
+        ZIO.logDebug(s"memberId=${this.memberId} Leadership validation: recent heartbeats sufficient")
+        *> ZIO.unit
       else
         // Need to send heartbeats to validate leadership
         for
+          _ <- ZIO.logDebug(
+            s"memberId=${this.memberId} Leadership validation: sending heartbeats to ${peersRequiringHeartbeat.mkString(", ")}"
+          )
           currentTerm <- stable.currentTerm
           lastIndex <- logStore.lastIndex
           
@@ -948,9 +956,14 @@ class Raft[S, A <: Command](
           // Check if we're still a leader after sending heartbeats
           finalState <- raftState.get
           _ <- finalState match
-            case _: Leader[S] => ZIO.unit
-            case f: Follower[S] => ZIO.fail(NotALeaderError(f.leaderId))
-            case _: Candidate[S] => ZIO.fail(NotALeaderError(None))
+            case _: Leader[S] => 
+              ZIO.logDebug(s"memberId=${this.memberId} Leadership validation: successful")
+            case f: Follower[S] => 
+              ZIO.logDebug(s"memberId=${this.memberId} Leadership validation: failed, now following ${f.leaderId}")
+              *> ZIO.fail(NotALeaderError(f.leaderId))
+            case _: Candidate[S] => 
+              ZIO.logDebug(s"memberId=${this.memberId} Leadership validation: failed, now candidate")
+              *> ZIO.fail(NotALeaderError(None))
         yield ()
     yield ()
 

@@ -917,6 +917,8 @@ class Raft[S, A <: Command](
         s"memberId=${this.memberId} validateLeadership: ${peersRequiringHeartbeat.length}/${peers.length} peers requiring heartbeat"
       )
       
+      // TODO (eran): TBD with Doron: as per Raft paper, we might want to always send heartbeat and not rely on the heartbeat due time
+      
       // If majority of peers don't require heartbeat, leadership is likely valid
       // peersRequiringHeartbeat.length < numberOfServers / 2 means:
       // - peers not requiring heartbeat + self > numberOfServers / 2 (majority)

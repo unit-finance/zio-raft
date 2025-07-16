@@ -80,19 +80,19 @@ object State:
       this.copy(heartbeatDue = heartbeatDue.set(from, when))
 
     def withPendingRead(entry: PendingReadEntry[S]): Leader[S] =
-      this.copy(pendingReads = pendingReads.enqueue(entry))
+      this.copy(pendingReads = pendingReads.withAdded(entry))
 
     def addPendingCommand[R](index: Index, promise: CommandPromise[R]): Leader[S] =
-      this.copy(pendingCommands = pendingCommands.add(index, promise))
+      this.copy(pendingCommands = pendingCommands.withAdded(index, promise))
 
-    def resetOperations(leaderId: Option[MemberId]): UIO[Leader[S]] =
+    def stepDown(leaderId: Option[MemberId]): UIO[Unit] =
       for
-        pendingReads <- pendingReads.reset(leaderId)
-        pendingCommands <- pendingCommands.reset(leaderId)
-      yield this.copy(pendingReads = pendingReads, pendingCommands = pendingCommands)
+        _ <- pendingReads.stepDown(leaderId)
+        _ <- pendingCommands.stepDown(leaderId)
+      yield ()
 
-    def completeOperations[R](index: Index, commandResponse: R, readState: S): UIO[Leader[S]] =
+    def completeCommands[R](index: Index, commandResponse: R, readState: S): UIO[Leader[S]] =
       for
-        pendingCommands <- pendingCommands.complete(index, commandResponse)
-        pendingReads <- pendingReads.complete(index, readState)
+        pendingCommands <- pendingCommands.withCompleted(index, commandResponse)
+        pendingReads <- pendingReads.withCompleted(index, readState)
       yield this.copy(pendingCommands = pendingCommands, pendingReads = pendingReads)

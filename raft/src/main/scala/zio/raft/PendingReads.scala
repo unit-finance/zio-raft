@@ -12,28 +12,20 @@ case class PendingReadEntry[S](
 )
 
 case class PendingReads[S](entries: List[PendingReadEntry[S]]):
-  def enqueue(entry: PendingReadEntry[S]): PendingReads[S] =
+  def withAdded(entry: PendingReadEntry[S]): PendingReads[S] =
     PendingReads(entries :+ entry)
 
-  def dequeue(upToIndex: Index): (List[PendingReadEntry[S]], PendingReads[S]) =
-    val (completed, remaining) = entries.partition(_.enqueuedAtIndex <= upToIndex)
-    (completed, PendingReads(remaining))
-
-  def complete(upToIndex: Index, state: S): UIO[PendingReads[S]] =
-    dequeue(upToIndex) match
+  def withCompleted(upToIndex: Index, state: S): UIO[PendingReads[S]] =
+    entries.partition(_.enqueuedAtIndex <= upToIndex) match
       case (completed, remaining) =>
         ZIO
           .foreach(completed)(_.promise.succeed(state))
-          .as(remaining)
+          .as(PendingReads(remaining))
 
-  def reset(leaderId: Option[MemberId]): UIO[PendingReads[S]] =
+  def stepDown(leaderId: Option[MemberId]): UIO[Unit] =
     ZIO
       .foreach(entries)(_.promise.fail(NotALeaderError(leaderId)))
-      .as(PendingReads(List.empty))
-
-  def isEmpty: Boolean = entries.isEmpty
-
-  def size: Int = entries.size
+      .unit
 
 object PendingReads:
   def empty[S]: PendingReads[S] = PendingReads(List.empty)

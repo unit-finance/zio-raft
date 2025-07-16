@@ -42,7 +42,7 @@ class Raft[S, A <: Command](
       // Reset commands and reads if we are a leader before we transition to Follower
       currentState <- raftState.get
       _ <- currentState match
-        case l: Leader[S] => l.resetOperations(leaderId) // Called for side effects, so we ignore the new state
+        case l: Leader[S] => l.stepDown(leaderId) // Called for side effects, so we ignore the new state
         case _            => ZIO.unit
       electionTimeout <- makeElectionTimeout
 
@@ -586,7 +586,7 @@ class Raft[S, A <: Command](
             _ <- appStateRef.set(newState)
 
             newRaftState <- state match
-              case l: Leader[S] => l.completeOperations(logEntry.index, response, newState)
+              case l: Leader[S] => l.completeCommands(logEntry.index, response, newState)
               case _            => ZIO.succeed(state)
           yield newRaftState.increaseLastApplied
         )

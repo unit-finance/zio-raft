@@ -908,12 +908,61 @@ class Raft[S, A <: Command](
       res <- promiseArg.await
     yield (res)
 
+  private def validateLeadership(leader: Leader[S]): ZIO[Any, NotALeaderError, Unit] =
+    for
+      now <- zio.Clock.instant
+      peersRequiringHeartbeat = peers.filter(peer => leader.heartbeatDue.due(now, peer))
+      
+      // If majority of peers don't require heartbeat, leadership is likely valid
+      _ <- if peersRequiringHeartbeat.length <= numberOfServers / 2 then
+        ZIO.unit
+      else
+        // Need to send heartbeats to validate leadership
+        for
+          currentTerm <- stable.currentTerm
+          lastIndex <- logStore.lastIndex
+          
+          // Send heartbeats to peers that need them
+          _ <- ZIO.foreachDiscard(peersRequiringHeartbeat) { peer =>
+            val matchIndex = leader.matchIndex.get(peer)
+            val commitIndex = Index.min(matchIndex, leader.commitIndex)
+            rpc.sendHeartbeat(
+              peer,
+              HeartbeatRequest[A](currentTerm, memberId, commitIndex)
+            )
+          }
+          
+          // Update heartbeat due times
+          _ <- raftState.update { state =>
+            peersRequiringHeartbeat.foldLeft(state) { (s, peer) =>
+              s match
+                case l: Leader[S] => l.withHeartbeatDue(peer, now.plus(Raft.heartbeartInterval))
+                case other => other
+            }
+          }
+          
+          // Wait briefly for responses to validate leadership
+          // If we don't receive majority responses within timeout, assume leadership lost
+          _ <- zio.Clock.sleep(rpcTimeout)
+          
+          // Check if we're still a leader after sending heartbeats
+          finalState <- raftState.get
+          _ <- finalState match
+            case _: Leader[S] => ZIO.unit
+            case f: Follower[S] => ZIO.fail(NotALeaderError(f.leaderId))
+            case _: Candidate[S] => ZIO.fail(NotALeaderError(None))
+        yield ()
+    yield ()
+
   def readState: ZIO[Any, NotALeaderError, S] =
     for
       s <- raftState.get
       result <- s match
         case l: Leader[S] =>
           for
+            // Validate leadership before accepting read
+            _ <- validateLeadership(l)
+            
             promise <- Promise.make[NotALeaderError, S]
             now <- zio.Clock.instant
             lastApplied <- logStore.lastIndex

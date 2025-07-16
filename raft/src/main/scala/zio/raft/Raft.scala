@@ -918,7 +918,9 @@ class Raft[S, A <: Command](
       )
       
       // If majority of peers don't require heartbeat, leadership is likely valid
-      _ <- if peersRequiringHeartbeat.length <= numberOfServers / 2 then
+      // peersRequiringHeartbeat.length < numberOfServers / 2 means:
+      // - peers not requiring heartbeat + self > numberOfServers / 2 (majority)
+      _ <- if peersRequiringHeartbeat.length < numberOfServers / 2 then
         ZIO.logDebug(s"memberId=${this.memberId} Leadership validation: recent heartbeats sufficient")
         *> ZIO.unit
       else
@@ -927,27 +929,9 @@ class Raft[S, A <: Command](
           _ <- ZIO.logDebug(
             s"memberId=${this.memberId} Leadership validation: sending heartbeats to ${peersRequiringHeartbeat.mkString(", ")}"
           )
-          currentTerm <- stable.currentTerm
-          lastIndex <- logStore.lastIndex
           
-          // Send heartbeats to peers that need them
-          _ <- ZIO.foreachDiscard(peersRequiringHeartbeat) { peer =>
-            val matchIndex = leader.matchIndex.get(peer)
-            val commitIndex = Index.min(matchIndex, leader.commitIndex)
-            rpc.sendHeartbeat(
-              peer,
-              HeartbeatRequest[A](currentTerm, memberId, commitIndex)
-            )
-          }
-          
-          // Update heartbeat due times
-          _ <- raftState.update { state =>
-            peersRequiringHeartbeat.foldLeft(state) { (s, peer) =>
-              s match
-                case l: Leader[S] => l.withHeartbeatDue(peer, now.plus(Raft.heartbeartInterval))
-                case other => other
-            }
-          }
+          // Reuse existing sendHeartbeatRule for each peer requiring heartbeat
+          _ <- ZIO.foreachDiscard(peersRequiringHeartbeat)(sendHeartbeatRule)
           
           // Wait briefly for responses to validate leadership
           // If we don't receive majority responses within timeout, assume leadership lost
@@ -973,7 +957,6 @@ class Raft[S, A <: Command](
       result <- s match
         case l: Leader[S] =>
           for
-            // Validate leadership before accepting read
             _ <- validateLeadership(l)
             
             promise <- Promise.make[NotALeaderError, S]

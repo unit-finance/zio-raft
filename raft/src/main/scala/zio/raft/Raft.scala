@@ -580,7 +580,6 @@ class Raft[S, A <: Command](
         .stream(state.lastApplied.plusOne, state.commitIndex)
         .runFoldZIO(state)((state, logEntry) =>
           for
-            // TODO (eran): is this safe? should we switch so it happens in one go? maybe with Ref.Synchronized?
             appState <- appStateRef.get
             (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState)
             _ <- appStateRef.set(newState)

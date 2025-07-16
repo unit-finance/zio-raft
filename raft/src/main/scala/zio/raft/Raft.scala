@@ -915,10 +915,13 @@ class Raft[S, A <: Command](
           for
             promise <- Promise.make[NotALeaderError, S]
             now <- zio.Clock.instant
-            lastApplied <- logStore.lastIndex
-            entry = PendingReadEntry[S](promise, lastApplied, now)
-            _ <- raftState.set(l.withPendingRead(entry))
-            result <- promise.await
+            enqueuedAtIndex = l.commitIndex
+            entry = PendingReadEntry[S](promise, enqueuedAtIndex, now)
+            result <-
+              if enqueuedAtIndex <= l.lastApplied then appStateRef.get
+              else
+                raftState.set(l.withPendingRead(entry))
+                promise.await
           yield result
         case f: Follower[S] =>
           ZIO.fail(NotALeaderError(f.leaderId))

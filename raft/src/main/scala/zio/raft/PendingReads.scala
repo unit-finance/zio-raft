@@ -13,8 +13,7 @@ case class PendingReadEntry[S](
 
 case class PendingReads[S](entries: List[PendingReadEntry[S]]):
   def withAdded(entry: PendingReadEntry[S]): PendingReads[S] =
-    if (entries.isEmpty || entry.enqueuedAtIndex >= entries.last.enqueuedAtIndex) then
-      PendingReads(entries :+ entry)
+    if (entries.isEmpty || entry.enqueuedAtIndex >= entries.last.enqueuedAtIndex) then PendingReads(entries :+ entry)
     else
       val (before, after) = entries.span(_.enqueuedAtIndex <= entry.enqueuedAtIndex)
       PendingReads(before ++ (entry :: after))

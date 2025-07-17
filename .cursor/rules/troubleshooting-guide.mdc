@@ -12,240 +12,71 @@ Status upgrades happen automatically when:
 - **experimental → beta**: 5+ implementations with 90%+ success rate
 - **beta → stable**: 15+ implementations across 3+ different projects
 
-## Scope
-
-This troubleshooting guide applies to all ZIO Raft development, including:
-- Core Raft implementation
-- Test development
-- Integration development
-- State machine implementations
-- RPC implementations
-
 ## Core Standards
 
-### 1. ZIO Effect Sequencing (Rating: 5)
+### 1. ZIO Effect Sequencing Bug (Rating: 5)
 
-**❌ Common Bug Pattern:**
+**Problem**: Using plain semicolon or newline to sequence ZIO effects can cause race conditions where the second effect starts before the first effect completes.
+
+**Symptoms**:
+- Test timeouts, especially in tests involving state mutations followed by reads
+- Promises that await indefinitely
+- Race conditions that only appear sometimes
+- Effects appearing to complete but their side effects not being visible
+
+**Root Cause**:
 ```scala
-// WRONG: Effects not properly sequenced
-raftState.set(newState)
-promise.await  // May start before state is set!
+// WRONG - Effect sequencing bug:
+raftState.set(l.withPendingRead(entry))
+promise.await  // Could start before state actually set!
+
+// CORRECT - Guaranteed sequencing:
+raftState.set(l.withPendingRead(entry)) *>  
+promise.await  // Guaranteed to wait for state update first
 ```
 
-**✅ Correct Pattern:**
+**Detection Strategy**:
+- Look for patterns where state mutation is followed immediately by operations that depend on that state
+- Search for promises or awaits that happen after state changes
+- Check for `Ref.set()` or similar state mutations not properly sequenced
+
+**Prevention**:
+- Always use `*>` (zipRight) when the second effect depends on the completion of the first
+- Use `flatMap` when you need to pass values between effects
+- Be especially careful with `Ref.set()` followed by operations that read that state
+
+**Example Fix**:
 ```scala
-// RIGHT: Effects properly sequenced
-raftState.set(newState) *>
-promise.await  // Guaranteed to start after state is set
+// Before (buggy):
+for {
+  l <- raftState.get
+  entry = PendingRead(readId, promise)
+  _ <- raftState.set(l.withPendingRead(entry))
+  result <- promise.await  // Race condition!
+} yield result
+
+// After (correct):
+for {
+  l <- raftState.get
+  entry = PendingRead(readId, promise)
+  result <- raftState.set(l.withPendingRead(entry)) *> promise.await
+} yield result
 ```
 
-**🔍 Symptoms:**
-- Tests timeout unexpectedly
-- Promises never resolve
-- State changes seem to be lost
-- Race conditions in asynchronous code
+## Scope
 
-**🎯 Prevention Tips:**
-- Always use `*>` or `flatMap` for effect sequencing
-- Never rely on execution order without explicit sequencing
-- Use `ZIO.debug` to trace effect execution order during debugging
-- Be especially careful with state mutations followed by waits
-
-**📋 When to Apply:**
-- Any time you have multiple ZIO effects that must execute in order
-- State mutations followed by operations that depend on that state
-- Promise/async operations after state changes
-
-### 2. Raft State Consistency (Rating: 4)
-
-**❌ Common Bug Pattern:**
-```scala
-// WRONG: Reading state multiple times without consistency
-s1 <- raftState.get
-// ... other operations ...
-s2 <- raftState.get  // May have changed!
-if s1.commitIndex != s2.commitIndex then ???
-```
-
-**✅ Correct Pattern:**
-```scala
-// RIGHT: Single consistent read
-s <- raftState.get
-// Use s throughout the operation
-```
-
-**🔍 Symptoms:**
-- Inconsistent behavior between test runs
-- Index mismatches
-- Unexpected state transitions
-
-**🎯 Prevention Tips:**
-- Read Raft state once per operation
-- Pass state as parameter to avoid re-reading
-- Use atomic state updates when needed
-- Be aware of concurrent rule execution
-
-### 3. Test Environment Setup (Rating: 3)
-
-**❌ Common Bug Pattern:**
-```scala
-// WRONG: Using unit tests for integration scenarios
-test("complex multi-node behavior") {
-  for
-    (singleRaft, _) <- makeRaft(...)  // Single node
-    _ <- complexMultiNodeOperation(singleRaft)  // Won't work!
-  yield assertTrue(result)
-}
-```
-
-**✅ Correct Pattern:**
-```scala
-// RIGHT: Use integration tests for multi-node scenarios
-test("complex multi-node behavior") {
-  for
-    (r1, _, r2, _, r3, _) <- makeRaft()  // 3-node cluster
-    _ <- complexMultiNodeOperation(r1, r2, r3)  // Proper quorum
-  yield assertTrue(result)
-}
-```
-
-**🔍 Symptoms:**
-- Tests timeout when expecting consensus
-- Commands never commit
-- Leadership operations fail
-
-**🎯 Prevention Tips:**
-- Use unit tests for message handling logic
-- Use integration tests for consensus operations
-- Consider quorum requirements for your test scenario
-- Match test environment to the behavior being tested
-
-### 4. Index and Term Management (Rating: 4)
-
-**❌ Common Bug Pattern:**
-```scala
-// WRONG: Mixing different index semantics
-nextIndex = logStore.lastIndex + 1
-commitIndex = someOtherValue
-if nextIndex <= commitIndex then ???  // Comparing apples to oranges!
-```
-
-**✅ Correct Pattern:**
-```scala
-// RIGHT: Understand index semantics clearly
-// commitIndex: last committed entry
-// lastApplied: last applied entry  
-// nextIndex: next entry to write
-// Ensure comparisons make semantic sense
-```
-
-**🔍 Symptoms:**
-- Infinite loops in consensus logic
-- Entries never committed or applied
-- Incorrect progress tracking
-
-**🎯 Prevention Tips:**
-- Document what each index represents
-- Use meaningful variable names
-- Add assertions for index relationships
-- Understand Raft paper definitions precisely
-
-### 5. Promise and Async Lifecycle (Rating: 3)
-
-**❌ Common Bug Pattern:**
-```scala
-// WRONG: Creating promises without cleanup
-def operation = 
-  for
-    promise <- Promise.make[Error, Result]
-    _ <- someAsyncOperation(promise)
-    // No cleanup if operation fails!
-  yield result
-```
-
-**✅ Correct Pattern:**
-```scala
-// RIGHT: Proper promise lifecycle management
-def operation = 
-  for
-    promise <- Promise.make[Error, Result]
-    result <- (someAsyncOperation(promise) *> promise.await)
-      .onInterrupt(promise.fail(OperationCancelled))
-  yield result
-```
-
-**🔍 Symptoms:**
-- Memory leaks from hanging promises
-- Resources not cleaned up on failures
-- Unexpected timeouts
-
-**🎯 Prevention Tips:**
-- Always consider promise cleanup paths
-- Use interruption handling for long-running operations
-- Set reasonable timeouts for promise operations
-- Consider using `Promise.unsafe` for testing when appropriate
-
-## Debugging Strategies
-
-### 1. Effect Sequencing Issues (Rating: 3)
-- Add `ZIO.debug("checkpoint")` between effects
-- Use `ZIO.logDebug` for state transitions
-- Check execution order with test timeouts
-- Verify state changes actually occur
-
-### 2. Consensus Problems (Rating: 4)
-- Log commitIndex, lastApplied, and nextIndex values
-- Trace rule execution order
-- Verify quorum requirements in tests
-- Check message flow between nodes
-
-### 3. Test Debugging (Rating: 2)
-- Use shorter timeouts to fail fast
-- Add explicit state assertions
-- Isolate the failing behavior
-- Compare working vs failing scenarios
+This troubleshooting guide applies to ZIO Raft implementation issues, focusing on patterns that cause subtle bugs and test failures.
 
 ## Rule Usage Tracking
 
-The rule metrics are automatically updated through Cursor's rule engine:
+The rule metrics are automatically updated through Cursor's rule engine when patterns from this guide are successfully applied to fix issues in the ZIO Raft project.
 
-1. **Detection**:
-   - Cursor monitors when this rule is used in debugging sessions
-   - The tracking comment is automatically inserted:
-     ```scala
-     // Implements rule: troubleshooting-guide
-     // Implementation #X (auto-updated by Cursor)
-     ```
+## Template for Adding New Issues
 
-2. **Validation**:
-   After each rule implementation, Cursor will:
-   - Ask the developer to confirm if the troubleshooting tip was helpful
-   - Request permission to update rule metrics
-   - Only record success if the bug was actually resolved
-   - Skip metric updates if the tip didn't help
+When new troubleshooting patterns are discovered:
 
-3. **Continuous Improvement**:
-   - Add new bug patterns as they are discovered
-   - Update prevention strategies based on experience
-   - Remove obsolete patterns that no longer apply
-   - Share successful debugging strategies across the team
-
-## Adding New Bug Patterns
-
-When you discover a new bug pattern:
-
-1. **Document the bug**: Show the incorrect code pattern
-2. **Provide the fix**: Show the correct approach
-3. **List symptoms**: How to recognize this bug
-4. **Prevention tips**: How to avoid it in the future
-5. **Rating**: Assess complexity (1-5)
-6. **Update this rule**: Add the new pattern to the appropriate section
-
-## Success Criteria
-
-This rule is successful when:
-- Developers quickly identify common bug patterns
-- Time to resolution decreases for known issues
-- Same bugs don't repeat across different developers
-- New team members can avoid common pitfalls
-- Debugging becomes more systematic and efficient
+1. **Add new section with Rating**
+2. **Document Problem, Symptoms, Root Cause**
+3. **Provide Detection Strategy and Prevention**
+4. **Include Example Fix**
+5. **Update scope if needed**

@@ -4,6 +4,7 @@ import zio.raft.State.{Follower, Leader}
 import zio.raft.StreamItem.CommandMessage
 import zio.test.*
 import zio.{Scope, ZIO}
+import zio.durationInt
 
 object RaftSpec extends ZIOSpecDefault:
   def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean): ZIO[Any, Nothing, (Raft[Int, TestCommands], MockRpc[TestCommands])] =
@@ -304,5 +305,5 @@ object RaftSpec extends ZIOSpecDefault:
         )
       yield assertTrue(messages == expectedMessages)
     }
-  )
+  ) @@ TestAspect.timeout(10.seconds)
 end RaftSpec

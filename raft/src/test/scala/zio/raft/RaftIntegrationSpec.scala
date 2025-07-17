@@ -149,5 +149,70 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         _ <- leader.sendCommand(Increase)
         x <- leader.sendCommand(Get)
       yield assertTrue(x == 3)
+    },
+    test("read returns the correct state with multiple writes") {
+      for
+        (
+          r1,
+          killSwitch1,
+          r2,
+          killSwitch2,
+          r3,
+          killSwitch3
+        ) <- makeRaft()
+
+        // Send multiple increase commands to get state = 3
+        // Use the existing pattern from other tests - mix commands with Get to verify state
+        _ <- r1.sendCommand(Increase)
+        _ <- r1.sendCommand(Increase)  
+        _ <- r1.sendCommand(Increase)
+        stateAfterWrites <- r1.sendCommand(Get) // This ensures commands are committed
+        
+        // Read the state (should be 3)
+        readResult <- r1.readState
+        
+        // Send another increase command after the read
+        _ <- r1.sendCommand(Increase)
+        stateAfterExtraWrite <- r1.sendCommand(Get) // This should be 4
+        
+        // Verify the read returned 3 (not 4), proving reads see state at point of request
+      yield assertTrue(stateAfterWrites == 3 && readResult == 3 && stateAfterExtraWrite == 4)
+    },
+    test("read returns the correct state when there are no writes") {
+      for
+        (
+          r1,
+          killSwitch1,
+          r2,
+          killSwitch2,
+          r3,
+          killSwitch3
+        ) <- makeRaft()
+        
+        // Read the state without any commands (should be initial state = 0)
+        readResult <- r1.readState
+        
+      yield assertTrue(readResult == 0)
+    },
+    test("read fails when not leader") {
+      for
+        (
+          r1,
+          killSwitch1,
+          r2,
+          killSwitch2,
+          r3,
+          killSwitch3
+        ) <- makeRaft()
+        
+        // Stop the leader (r1) to make r2 and r3 followers/candidates
+        _ <- killSwitch1.set(false)
+        
+        // Try to read from a non-leader node (should fail with NotALeaderError)
+        readResult <- r2.readState.either
+        
+      yield assertTrue(
+        readResult.isLeft && readResult.left.exists(_.isInstanceOf[NotALeaderError])
+      )
     }
-  ) @@ withLiveClock
+  ) @@ withLiveClock @@ TestAspect.timeout(10.seconds)

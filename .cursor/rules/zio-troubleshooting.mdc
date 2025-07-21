@@ -1,0 +1,262 @@
+# ZIO Effect Composition Troubleshooting
+
+## Rating System
+
+The rule's status is automatically managed by Cursor based on usage metrics:
+
+- 🔴 **experimental** (default): New pattern, limited validation
+- 🟡 **beta**: Validated but needs monitoring
+- 🟢 **stable**: Well-established and safe for widespread use
+
+Status upgrades happen automatically when:
+- **experimental → beta**: 5+ implementations with 90%+ success rate
+- **beta → stable**: 15+ implementations across 3+ different projects
+
+## Scope
+
+This rule applies to all ZIO-based code in the project, including:
+- Effect composition and chaining
+- Promise handling
+- Error handling
+- Resource management
+- Stream operations
+- Concurrent operations
+
+## Context
+
+ZIO effects that are not properly composed can be silently ignored, leading to bugs that are extremely difficult to identify. These issues often manifest as:
+- Operations that appear to execute but have no effect
+- Promises that never complete
+- Resources that aren't cleaned up
+- Race conditions or timing issues
+
+## Core Standards
+
+### 1. Nested Effect Detection (Rating: 5)
+**Critical Pattern**: `ZIO[..., ZIO[...]]` structures indicate nested effects that will be ignored.
+
+**Common Violations**:
+```scala
+// ❌ WRONG: Creates ZIO[Any, Nothing, UIO[Boolean]]
+appStateRef.get.map(state => promise.succeed(state))
+
+// ✅ CORRECT: Uses flatMap to properly chain effects
+appStateRef.get.flatMap(state => promise.succeed(state))
+```
+
+**Detection Patterns**:
+- `.map(_.succeed(...))`
+- `.map(_.fail(...))`
+- `.map(ZIO.*)` 
+- `.map(effect)` where `effect` returns a ZIO
+
+### 2. Promise Completion Patterns (Rating: 4)
+**Promise operations must be properly handled as effects**
+
+**Common Violations**:
+```scala
+// ❌ WRONG: Promise completion effect is ignored
+someEffect.map(result => promise.succeed(result))
+
+// ❌ WRONG: Effect not handled
+promise.fail(error) // Returns UIO[Boolean] that's ignored
+
+// ✅ CORRECT: Use flatMap for chaining
+someEffect.flatMap(result => promise.succeed(result))
+
+// ✅ CORRECT: Handle the completion effect
+promise.fail(error).unit
+```
+
+### 3. Effect Chaining Validation (Rating: 3)
+**All ZIO operations must be properly chained or their results used**
+
+**Detection Patterns**:
+- Standalone effect calls without assignment or chaining
+- `.map` used where `.flatMap` should be used
+- Effects in for-comprehensions without `<-`
+
+**Examples**:
+```scala
+// ❌ WRONG: Effect result ignored
+for {
+  x <- someEffect
+  _ = anotherEffect // Effect ignored!
+} yield x
+
+// ✅ CORRECT: Effect properly sequenced
+for {
+  x <- someEffect
+  _ <- anotherEffect
+} yield x
+```
+
+### 4. Error Handling Patterns (Rating: 3)
+**Error effects must be properly composed**
+
+**Common Issues**:
+```scala
+// ❌ WRONG: Error effect ignored in map
+result.map(value => ZIO.fail(someError))
+
+// ✅ CORRECT: Error properly propagated
+result.flatMap(value => ZIO.fail(someError))
+```
+
+### 5. Resource Management (Rating: 4)
+**Resources must be properly acquired and released**
+
+**Patterns to Check**:
+- `ZIO.acquireRelease` usage
+- `ZManaged` composition
+- File/connection handling
+- Ref and Promise lifecycle
+
+### 6. Concurrent Operations (Rating: 4)
+**Concurrent effects must be properly joined or supervised**
+
+**Common Issues**:
+```scala
+// ❌ WRONG: Forked effect not handled
+effect.fork // Fiber[E, A] ignored
+
+// ✅ CORRECT: Fiber properly managed
+effect.forkScoped
+// or
+fiber <- effect.fork
+result <- fiber.join
+```
+
+### 7. Stream Operations (Rating: 3)
+**ZStream effects must be properly run or connected**
+
+**Patterns to Check**:
+- Streams that are created but never run
+- Stream transformations that return effects
+- Proper stream consumption patterns
+
+## Detection Checklist
+
+When reviewing ZIO code, systematically check for:
+
+### High Priority (Rating 4-5)
+- [ ] `.map(promise.succeed(...))` → Should use `.flatMap`
+- [ ] `.map(promise.fail(...))` → Should use `.flatMap`  
+- [ ] `.map(ZIO.*)` → Should use `.flatMap`
+- [ ] Standalone `promise.fail(...)` without `.unit`
+- [ ] `effect.fork` without proper fiber management
+
+### Medium Priority (Rating 3)
+- [ ] Effects assigned with `=` in for-comprehensions
+- [ ] `.map` where the function returns ZIO
+- [ ] Error handling that returns ZIO effects
+- [ ] Resource operations without proper cleanup
+
+### Low Priority (Rating 1-2)
+- [ ] Consistent effect naming conventions
+- [ ] Proper effect documentation
+- [ ] Type annotations for complex effects
+
+## Common Anti-Patterns
+
+### 1. The "Map Trap" (Rating: 5)
+```scala
+// Creates nested effect - the inner effect is ignored
+effect.map(result => otherEffect)
+```
+
+### 2. The "Fire and Forget" (Rating: 4)
+```scala
+// Effect is created but never executed
+val effect = ZIO.succeed("hello")
+// effect is never run!
+```
+
+### 3. The "Promise Abandonment" (Rating: 5)
+```scala
+// Promise completion effect is ignored
+promise.succeed(value) // Returns UIO[Boolean] that's ignored
+```
+
+### 4. The "Resource Leak" (Rating: 4)
+```scala
+// Resource acquired but not guaranteed to be released
+val resource = acquireResource
+// No corresponding release!
+```
+
+## Usage Guidelines
+
+### When to Apply This Rule
+
+Use this rule during:
+- Code reviews involving ZIO operations
+- Debugging mysterious behavior in ZIO code
+- When effects appear to be ignored or not executing
+- Performance investigations (resource leaks)
+- Concurrency issue troubleshooting
+
+### How to Use This Rule
+
+1. **Systematic Review**: Go through each pattern in the checklist
+2. **Search Patterns**: Use grep/search for the detection patterns
+3. **Effect Tracing**: Follow effect chains to ensure proper composition
+4. **Type Checking**: Look for nested effect types in IDE/compiler output
+5. **Testing**: Verify that effects actually execute as expected
+
+## Consequences
+
+### Following This Rule
+- **Prevents**: Silent effect ignoring bugs
+- **Ensures**: Proper resource management
+- **Improves**: Code reliability and predictability
+- **Enables**: Better debugging and maintenance
+
+### Ignoring This Rule
+- **Causes**: Silent failures and unpredictable behavior
+- **Leads to**: Resource leaks and memory issues
+- **Results in**: Difficult-to-debug concurrency problems
+- **Creates**: Maintenance nightmares
+
+## Examples
+
+### Before (Problematic)
+```scala
+def handleRead(entry: PendingReadEntry[S]): ZIO[Any, Nothing, Unit] =
+  for
+    isPendingRead <- raftState.modify { /* ... */ }
+    _ <- isPendingRead match
+      case Right(false) => appStateRef.get.map(entry.promise.succeed) // ❌ BUG!
+      case Left(e) => entry.promise.fail(e) // ❌ Effect ignored!
+  yield ()
+```
+
+### After (Fixed)
+```scala
+def handleRead(entry: PendingReadEntry[S]): ZIO[Any, Nothing, Unit] =
+  for
+    isPendingRead <- raftState.modify { /* ... */ }
+    _ <- isPendingRead match
+      case Right(false) => appStateRef.get.flatMap(entry.promise.succeed) // ✅ Correct
+      case Left(e) => entry.promise.fail(e).unit // ✅ Effect handled
+  yield ()
+```
+
+## Rule Usage Tracking
+
+The rule metrics are automatically updated through Cursor's rule engine:
+
+1. **Detection**: Cursor monitors when this rule is used to identify ZIO issues
+2. **Validation**: After each rule implementation, Cursor asks for confirmation
+3. **Updates**: Successful applications increase metrics and may upgrade status
+4. **Manual Override**: Users can flag incorrect applications
+
+Tracking comment format:
+```scala
+// Implements rule: zio-troubleshooting  
+// Implementation #X (auto-updated by Cursor)
+```
+description:
+globs:
+alwaysApply: false
+---

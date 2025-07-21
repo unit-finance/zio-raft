@@ -1,9 +1,10 @@
 package zio.raft
 
-import zio.raft.State.{Candidate, Follower, Leader}
+import zio.raft.State.{Follower, Leader}
 import zio.raft.StreamItem.CommandMessage
 import zio.test.*
 import zio.{Scope, ZIO}
+import zio.durationInt
 
 object RaftSpec extends ZIOSpecDefault:
   def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean): ZIO[Any, Nothing, (Raft[Int, TestCommands], MockRpc[TestCommands])] =
@@ -27,30 +28,32 @@ object RaftSpec extends ZIOSpecDefault:
 
   def isCandidate(raft: Raft[Int, TestCommands]) =
     for s <- raft.raftState.get
-    yield if s.isInstanceOf[Candidate] then true else false
+    yield if s.isInstanceOf[State.Candidate[Int]] then true else false
 
   def isFollower(raft: Raft[Int, TestCommands]) =
     for s <- raft.raftState.get
-    yield if s.isInstanceOf[Follower] then true else false
+    yield if s.isInstanceOf[State.Follower[Int]] then true else false
 
   def expectFollower(raft: Raft[Int, TestCommands]) =
     raft.raftState.get.flatMap:
-      case f: Follower => ZIO.succeed(f)
-      case _           => ZIO.die(new Exception("Expected follower"))
+      case f: State.Follower[Int] => ZIO.succeed(f)
+      case _                      => ZIO.die(new Exception("Expected follower"))
 
   def getLeader(raft: Raft[Int, TestCommands]) =
     for s <- raft.raftState.get
     yield s match
-      case Follower(commitIndex, lastApplied, electionTimeout, leaderId) =>
+      case State.Follower(commitIndex, lastApplied, electionTimeout, leaderId) =>
         leaderId
-      case _: Candidate => None
-      case Leader(
+      case _: State.Candidate[Int] => None
+      case State.Leader(
             nextIndex,
             matchIndex,
             heartbeatDue,
             replicationStatus,
             commitIndex,
-            lastApplied
+            lastApplied,
+            pendingReads,
+            pendingCommands
           ) =>
         Some(raft.memberId)
 
@@ -61,7 +64,7 @@ object RaftSpec extends ZIOSpecDefault:
       commitIndex: Index
   ) =
     raft.handleStreamItem(
-      StreamItem.Message[TestCommands](
+      StreamItem.Message[TestCommands, Int](
         HeartbeatRequest(term, leaderId, commitIndex)
       )
     )
@@ -72,7 +75,7 @@ object RaftSpec extends ZIOSpecDefault:
       memberId: MemberId
   ) =
     raft.handleStreamItem(
-      StreamItem.Message[TestCommands](
+      StreamItem.Message[TestCommands, Int](
         RequestVoteResult.Granted(memberId, term)
       )
     )
@@ -87,7 +90,7 @@ object RaftSpec extends ZIOSpecDefault:
       leaderCommitIndex: Index
   ) =
     raft.handleStreamItem(
-      StreamItem.Message[TestCommands](
+      StreamItem.Message[TestCommands, Int](
         AppendEntriesRequest(
           term,
           leaderId,
@@ -100,15 +103,15 @@ object RaftSpec extends ZIOSpecDefault:
     )
 
   def handleBootstrap(raft: Raft[Int, TestCommands]) =
-    raft.handleStreamItem(StreamItem.Bootstrap[TestCommands]())
+    raft.handleStreamItem(StreamItem.Bootstrap[TestCommands, Int]())
 
   def handleTick(raft: Raft[Int, TestCommands]) =
-    raft.handleStreamItem(StreamItem.Tick[TestCommands]())
+    raft.handleStreamItem(StreamItem.Tick[TestCommands, Int]())
 
   def sendCommand(raft: Raft[Int, TestCommands], commandArg: TestCommands) =
     for
       promiseArg <- zio.Promise.make[NotALeaderError, Int]
-      _ <- raft.handleStreamItem(new CommandMessage[TestCommands] {
+      _ <- raft.handleStreamItem(new CommandMessage[TestCommands, Int] {
         val command: TestCommands = commandArg
         val promise: CommandPromise[Int] = promiseArg
       })
@@ -302,5 +305,5 @@ object RaftSpec extends ZIOSpecDefault:
         )
       yield assertTrue(messages == expectedMessages)
     }
-  )
+  ) @@ TestAspect.timeout(10.seconds)
 end RaftSpec

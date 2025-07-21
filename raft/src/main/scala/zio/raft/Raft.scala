@@ -913,12 +913,13 @@ class Raft[S, A <: Command](
     for
       lastIndex <- logStore.lastIndex
       isPendingRead <- raftState.modify {
-        case l: Leader[S] if lastIndex > l.lastApplied => (Right(true), l.withPendingRead(PendingReadEntry[S](r.promise, lastIndex)))
+        case l: Leader[S] if lastIndex > l.lastApplied =>
+          (Right(true), l.withPendingRead(PendingReadEntry[S](r.promise, lastIndex)))
 
-        // TODO (eran): when leader validation is implemented, we should use it here instead 
-        case l: Leader[S]                                          => (Right(false), l)
-        case f: Follower[S]                                        => (Left(NotALeaderError(f.leaderId)), f)
-        case c: Candidate[S]                                       => (Left(NotALeaderError(None)), c)
+        // TODO (eran): when leader validation is implemented, we should use it here instead
+        case l: Leader[S]    => (Right(false), l)
+        case f: Follower[S]  => (Left(NotALeaderError(f.leaderId)), f)
+        case c: Candidate[S] => (Left(NotALeaderError(None)), c)
       }
       _ <- isPendingRead match
         case Right(true)  => ZIO.unit

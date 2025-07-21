@@ -177,6 +177,12 @@ class Raft[S, A <: Command](
           val wasPaused = l.replicationStatus.isPaused(m.from)
           val leader = l.withResume(m.from)
           for
+            // TODO (eran): Implement this
+            // TODO (eran): TBD how is the timestamp in heartbeat used? in theory we should always update all with heartbeats no?
+            // _ <- pendingReads.heartbeat(m.timestamp, m.from, peers.length) // pending reads can get confirmed by: (1) waiting for write and it was applied (2) or was ready for heartbeat from tiemstamp and it arrived. when we have a new read that requires heartbeat we want to send a "HeartnbeatDueNow" message to followers so they reply immediately and we do not wait.
+
+            // // when we have a new read, if we alreayd have existing reads, we want to add the timestamp of the earliest read (cheapest to get).
+
             _ <- raftState.set(leader).when(wasPaused)
             lastIndex <- logStore.lastIndex
             matchIndex = l.matchIndex.get(m.from)
@@ -910,22 +916,19 @@ class Raft[S, A <: Command](
     yield (res)
 
   def handleRead(r: Read[A, S]): ZIO[Any, Nothing, Unit] =
-    for
-      lastIndex <- logStore.lastIndex
-      isPendingRead <- raftState.modify {
-        case l: Leader[S] if lastIndex > l.lastApplied =>
-          (Right(true), l.withPendingRead(PendingReadEntry[S](r.promise, lastIndex)))
-
-        // TODO (eran): when leader validation is implemented, we should use it here instead
-        case l: Leader[S]    => (Right(false), l)
-        case f: Follower[S]  => (Left(NotALeaderError(f.leaderId)), f)
-        case c: Candidate[S] => (Left(NotALeaderError(None)), c)
-      }
-      _ <- isPendingRead match
-        case Right(true)  => ZIO.unit
-        case Right(false) => appStateRef.get.flatMap(r.promise.succeed).unit
-        case Left(e)      => r.promise.fail(e).unit
-    yield ()
+    (for
+      s <- raftState.get
+      l <- s match
+        case l: Leader[S] => ZIO.succeed(l)
+        case f: Follower[S] => ZIO.fail(NotALeaderError(f.leaderId))
+        case c: Candidate[S] => ZIO.fail(NotALeaderError(None))
+      
+      now <- zio.Clock.instant
+      pendingReadEntry = l.pendingCommands.lastIndex match
+        case Some(index) => PendingReadEntry.PendingCommand[S](r.promise, index)
+        case None => PendingReadEntry.PendingHeartbeat[S](r.promise, now, peers)
+      _ <- raftState.set(l.withPendingRead(pendingReadEntry))      
+    yield ()).catchAll(e => r.promise.fail(e).unit)
 
   def readState: ZIO[Any, NotALeaderError, S] =
     for

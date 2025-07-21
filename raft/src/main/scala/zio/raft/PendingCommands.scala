@@ -16,5 +16,8 @@ case class PendingCommands(map: Map[Index, Any]):
       .foreach(map.values.map(_.asInstanceOf[CommandPromise[Any]]))(_.fail(NotALeaderError(leaderId)))
       .unit
 
+  // TODO (eran): optimize this by using the same structure as pendingReads and taking last
+  def lastIndex: Option[Index] = Option.when(map.keys.nonEmpty)(map.keys.max(using Ordering.by(_.value)))
+
 object PendingCommands:
   def empty: PendingCommands = PendingCommands(Map.empty[Index, Any])

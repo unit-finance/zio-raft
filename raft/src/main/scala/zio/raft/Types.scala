@@ -47,7 +47,7 @@ case class ClusterConfiguration(
 ):
   def numberOfServers = 1 + peers.length
 
-  // TODO (eran): is this correct? should it be numberOfServers / 2 + 1?
+  // TODO (eran): is this correct? should it be numberOfServers / 2 + 1? this is correct since node always votes for itself, but this impl is not very clear
   def quorum = numberOfServers / 2
 
 trait Command:
@@ -94,10 +94,13 @@ object AppendEntriesResult:
   case class Failure[A <: Command](from: MemberId, term: Term, index: Index, hint: Option[(Term, Index)])
       extends AppendEntriesResult[A]
 
-case class HeartbeatRequest[A <: Command](term: Term, leaderId: MemberId, leaderCommitIndex: Index)
-    extends RPCMessage[A]
+case class HeartbeatRequest[A <: Command](
+    term: Term,
+    leaderId: MemberId,
+    leaderCommitIndex: Index /*, timestamp: Instant*/
+) extends RPCMessage[A]
 
-case class HeartbeatResponse[A <: Command](from: MemberId, term: Term) extends RPCMessage[A]
+case class HeartbeatResponse[A <: Command](from: MemberId, term: Term /*, timestamp: Instant*/ ) extends RPCMessage[A]
 
 case class InstallSnapshotRequest[A <: Command](
     term: Term,

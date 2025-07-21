@@ -94,5 +94,5 @@ object State:
     def completeCommands[R](index: Index, commandResponse: R, readState: S): UIO[Leader[S]] =
       for
         pendingCommands <- pendingCommands.withCompleted(index, commandResponse)
-        pendingReads <- pendingReads.withCompleted(index, readState)
+        pendingReads <- pendingReads.withCommandCompleted(index, readState)
       yield this.copy(pendingCommands = pendingCommands, pendingReads = pendingReads)

@@ -17,14 +17,10 @@ case class PendingReads[S](entries: List[PendingReadEntry[S]]):
       PendingReads(before ++ (entry :: after))
 
   def withCompleted(upToIndex: Index, state: S): UIO[PendingReads[S]] =
-          .as(PendingReads(remaining))
     if entries.isEmpty || entries.last.enqueuedAtIndex > upToIndex then ZIO.succeed(this)
     else
       entries.span(_.enqueuedAtIndex <= upToIndex) match
-        case (completed, remaining) =>
-          for
-            _ <- ZIO.debug(s"withCompleted completed=$completed remaining=$remaining")
-            _ <- ZIO.foreach(completed)(_.promise.succeed(state))
+        case (completed, remaining) => ZIO.foreach(completed)(_.promise.succeed(state)).as(PendingReads(remaining))
 
   def stepDown(leaderId: Option[MemberId]): UIO[Unit] =
     ZIO

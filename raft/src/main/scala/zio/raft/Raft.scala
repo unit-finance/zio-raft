@@ -850,7 +850,7 @@ class Raft[S, A <: Command](
           _ <- ZIO.logDebug(s"memberId=${this.memberId} handleCommand $entry")
           _ <- logStore.storeLog(entry)
 
-          _ <- raftState.set(l.addPendingCommand(entry.index, promise))
+          _ <- raftState.set(l.withPendingCommand(entry.index, promise))
         yield ()
       case f: Follower[S] =>
         promise.fail(NotALeaderError(f.leaderId)).unit

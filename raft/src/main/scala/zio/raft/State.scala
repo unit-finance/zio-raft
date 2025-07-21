@@ -82,7 +82,7 @@ object State:
     def withPendingRead(entry: PendingReadEntry[S]): Leader[S] =
       this.copy(pendingReads = pendingReads.withAdded(entry))
 
-    def addPendingCommand[R](index: Index, promise: CommandPromise[R]): Leader[S] =
+    def withPendingCommand[R](index: Index, promise: CommandPromise[R]): Leader[S] =
       this.copy(pendingCommands = pendingCommands.withAdded(index, promise))
 
     def stepDown(leaderId: Option[MemberId]): UIO[Unit] =

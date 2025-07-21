@@ -165,10 +165,12 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         _ <- r1.sendCommand(Increase)  
         _ <- r1.sendCommand(Increase)
         
-        readResult <- r1.readState
+        readResult1 <- r1.readState
         
         _ <- r1.sendCommand(Increase)
-      yield assertTrue(readResult == 3)
+
+        readResult2 <- r1.readState
+      yield assertTrue(readResult1 == 3 && readResult2 == 4)
     },
     test("read returns the correct state when there are no writes") {
       for

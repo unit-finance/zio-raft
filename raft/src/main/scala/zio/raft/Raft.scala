@@ -9,13 +9,15 @@ import zio.raft.State.{Candidate, Follower, Leader}
 import zio.raft.StreamItem.{Bootstrap, CommandMessage, Message, Tick}
 import zio.stream.ZStream
 import zio.{Chunk, Promise, Queue, Ref, UIO, URIO, ZIO, durationInt}
+import zio.raft.StreamItem.Read
 
-sealed trait StreamItem[A <: Command]
+sealed trait StreamItem[A <: Command, S]
 object StreamItem:
-  case class Tick[A <: Command]() extends StreamItem[A]
-  case class Message[A <: Command](message: RPCMessage[A]) extends StreamItem[A]
-  case class Bootstrap[A <: Command]() extends StreamItem[A]
-  trait CommandMessage[A <: Command] extends StreamItem[A]:
+  case class Tick[A <: Command, S]() extends StreamItem[A, S]
+  case class Message[A <: Command, S](message: RPCMessage[A]) extends StreamItem[A, S]
+  case class Bootstrap[A <: Command, S]() extends StreamItem[A, S]
+  case class Read[A <: Command, S](promise: Promise[NotALeaderError, S]) extends StreamItem[A, S]
+  trait CommandMessage[A <: Command, S] extends StreamItem[A, S]:
     val command: A
     val promise: CommandPromise[command.Response]
 
@@ -23,7 +25,7 @@ class Raft[S, A <: Command](
     val memberId: MemberId,
     peers: Peers,
     private[raft] val raftState: Ref[State[S]],
-    commandsQueue: Queue[StreamItem[A]],
+    commandsQueue: Queue[StreamItem[A, S]],
     stable: Stable,
     logStore: LogStore[A],
     snapshotStore: SnapshotStore,
@@ -535,14 +537,9 @@ class Raft[S, A <: Command](
         case _ => ZIO.unit
     yield ()
 
-  private def applyToStateMachineRule =
+  private def applyToStateMachineRule: ZIO[Any, Nothing, Boolean] =
     for
       s <- raftState.get
-      _ <- ZIO
-        .logDebug(
-          s"memberId=${this.memberId} applyToStateMachineRule ${s.commitIndex} ${s.lastApplied}"
-        )
-        .when(s.commitIndex > s.lastApplied)
       newState <- applyToStateMachine(s)
       _ <- raftState.set(newState)
     yield s != newState
@@ -576,19 +573,19 @@ class Raft[S, A <: Command](
 
   private def applyToStateMachine(state: State[S]): ZIO[Any, Nothing, State[S]] =
     if state.commitIndex > state.lastApplied then
-      logStore
-        .stream(state.lastApplied.plusOne, state.commitIndex)
-        .runFoldZIO(state)((state, logEntry) =>
-          for
-            appState <- appStateRef.get
-            (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState)
-            _ <- appStateRef.set(newState)
-
-            newRaftState <- state match
-              case l: Leader[S] => l.completeCommands(logEntry.index, response, newState)
-              case _            => ZIO.succeed(state)
-          yield newRaftState.increaseLastApplied
-        )
+      ZIO.logDebug(s"memberId=${this.memberId} applyToStateMachineRule ${state.commitIndex} ${state.lastApplied}") *>
+        logStore
+          .stream(state.lastApplied.plusOne, state.commitIndex)
+          .runFoldZIO(state)((state, logEntry) =>
+            for
+              appState <- appStateRef.get
+              (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState)
+              _ <- appStateRef.set(newState)
+              newRaftState <- state match
+                case l: Leader[S] => l.completeCommands(logEntry.index, response, newState)
+                case _            => ZIO.succeed(state)
+            yield newRaftState.increaseLastApplied
+          )
     else ZIO.succeed(state)
 
   private def sendHeartbeatRule(peer: MemberId) =
@@ -798,7 +795,7 @@ class Raft[S, A <: Command](
       _ <- ZIO.when(changed)(takeSnapshotRule)
     yield ()
 
-  private def handleMessage(message: RPCMessage[A]) =
+  private def handleMessage(message: RPCMessage[A]): ZIO[Any, Nothing, Unit] =
     message match
       case r: RequestVoteRequest[A] =>
         for
@@ -860,7 +857,7 @@ class Raft[S, A <: Command](
       case c: Candidate[S] =>
         promise.fail(NotALeaderError(None)).unit
 
-  private[raft] def handleStreamItem(item: StreamItem[A]) =
+  private[raft] def handleStreamItem(item: StreamItem[A, S]): ZIO[Any, Nothing, Unit] =
     item match
       case Tick() =>
         preRules <*> postRules
@@ -871,7 +868,7 @@ class Raft[S, A <: Command](
           _ <- handleMessage(message)
           _ <- postRules
         yield ()
-      case commandMessage: CommandMessage[A] =>
+      case commandMessage: CommandMessage[A, S] =>
         for
           _ <- ZIO.logDebug(s"[CommandMessage] memberId=${this.memberId} ${commandMessage.command}")
           _ <- preRules
@@ -880,6 +877,11 @@ class Raft[S, A <: Command](
             commandMessage.promise
           )
           _ <- postRules
+        yield ()
+      case r: Read[A, S] =>
+        for
+          _ <- ZIO.logDebug(s"[Read] memberId=${this.memberId} $r")
+          _ <- handleRead(r)
         yield ()
       case Bootstrap() =>
         for
@@ -907,26 +909,27 @@ class Raft[S, A <: Command](
       res <- promiseArg.await
     yield (res)
 
+  def handleRead(r: Read[A, S]): ZIO[Any, Nothing, Unit] =
+    for
+      lastIndex <- logStore.lastIndex
+      entry = PendingReadEntry[S](r.promise, lastIndex)
+      isPendingRead <- raftState.modify {
+        case l: Leader[S] if entry.enqueuedAtIndex > l.lastApplied => (Right(true), l.withPendingRead(entry))
+        case l: Leader[S]                                          => (Right(false), l)
+        case f: Follower[S]                                        => (Left(NotALeaderError(f.leaderId)), f)
+        case c: Candidate[S]                                       => (Left(NotALeaderError(None)), c)
+      }
+      _ <- isPendingRead match
+        case Right(true)  => ZIO.unit
+        case Right(false) => appStateRef.get.flatMap(entry.promise.succeed).unit
+        case Left(e)      => entry.promise.fail(e).unit
+    yield ()
+
   def readState: ZIO[Any, NotALeaderError, S] =
     for
-      s <- raftState.get
-      result <- s match
-        case l: Leader[S] =>
-          for
-            promise <- Promise.make[NotALeaderError, S]
-            now <- zio.Clock.instant
-            enqueuedAtIndex = l.commitIndex
-            entry = PendingReadEntry[S](promise, enqueuedAtIndex, now)
-            result <-
-              if enqueuedAtIndex <= l.lastApplied then appStateRef.get
-              else
-                raftState.set(l.withPendingRead(entry))
-                promise.await
-          yield result
-        case f: Follower[S] =>
-          ZIO.fail(NotALeaderError(f.leaderId))
-        case c: Candidate[S] =>
-          ZIO.fail(NotALeaderError(None))
+      promise <- Promise.make[NotALeaderError, S]
+      _ <- commandsQueue.offer(Read[A, S](promise))
+      result <- promise.await
     yield result
 
   // bootstrap the node and wait until the node would become the leader, only works when the current term is zero
@@ -948,9 +951,9 @@ class Raft[S, A <: Command](
     yield ()
 
   def run =
-    val tick = ZStream.repeat(StreamItem.Tick[A]())
+    val tick = ZStream.repeat(StreamItem.Tick[A, S]())
     val messages = rpc.incomingMessages
-      .map(Message(_))
+      .map(Message[A, S](_))
     val commandMessage =
       ZStream.fromQueue(this.commandsQueue)
     ZStream
@@ -1006,7 +1009,7 @@ object Raft:
       state <- Ref.make[State[S]](
         State.Follower[S](previousIndex, previousIndex, electionTimeout, None)
       )
-      commandsQueue <- Queue.unbounded[StreamItem[A]] // TODO: should this be bounded for back-pressure?
+      commandsQueue <- Queue.unbounded[StreamItem[A, S]] // TODO: should this be bounded for back-pressure?
 
       raft = new Raft[S, A](
         memberId,

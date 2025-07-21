@@ -912,17 +912,18 @@ class Raft[S, A <: Command](
   def handleRead(r: Read[A, S]): ZIO[Any, Nothing, Unit] =
     for
       lastIndex <- logStore.lastIndex
-      entry = PendingReadEntry[S](r.promise, lastIndex)
       isPendingRead <- raftState.modify {
-        case l: Leader[S] if entry.enqueuedAtIndex > l.lastApplied => (Right(true), l.withPendingRead(entry))
+        case l: Leader[S] if lastIndex > l.lastApplied => (Right(true), l.withPendingRead(PendingReadEntry[S](r.promise, lastIndex)))
+
+        // TODO (eran): when leader validation is implemented, we should use it here instead 
         case l: Leader[S]                                          => (Right(false), l)
         case f: Follower[S]                                        => (Left(NotALeaderError(f.leaderId)), f)
         case c: Candidate[S]                                       => (Left(NotALeaderError(None)), c)
       }
       _ <- isPendingRead match
         case Right(true)  => ZIO.unit
-        case Right(false) => appStateRef.get.flatMap(entry.promise.succeed).unit
-        case Left(e)      => entry.promise.fail(e).unit
+        case Right(false) => appStateRef.get.flatMap(r.promise.succeed).unit
+        case Left(e)      => r.promise.fail(e).unit
     yield ()
 
   def readState: ZIO[Any, NotALeaderError, S] =

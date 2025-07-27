@@ -41,7 +41,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
       stateMachine1 = TestStateMachine.make(enableSnapshot)
       stateMachine2 = TestStateMachine.make(enableSnapshot)
       stateMachine3 = TestStateMachine.make(enableSnapshot)
-      peers = Array(
+      peers = Set(
         MemberId("peer1"),
         MemberId("peer2"),
         MemberId("peer3")
@@ -198,15 +198,39 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           r3,
           killSwitch3
         ) <- makeRaft()
-        
-        // Stop the leader (r1) to make r2 and r3 followers/candidates
-        _ <- killSwitch1.set(false)
-        
+                
         // Try to read from a non-leader node (should fail with NotALeaderError)
         readResult <- r2.readState.either
         
       yield assertTrue(
         readResult.isLeft && readResult.left.exists(_.isInstanceOf[NotALeaderError])
       )
-    }
+    },
+    test("isolated leader cannot apply commands") {
+      for
+        (
+          r1,
+          killSwitch1,
+          r2,
+          killSwitch2,
+          r3,
+          killSwitch3
+        ) <- makeRaft()
+        
+        // Verify r1 is the leader initially
+        _ <- r1.sendCommand(Increase)
+        initialState <- r1.sendCommand(Get)
+        
+        // Isolate the leader (r1) from the rest of the cluster
+        _ <- killSwitch1.set(false)
+        
+        // Try to send a command to the isolated leader
+        // This should timeout because the leader cannot commit without majority consensus
+        commandResult <- r1.sendCommand(Increase).timeout(2.seconds)
+        
+      yield assertTrue(
+        initialState == 1 && // Verify initial command worked
+        commandResult.isEmpty // Command should timeout (returning None) due to lack of majority
+      )
+    } @@ TestAspect.timeout(5.seconds)
   ) @@ withLiveClock

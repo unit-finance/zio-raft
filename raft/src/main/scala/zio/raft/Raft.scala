@@ -688,8 +688,7 @@ class Raft[S, A <: Command](
                 ZIO
                   .logWarning(
                     s"memberId=${this.memberId} failed to send entries to peer $peer $nextIndex $leaderLastLogIndex, pausing peer"
-                  )
-                  .when(!sent) *>
+                  ) *>
                   raftState.set(l.withPause(peer))
           yield ()
         case _ =>

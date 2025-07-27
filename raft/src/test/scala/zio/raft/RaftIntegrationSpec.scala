@@ -225,12 +225,17 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         _ <- killSwitch1.set(false)
         
         // Try to send a command to the isolated leader
-        // This should timeout because the leader cannot commit without majority consensus
-        commandResult <- r1.sendCommand(Increase).timeout(2.seconds)
+        // This can either timeout (if leader hasn't detected isolation yet) 
+        // or fail with NotALeaderError (if leader has stepped down)
+        commandResult <- r1.sendCommand(Increase).timeout(2.seconds).either
         
       yield assertTrue(
         initialState == 1 && // Verify initial command worked
-        commandResult.isEmpty // Command should timeout (returning None) due to lack of majority
+        (commandResult match {
+          case Right(None) => true // Command timed out - leader couldn't commit
+          case Left(_: NotALeaderError) => true // Leader stepped down due to isolation
+          case _ => false // Any other result is unexpected
+        })
       )
-    } @@ TestAspect.timeout(5.seconds)
+    } @@ TestAspect.timeout(5.seconds) @@ TestAspect.nonFlaky
   ) @@ withLiveClock

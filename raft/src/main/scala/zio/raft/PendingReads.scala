@@ -7,43 +7,69 @@ import zio.ZIO
 import zio.raft.PendingReadEntry.PendingCommand
 import zio.raft.PendingReadEntry.PendingHeartbeat
 
-sealed trait PendingReadEntry[S]:
+ // TODO (eran): can this be converted to enum? check if compiles to scala 2 and if looks better
+
+private sealed trait PendingReadEntry[S]:
   val promise: Promise[NotALeaderError, S]
 
-object PendingReadEntry:
+private object PendingReadEntry:
   case class PendingCommand[S](promise: Promise[NotALeaderError, S], enqueuedAtIndex: Index) extends PendingReadEntry[S]
   case class PendingHeartbeat[S](promise: Promise[NotALeaderError, S], timestamp: Instant, members: Peers) extends PendingReadEntry[S]
 
+private implicit def pendingHeartbeatOrdering[S]: Ordering[PendingHeartbeat[S]] = Ordering.by(_.timestamp)
+private implicit def pendingCommandOrdering[S]: Ordering[PendingCommand[S]] = Ordering.by(_.enqueuedAtIndex.value)
 
+object InsertSortList:
+  def empty[A](implicit ordering: Ordering[A]): InsertSortList[A] = InsertSortList(List.empty)
 
-case class PendingReads[S](readsPendingCommands: List[PendingCommand[S]], readsPendingHeartbeats: List[PendingHeartbeat[S]]):
-  private def addReadPendingCommand(entry: PendingCommand[S]): PendingReads[S] =
-    if (readsPendingCommands.isEmpty || entry.enqueuedAtIndex >= readsPendingCommands.last.enqueuedAtIndex) then 
-      this.copy(readsPendingCommands = readsPendingCommands :+ entry)
+case class InsertSortList[A](list: List[A])(implicit ordering: Ordering[A]) extends Iterable[A]:
+
+  override def iterator: Iterator[A] = list.iterator
+
+  def withSortedInsert(a: A): InsertSortList[A] =
+    if (list.isEmpty || ordering.gteq(a, list.last)) then InsertSortList(list :+ a)
     else
-      val (before, after) = readsPendingCommands.span(_.enqueuedAtIndex <= entry.enqueuedAtIndex)
-      this.copy(readsPendingCommands = before ++ (entry :: after))
+      val (before, after) = list.span(ordering.lteq(_, a))
+      InsertSortList(before ++ (a :: after))
 
-  def addReadPendingHeartbeat(entry: PendingHeartbeat[S]): PendingReads[S] =
-    // TODO (eran): how do we want to use timestamp? do we want to sort the list?
-    this.copy(readsPendingHeartbeats = readsPendingHeartbeats :+ entry)
+  override def isEmpty: Boolean = list.isEmpty
+  override def last: A = list.last
+  override def span(p: A => Boolean): (InsertSortList[A], InsertSortList[A]) =
+    val (before, after) = list.span(p)
+    (InsertSortList(before), InsertSortList(after))
 
-  def withAdded(entry: PendingReadEntry[S]): PendingReads[S] = entry match
-    case c: PendingCommand[S]   => addReadPendingCommand(c)
-    case h: PendingHeartbeat[S] => addReadPendingHeartbeat(h)
+  def ++(other: InsertSortList[A]): InsertSortList[A] = InsertSortList(list ++ other.list)
 
-  def withCommandCompleted(upToIndex: Index, state: S): UIO[PendingReads[S]] =
-    if readsPendingCommands.isEmpty || readsPendingCommands.last.enqueuedAtIndex > upToIndex then ZIO.succeed(this)
+// TODO (Eran): fix all naming
+
+case class PendingReads[S](readsPendingCommands: InsertSortList[PendingCommand[S]], readsPendingHeartbeats: InsertSortList[PendingHeartbeat[S]]):
+  def withReadPendingCommand(promise: Promise[NotALeaderError, S], commandIndex: Index): PendingReads[S] =
+    this.copy(readsPendingCommands = readsPendingCommands.withSortedInsert(PendingCommand(promise, commandIndex)))
+
+  def withReadPendingHeartbeat(promise: Promise[NotALeaderError, S], timestamp: Instant, members: Peers): PendingReads[S] =
+    this.copy(readsPendingHeartbeats = readsPendingHeartbeats.withSortedInsert(PendingHeartbeat(promise, timestamp, members)))
+
+  def withCommandCompleted(commandIndex: Index, stateAfterApply: S): UIO[PendingReads[S]] =
+    if readsPendingCommands.isEmpty || readsPendingCommands.last.enqueuedAtIndex > commandIndex then ZIO.succeed(this)
     else
-      readsPendingCommands.span(_.enqueuedAtIndex <= upToIndex) match
-        case (completed, remaining) => ZIO.foreach(completed)(_.promise.succeed(state)).as(this.copy(readsPendingCommands = remaining))
+      readsPendingCommands.span(_.enqueuedAtIndex <= commandIndex) match
+        case (completed, remaining) => ZIO.foreach(completed)(_.promise.succeed(stateAfterApply)).as(this.copy(readsPendingCommands = remaining))
 
-  // TODO (eran): implement this
-  def withHeartbeatReceived(memberId: MemberId, timestamp: Instant): UIO[PendingReads[S]] = ???
+  def withHeartbeatResponse(memberId: MemberId, timestamp: Instant, state: S, majority: Int): UIO[PendingReads[S]] = 
+    if readsPendingHeartbeats.isEmpty then ZIO.succeed(this)
+    else
+      readsPendingHeartbeats.span(_.timestamp.compareTo(timestamp) <= 0) match
+        case (relevantForHeartbeat, remaining) => 
+          relevantForHeartbeat
+          .map(i => i.copy(members = i.members.filter(_ != memberId)))
+          .partition(_.members.size <= majority) match
+            case (heartbeatCompleted, heartbeatStillRequired) => 
+              ZIO.foreach(heartbeatCompleted)(_.promise.succeed(state)).as(this.copy(readsPendingHeartbeats = InsertSortList(remaining.list ++ heartbeatStillRequired)))
+          
 
   def stepDown(leaderId: Option[MemberId]): UIO[Unit] =
     // TODO (eran): improve this by using a stream
     ZIO.foreach(readsPendingCommands ++ readsPendingHeartbeats)(_.promise.fail(NotALeaderError(leaderId))).unit
 
 object PendingReads:
-  def empty[S]: PendingReads[S] = PendingReads(List.empty, List.empty)
+  def empty[S]: PendingReads[S] = PendingReads(InsertSortList.empty, InsertSortList.empty)

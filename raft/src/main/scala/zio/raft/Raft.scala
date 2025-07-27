@@ -35,7 +35,7 @@ class Raft[S, A <: Command](
 ):
   val rpcTimeout = 50.millis
   val batchSize = 100
-  val numberOfServers = peers.length + 1
+  val numberOfServers = peers.size + 1
 
   private def stepDown(newTerm: Term, leaderId: Option[MemberId]) =
     for
@@ -174,16 +174,19 @@ class Raft[S, A <: Command](
       s <- raftState.get
       _ <- s match
         case l: State.Leader[S] =>
-          val wasPaused = l.replicationStatus.isPaused(m.from)
-          val leader = l.withResume(m.from)
           for
-            // TODO (eran): Implement this
-            // TODO (eran): TBD how is the timestamp in heartbeat used? in theory we should always update all with heartbeats no?
-            // _ <- pendingReads.heartbeat(m.timestamp, m.from, peers.length) // pending reads can get confirmed by: (1) waiting for write and it was applied (2) or was ready for heartbeat from tiemstamp and it arrived. when we have a new read that requires heartbeat we want to send a "HeartnbeatDueNow" message to followers so they reply immediately and we do not wait.
+            appState <- appStateRef.get
+            now <- zio.Clock.instant // TODO (eran): are we ok with using now? it means we are using older heartbeat based on the response time instead of the send time
+            before = l.pendingReads
+            leader <- l.withHeartbeatResponse(m.from, now, appState, numberOfServers / 2)
+            after = l.pendingReads
+            _ <- ZIO.logDebug(s"pendingReads before: $before, after: $after")
+            _ <- raftState.set(leader)
 
-            // // when we have a new read, if we alreayd have existing reads, we want to add the timestamp of the earliest read (cheapest to get).
-
+            wasPaused = l.replicationStatus.isPaused(m.from)
+            leader = l.withResume(m.from)
             _ <- raftState.set(leader).when(wasPaused)
+
             lastIndex <- logStore.lastIndex
             matchIndex = l.matchIndex.get(m.from)
 
@@ -918,16 +921,22 @@ class Raft[S, A <: Command](
   def handleRead(r: Read[A, S]): ZIO[Any, Nothing, Unit] =
     (for
       s <- raftState.get
-      l <- s match
-        case l: Leader[S] => ZIO.succeed(l)
+      // If we have pending commands we piggyback on the next command to handle the read, 
+      // otherwise we need to verify leadership by waiting with the read until we get heartbeats from all peers 
+      newRaftState <- s match
+        case l: Leader[S] => l.pendingCommands.lastIndex match
+          case Some(index) => ZIO.succeed(l.withReadPendingCommand(r.promise, index))
+          case None => 
+            for 
+              now <- zio.Clock.instant
+              // TODO (Eran): TBD, we can also actively send heartbeat due to all peers, currently we just wait for the next cycle, which means we might wait a bit longer
+              newState = l.withHeartbeatDueFromAll(now).withReadPendingHeartbeat(r.promise, now, peers)
+            yield newState          
         case f: Follower[S] => ZIO.fail(NotALeaderError(f.leaderId))
         case c: Candidate[S] => ZIO.fail(NotALeaderError(None))
       
-      now <- zio.Clock.instant
-      pendingReadEntry = l.pendingCommands.lastIndex match
-        case Some(index) => PendingReadEntry.PendingCommand[S](r.promise, index)
-        case None => PendingReadEntry.PendingHeartbeat[S](r.promise, now, peers)
-      _ <- raftState.set(l.withPendingRead(pendingReadEntry))      
+      
+      _ <- raftState.set(newRaftState)      
     yield ()).catchAll(e => r.promise.fail(e).unit)
 
   def readState: ZIO[Any, NotALeaderError, S] =

@@ -39,13 +39,13 @@ object Index:
     Index(m)
 
 case class MemberId(value: String)
-type Peers = Array[MemberId]
+type Peers = Set[MemberId]
 
 case class ClusterConfiguration(
     server: MemberId,
-    peers: Array[MemberId]
+    peers: Peers
 ):
-  def numberOfServers = 1 + peers.length
+  def numberOfServers = 1 + peers.size
 
   // TODO (eran): is this correct? should it be numberOfServers / 2 + 1? this is correct since node always votes for itself, but this impl is not very clear
   def quorum = numberOfServers / 2

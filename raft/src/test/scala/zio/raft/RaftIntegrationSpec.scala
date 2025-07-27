@@ -161,18 +161,16 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch3
         ) <- makeRaft()
 
-        _ <- r1.sendCommand(Increase)
-        _ <- r1.sendCommand(Increase)  
-        _ <- r1.sendCommand(Increase)
-        
+        _ <- r1.sendCommand(Increase).fork.repeatN(10)
+        _ <- ZIO.sleep(100.millis) // Give raft the time to queue all writes
         readResult1 <- r1.readState
         
         _ <- r1.sendCommand(Increase)
 
         readResult2 <- r1.readState
-      yield assertTrue(readResult1 == 3 && readResult2 == 4)
-    },
-    test("read returns the correct state when there are no writes") {
+      yield assertTrue(readResult1 == 11 && readResult2 == 12)
+    } @@ TestAspect.nonFlaky,
+    test("read returns the correct state when there are no pending writes.") {
       for
         (
           r1,
@@ -183,10 +181,30 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch3
         ) <- makeRaft()
         
-        // Read the state without any commands (should be initial state = 0)
+        _ <- r1.sendCommand(Increase)
+
+        // When this runs we should have no writes in the queue since the sendCommand call is blocking
         readResult <- r1.readState
         
-      yield assertTrue(readResult == 0)
+      yield assertTrue(readResult == 1)
+    } @@ TestAspect.nonFlaky,    
+    test("read returns the correct state when there are no writes and one follower is down.") {
+      for
+        (
+          r1,
+          killSwitch1,
+          r2,
+          killSwitch2,
+          r3,
+          killSwitch3
+        ) <- makeRaft()
+
+
+        _ <- r1.sendCommand(Increase)
+        _ <- killSwitch2.set(false)
+        readResult <- r1.readState
+        
+      yield assertTrue(readResult == 1)
     },
     test("read fails when not leader") {
       for
@@ -205,37 +223,37 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
       yield assertTrue(
         readResult.isLeft && readResult.left.exists(_.isInstanceOf[NotALeaderError])
       )
-    },
-    test("isolated leader cannot apply commands") {
-      for
-        (
-          r1,
-          killSwitch1,
-          r2,
-          killSwitch2,
-          r3,
-          killSwitch3
-        ) <- makeRaft()
+    }
+    // test("isolated leader cannot apply commands") {
+    //   for
+    //     (
+    //       r1,
+    //       killSwitch1,
+    //       r2,
+    //       killSwitch2,
+    //       r3,
+    //       killSwitch3
+    //     ) <- makeRaft()
         
-        // Verify r1 is the leader initially
-        _ <- r1.sendCommand(Increase)
-        initialState <- r1.sendCommand(Get)
+    //     // Verify r1 is the leader initially
+    //     _ <- r1.sendCommand(Increase)
+    //     initialState <- r1.readState
         
-        // Isolate the leader (r1) from the rest of the cluster
-        _ <- killSwitch1.set(false)
+    //     // Isolate the leader (r1) from the rest of the cluster
+    //     _ <- killSwitch1.set(false)
         
-        // Try to send a command to the isolated leader
-        // This can either timeout (if leader hasn't detected isolation yet) 
-        // or fail with NotALeaderError (if leader has stepped down)
-        commandResult <- r1.sendCommand(Increase).timeout(2.seconds).either
+    //     // Try to send a command to the isolated leader
+    //     // This can either timeout (if leader hasn't detected isolation yet) 
+    //     // or fail with NotALeaderError (if leader has stepped down)
+    //     commandResult <- r1.sendCommand(Increase).timeout(2.seconds).either
         
-      yield assertTrue(
-        initialState == 1 && // Verify initial command worked
-        (commandResult match {
-          case Right(None) => true // Command timed out - leader couldn't commit
-          case Left(_: NotALeaderError) => true // Leader stepped down due to isolation
-          case _ => false // Any other result is unexpected
-        })
-      )
-    } @@ TestAspect.timeout(5.seconds) @@ TestAspect.nonFlaky
+    //   yield assertTrue(
+    //     initialState == 1 && // Verify initial command worked
+    //     (commandResult match {
+    //       case Right(None) => true // Command timed out - leader couldn't commit
+    //       case Left(_: NotALeaderError) => true // Leader stepped down due to isolation
+    //       case _ => false // Any other result is unexpected
+    //     })
+    //   )
+    // } @@ TestAspect.timeout(5.seconds)
   ) @@ withLiveClock

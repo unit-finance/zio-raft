@@ -80,7 +80,7 @@ object State:
     def withHeartbeatDue(from: MemberId, when: Instant): Leader[S] =
       this.copy(heartbeatDue = heartbeatDue.set(from, when))
 
-    def withHeartbeatDueFromAll(when: Instant): Leader[S] =
+    def withHeartbeatDueFromAll: Leader[S] =
       this.copy(heartbeatDue = HeartbeatDue.empty)
 
     def withReadPendingCommand(promise: Promise[NotALeaderError, S], commandIndex: Index): Leader[S] =

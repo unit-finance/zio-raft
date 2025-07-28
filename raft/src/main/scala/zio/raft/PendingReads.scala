@@ -7,38 +7,35 @@ import zio.ZIO
 import zio.raft.PendingReadEntry.PendingCommand
 import zio.raft.PendingReadEntry.PendingHeartbeat
 
-// TODO (eran): can this be converted to enum? check if compiles to scala 2 and if looks better
-
-private sealed trait PendingReadEntry[S]:
-  val promise: Promise[NotALeaderError, S]
-
-private object PendingReadEntry:
-  case class PendingCommand[S](promise: Promise[NotALeaderError, S], enqueuedAtIndex: Index) extends PendingReadEntry[S]
-  case class PendingHeartbeat[S](
-      promise: Promise[NotALeaderError, S],
+private enum PendingReadEntry[S](val promise: Promise[NotALeaderError, S]):
+  case PendingCommand(override val promise: Promise[NotALeaderError, S], enqueuedAtIndex: Index) extends PendingReadEntry[S](promise)
+  case PendingHeartbeat(
+      override val promise: Promise[NotALeaderError, S],
       timestamp: Instant,
       peersHeartbeats: Peers = Set.empty
-  ) extends PendingReadEntry[S] {
-    def hasMajority(numberOfServers: Int): Boolean = peersHeartbeats.size + 1 > numberOfServers / 2
-  }
+  ) extends PendingReadEntry[S](promise)
 
-private implicit def pendingHeartbeatOrdering[S]: Ordering[PendingHeartbeat[S]] = Ordering.by(_.timestamp)
-private implicit def pendingCommandOrdering[S]: Ordering[PendingCommand[S]] = Ordering.by(_.enqueuedAtIndex.value)
+  def hasMajority(numberOfServers: Int): Boolean = this match
+    case PendingHeartbeat(_, _, peersHeartbeats) => peersHeartbeats.size + 1 > numberOfServers / 2
+    case _ => false
+
+private implicit def pendingHeartbeatOrdering[S]: Ordering[PendingReadEntry.PendingHeartbeat[S]] = Ordering.by(_.timestamp)
+private implicit def pendingCommandOrdering[S]: Ordering[PendingReadEntry.PendingCommand[S]] = Ordering.by(_.enqueuedAtIndex.value)
 
 // TODO (Eran): fix all naming
 case class PendingReads[S](
-    readsPendingCommands: InsertSortList[PendingCommand[S]],
-    readsPendingHeartbeats: InsertSortList[PendingHeartbeat[S]]
+    readsPendingCommands: InsertSortList[PendingReadEntry.PendingCommand[S]],
+    readsPendingHeartbeats: InsertSortList[PendingReadEntry.PendingHeartbeat[S]]
 ):
   def withReadPendingCommand(promise: Promise[NotALeaderError, S], commandIndex: Index): PendingReads[S] =
-    this.copy(readsPendingCommands = readsPendingCommands.withSortedInsert(PendingCommand(promise, commandIndex)))
+    this.copy(readsPendingCommands = readsPendingCommands.withSortedInsert(PendingReadEntry.PendingCommand(promise, commandIndex)))
 
   def withReadPendingHeartbeat(
       promise: Promise[NotALeaderError, S],
       timestamp: Instant,
       members: Peers
   ): PendingReads[S] =
-    this.copy(readsPendingHeartbeats = readsPendingHeartbeats.withSortedInsert(PendingHeartbeat(promise, timestamp)))
+    this.copy(readsPendingHeartbeats = readsPendingHeartbeats.withSortedInsert(PendingReadEntry.PendingHeartbeat(promise, timestamp)))
 
   def withCommandCompleted(commandIndex: Index, stateAfterApply: S): UIO[PendingReads[S]] =
     if readsPendingCommands.isEmpty || readsPendingCommands.head.enqueuedAtIndex > commandIndex then ZIO.succeed(this)

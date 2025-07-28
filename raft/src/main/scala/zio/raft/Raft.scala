@@ -177,7 +177,7 @@ class Raft[S, A <: Command](
           for
             appState <- appStateRef.get
             now <- zio.Clock.instant // TODO (eran): are we ok with using now? it means we are using older heartbeat based on the response time instead of the send time
-            l <- l.withHeartbeatResponse(m.from, now, appState)
+            l <- l.withHeartbeatResponse(m.from, now, appState, numberOfServers)
             _ <- raftState.set(l)
 
             wasPaused = l.replicationStatus.isPaused(m.from)

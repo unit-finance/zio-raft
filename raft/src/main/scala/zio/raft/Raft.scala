@@ -245,7 +245,6 @@ class Raft[S, A <: Command](
                         _ <- ZIO.when(
                           logTerm.isDefined && logTerm != Some(entry.term)
                         )(
-                          // TODO (eran): can we optimize this with batch delete? or at least delete from the last/max index?
                           logStore.deleteFrom(entry.index)
                         )
                       yield ()

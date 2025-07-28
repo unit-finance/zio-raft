@@ -176,7 +176,7 @@ class Raft[S, A <: Command](
         case l: State.Leader[S] =>
           for
             appState <- appStateRef.get
-            now <- zio.Clock.instant // TODO (eran): are we ok with using now? it means we are using older heartbeat based on the response time instead of the send time
+            now <- zio.Clock.instant
             l <- l.withHeartbeatResponse(m.from, now, appState, numberOfServers)
             _ <- raftState.set(l)
 
@@ -918,22 +918,21 @@ class Raft[S, A <: Command](
   def handleRead(r: Read[A, S]): ZIO[Any, Nothing, Unit] =
     (for
       s <- raftState.get
-      // If we have pending commands we piggyback on the next command to handle the read, 
-      // otherwise we need to verify leadership by waiting with the read until we get heartbeats from all peers 
+      // If we have pending commands we piggyback on the next command to handle the read,
+      // otherwise we need to verify leadership by waiting with the read until we get heartbeats from all peers
       newRaftState <- s match
-        case l: Leader[S] => l.pendingCommands.lastIndex match
-          case Some(index) => ZIO.succeed(l.withReadPendingCommand(r.promise, index))
-          case None => 
-            for 
-              now <- zio.Clock.instant
-              // TODO (Eran): TBD, we can also actively send heartbeat due to all peers, currently we just wait for the next cycle, which means we might wait a bit longer
-              newState = l.withHeartbeatDueFromAll(now).withReadPendingHeartbeat(r.promise, now, peers)
-            yield newState          
-        case f: Follower[S] => ZIO.fail(NotALeaderError(f.leaderId))
+        case l: Leader[S] =>
+          l.pendingCommands.lastIndex match
+            case Some(index) => ZIO.succeed(l.withReadPendingCommand(r.promise, index))
+            case None =>
+              for
+                now <- zio.Clock.instant
+                newState = l.withHeartbeatDueFromAll(now).withReadPendingHeartbeat(r.promise, now, peers)
+              yield newState
+        case f: Follower[S]  => ZIO.fail(NotALeaderError(f.leaderId))
         case c: Candidate[S] => ZIO.fail(NotALeaderError(None))
-      
-      
-      _ <- raftState.set(newRaftState)      
+
+      _ <- raftState.set(newRaftState)
     yield ()).catchAll(e => r.promise.fail(e).unit)
 
   def readState: ZIO[Any, NotALeaderError, S] =

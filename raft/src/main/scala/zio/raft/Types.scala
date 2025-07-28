@@ -47,7 +47,7 @@ case class ClusterConfiguration(
 ):
   def numberOfServers = 1 + peers.size
 
-  // TODO (eran): is this correct? should it be numberOfServers / 2 + 1? this is correct since node always votes for itself, but this impl is not very clear
+  // TODO (eran): go over the code and fix peers and numberOfServers so it would mean the same everywhere
   def quorum = numberOfServers / 2
 
 trait Command:

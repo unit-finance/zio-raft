@@ -1,6 +1,5 @@
 package zio.raft
 
-
 object InsertSortList:
   def empty[A](implicit ordering: Ordering[A]): InsertSortList[A] = InsertSortList(List.empty)
 

@@ -925,7 +925,7 @@ class Raft[S, A <: Command](
             case Some(index) => ZIO.succeed(l.withReadPendingCommand(r.promise, index))
             case None =>
               for now <- zio.Clock.instant
-              yield l.withHeartbeatDueFromAll.withReadPendingHeartbeat(r.promise, now, peers)
+              yield l.withHeartbeatDueFromAll.withReadPendingHeartbeat(r.promise, now)
         case f: Follower[S]  => ZIO.fail(NotALeaderError(f.leaderId))
         case c: Candidate[S] => ZIO.fail(NotALeaderError(None))
 

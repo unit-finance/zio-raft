@@ -45,9 +45,9 @@ object PendingReadsSpec extends ZIOSpecDefault:
         later = now.plusSeconds(60)
         
         pendingReads = PendingReads.empty[String]
-          .withReadPendingHeartbeat(promise1, later, Set.empty)
-          .withReadPendingHeartbeat(promise2, earlier, Set.empty)
-          .withReadPendingHeartbeat(promise3, now, Set.empty)
+          .withReadPendingHeartbeat(promise1, later)
+          .withReadPendingHeartbeat(promise2, earlier)
+          .withReadPendingHeartbeat(promise3, now)
         
         heartbeatsList = pendingReads.readsPendingHeartbeats.list
       } yield assertTrue(
@@ -108,9 +108,9 @@ object PendingReadsSpec extends ZIOSpecDefault:
         member2 = MemberId("member2")
         
         initialReads = PendingReads.empty[String]
-          .withReadPendingHeartbeat(promise1, earlier, Set.empty)
-          .withReadPendingHeartbeat(promise2, now, Set.empty)
-          .withReadPendingHeartbeat(promise3, later, Set.empty)
+          .withReadPendingHeartbeat(promise1, earlier)
+          .withReadPendingHeartbeat(promise2, now)
+          .withReadPendingHeartbeat(promise3, later)
         
         // First heartbeat response (not enough for majority in 3-node cluster)
         afterFirst <- initialReads.withHeartbeatResponse(member1, now, "heartbeat_state", 3)
@@ -149,8 +149,8 @@ object PendingReadsSpec extends ZIOSpecDefault:
         pendingReads = PendingReads.empty[String]
           .withReadPendingCommand(commandPromise1, Index(1))
           .withReadPendingCommand(commandPromise2, Index(2))
-          .withReadPendingHeartbeat(heartbeatPromise1, now, Set.empty)
-          .withReadPendingHeartbeat(heartbeatPromise2, now.plusSeconds(10), Set.empty)
+          .withReadPendingHeartbeat(heartbeatPromise1, now)
+          .withReadPendingHeartbeat(heartbeatPromise2, now.plusSeconds(10))
         
         _ <- pendingReads.stepDown(leaderId)
         
@@ -185,11 +185,11 @@ object PendingReadsSpec extends ZIOSpecDefault:
         member2 = MemberId("member2")
         
         initialReads = PendingReads.empty[String]
-          .withReadPendingHeartbeat(promise1, t1, Set.empty)
-          .withReadPendingHeartbeat(promise2, t2, Set.empty)
-          .withReadPendingHeartbeat(promise3, t3, Set.empty)
-          .withReadPendingHeartbeat(promise4, t4, Set.empty)
-          .withReadPendingHeartbeat(promise5, t5, Set.empty)
+          .withReadPendingHeartbeat(promise1, t1)
+          .withReadPendingHeartbeat(promise2, t2)
+          .withReadPendingHeartbeat(promise3, t3)
+          .withReadPendingHeartbeat(promise4, t4)
+          .withReadPendingHeartbeat(promise5, t5)
         
         // Add some heartbeat responses to build up majority for earlier timestamps
         withFirstResponse <- initialReads.withHeartbeatResponse(member1, t3, "state", 3)

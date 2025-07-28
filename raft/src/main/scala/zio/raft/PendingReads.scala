@@ -7,35 +7,20 @@ import zio.ZIO
 import zio.raft.PendingReadEntry.PendingCommand
 import zio.raft.PendingReadEntry.PendingHeartbeat
 
-private enum PendingReadEntry[S](val promise: Promise[NotALeaderError, S]):
-  case PendingCommand(override val promise: Promise[NotALeaderError, S], enqueuedAtIndex: Index) extends PendingReadEntry[S](promise)
-  case PendingHeartbeat(
-      override val promise: Promise[NotALeaderError, S],
-      timestamp: Instant,
-      peersHeartbeats: Peers = Set.empty
-  ) extends PendingReadEntry[S](promise)
-
-  def hasMajority(numberOfServers: Int): Boolean = this match
-    case PendingHeartbeat(_, _, peersHeartbeats) => peersHeartbeats.size + 1 > numberOfServers / 2
-    case _ => false
-
-private implicit def pendingHeartbeatOrdering[S]: Ordering[PendingReadEntry.PendingHeartbeat[S]] = Ordering.by(_.timestamp)
-private implicit def pendingCommandOrdering[S]: Ordering[PendingReadEntry.PendingCommand[S]] = Ordering.by(_.enqueuedAtIndex.value)
-
 // TODO (Eran): fix all naming
 case class PendingReads[S](
     readsPendingCommands: InsertSortList[PendingReadEntry.PendingCommand[S]],
     readsPendingHeartbeats: InsertSortList[PendingReadEntry.PendingHeartbeat[S]]
 ):
   def withReadPendingCommand(promise: Promise[NotALeaderError, S], commandIndex: Index): PendingReads[S] =
-    this.copy(readsPendingCommands = readsPendingCommands.withSortedInsert(PendingReadEntry.PendingCommand(promise, commandIndex)))
+    this.copy(readsPendingCommands =
+      readsPendingCommands.withSortedInsert(PendingReadEntry.PendingCommand(promise, commandIndex))
+    )
 
-  def withReadPendingHeartbeat(
-      promise: Promise[NotALeaderError, S],
-      timestamp: Instant,
-      members: Peers
-  ): PendingReads[S] =
-    this.copy(readsPendingHeartbeats = readsPendingHeartbeats.withSortedInsert(PendingReadEntry.PendingHeartbeat(promise, timestamp)))
+  def withReadPendingHeartbeat(promise: Promise[NotALeaderError, S], timestamp: Instant): PendingReads[S] =
+    this.copy(readsPendingHeartbeats =
+      readsPendingHeartbeats.withSortedInsert(PendingReadEntry.PendingHeartbeat(promise, timestamp))
+    )
 
   def withCommandCompleted(commandIndex: Index, stateAfterApply: S): UIO[PendingReads[S]] =
     if readsPendingCommands.isEmpty || readsPendingCommands.head.enqueuedAtIndex > commandIndex then ZIO.succeed(this)
@@ -67,3 +52,20 @@ case class PendingReads[S](
 
 object PendingReads:
   def empty[S]: PendingReads[S] = PendingReads(InsertSortList.empty, InsertSortList.empty)
+
+private enum PendingReadEntry[S](val promise: Promise[NotALeaderError, S]):
+  case PendingCommand(override val promise: Promise[NotALeaderError, S], enqueuedAtIndex: Index)
+      extends PendingReadEntry[S](promise)
+  case PendingHeartbeat(
+      override val promise: Promise[NotALeaderError, S],
+      timestamp: Instant,
+      peersHeartbeats: Peers = Set.empty
+  ) extends PendingReadEntry[S](promise)
+
+object PendingReadEntry:
+  extension [S](pendingHeartbeat: PendingHeartbeat[S])
+    def hasMajority(numberOfServers: Int): Boolean = pendingHeartbeat.peersHeartbeats.size + 1 > numberOfServers / 2
+
+private given pendingHeartbeatOrdering[S]: Ordering[PendingReadEntry.PendingHeartbeat[S]] = Ordering.by(_.timestamp)
+private given pendingCommandOrdering[S]: Ordering[PendingReadEntry.PendingCommand[S]] =
+  Ordering.by(_.enqueuedAtIndex.value)

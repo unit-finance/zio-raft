@@ -3,7 +3,7 @@ package zio.raft
 object InsertSortList:
   def empty[A](implicit ordering: Ordering[A]): InsertSortList[A] = InsertSortList(List.empty)
 
-case class InsertSortList[A](list: List[A])(implicit ordering: Ordering[A]) extends Iterable[A]:
+case class InsertSortList[A](list: List[A])(using ordering: Ordering[A]) extends Iterable[A]:
 
   override def iterator: Iterator[A] = list.iterator
 

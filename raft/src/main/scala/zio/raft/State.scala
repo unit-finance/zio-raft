@@ -86,8 +86,8 @@ object State:
     def withReadPendingCommand(promise: Promise[NotALeaderError, S], commandIndex: Index): Leader[S] =
       this.copy(pendingReads = pendingReads.withReadPendingCommand(promise, commandIndex))
 
-    def withReadPendingHeartbeat(promise: Promise[NotALeaderError, S], timestamp: Instant, members: Peers): Leader[S] =
-      this.copy(pendingReads = pendingReads.withReadPendingHeartbeat(promise, timestamp, members))
+    def withReadPendingHeartbeat(promise: Promise[NotALeaderError, S], timestamp: Instant): Leader[S] =
+      this.copy(pendingReads = pendingReads.withReadPendingHeartbeat(promise, timestamp))
 
     def withPendingCommand[R](index: Index, promise: CommandPromise[R]): Leader[S] =
       this.copy(pendingCommands = pendingCommands.withAdded(index, promise))

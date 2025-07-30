@@ -2,6 +2,7 @@ package zio.raft
 
 import java.time.Instant
 import zio.UIO
+import zio.Promise
 
 sealed trait State[S]:
   val commitIndex: Index
@@ -79,8 +80,14 @@ object State:
     def withHeartbeatDue(from: MemberId, when: Instant): Leader[S] =
       this.copy(heartbeatDue = heartbeatDue.set(from, when))
 
-    def withPendingRead(entry: PendingReadEntry[S]): Leader[S] =
-      this.copy(pendingReads = pendingReads.withAdded(entry))
+    def withHeartbeatDueFromAll: Leader[S] =
+      this.copy(heartbeatDue = HeartbeatDue.empty)
+
+    def withReadPendingCommand(promise: Promise[NotALeaderError, S], commandIndex: Index): Leader[S] =
+      this.copy(pendingReads = pendingReads.withReadPendingCommand(promise, commandIndex))
+
+    def withReadPendingHeartbeat(promise: Promise[NotALeaderError, S], timestamp: Instant): Leader[S] =
+      this.copy(pendingReads = pendingReads.withReadPendingHeartbeat(promise, timestamp))
 
     def withPendingCommand[R](index: Index, promise: CommandPromise[R]): Leader[S] =
       this.copy(pendingCommands = pendingCommands.withAdded(index, promise))
@@ -94,5 +101,9 @@ object State:
     def completeCommands[R](index: Index, commandResponse: R, readState: S): UIO[Leader[S]] =
       for
         pendingCommands <- pendingCommands.withCompleted(index, commandResponse)
-        pendingReads <- pendingReads.withCompleted(index, readState)
+        pendingReads <- pendingReads.withCommandCompleted(index, readState)
       yield this.copy(pendingCommands = pendingCommands, pendingReads = pendingReads)
+
+    def withHeartbeatResponse(memberId: MemberId, timestamp: Instant, state: S, numberOfServers: Int): UIO[Leader[S]] =
+      for pendingReads <- pendingReads.withHeartbeatResponse(memberId, timestamp, state, numberOfServers)
+      yield this.copy(pendingReads = pendingReads)

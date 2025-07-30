@@ -36,7 +36,7 @@ class Raft[S, A <: Command](
 ):
   val rpcTimeout = 50.millis
   val batchSize = 100
-  val numberOfServers = peers.length + 1
+  val numberOfServers = peers.size + 1
 
   private def stepDown(newTerm: Term, leaderId: Option[MemberId]) =
     for
@@ -175,10 +175,16 @@ class Raft[S, A <: Command](
       s <- raftState.get
       _ <- s match
         case l: State.Leader[S] =>
-          val wasPaused = l.replicationStatus.isPaused(m.from)
-          val leader = l.withResume(m.from)
           for
+            appState <- appStateRef.get
+            now <- zio.Clock.instant
+            l <- l.withHeartbeatResponse(m.from, now, appState, numberOfServers)
+            _ <- raftState.set(l)
+
+            wasPaused = l.replicationStatus.isPaused(m.from)
+            leader = l.withResume(m.from)
             _ <- raftState.set(leader).when(wasPaused)
+
             lastIndex <- logStore.lastIndex
             matchIndex = l.matchIndex.get(m.from)
 
@@ -683,8 +689,7 @@ class Raft[S, A <: Command](
                 ZIO
                   .logWarning(
                     s"memberId=${this.memberId} failed to send entries to peer $peer $nextIndex $leaderLastLogIndex, pausing peer"
-                  )
-                  .when(!sent) *>
+                  ) *>
                   raftState.set(l.withPause(peer))
           yield ()
         case _ =>
@@ -912,22 +917,22 @@ class Raft[S, A <: Command](
     yield (res)
 
   def handleRead(r: Read[A, S]): ZIO[Any, Nothing, Unit] =
-    for
-      lastIndex <- logStore.lastIndex
-      isPendingRead <- raftState.modify {
-        case l: Leader[S] if lastIndex > l.lastApplied =>
-          (Right(true), l.withPendingRead(PendingReadEntry[S](r.promise, lastIndex)))
+    (for
+      s <- raftState.get
+      // If we have pending commands we piggyback on the next command to handle the read,
+      // otherwise we need to verify leadership by waiting with the read until we get heartbeats from all peers
+      newRaftState <- s match
+        case l: Leader[S] =>
+          l.pendingCommands.lastIndex match
+            case Some(index) => ZIO.succeed(l.withReadPendingCommand(r.promise, index))
+            case None =>
+              for now <- zio.Clock.instant
+              yield l.withHeartbeatDueFromAll.withReadPendingHeartbeat(r.promise, now)
+        case f: Follower[S]  => ZIO.fail(NotALeaderError(f.leaderId))
+        case c: Candidate[S] => ZIO.fail(NotALeaderError(None))
 
-        // TODO (eran): when leader validation is implemented, we should use it here instead
-        case l: Leader[S]    => (Right(false), l)
-        case f: Follower[S]  => (Left(NotALeaderError(f.leaderId)), f)
-        case c: Candidate[S] => (Left(NotALeaderError(None)), c)
-      }
-      _ <- isPendingRead match
-        case Right(true)  => ZIO.unit
-        case Right(false) => appStateRef.get.flatMap(r.promise.succeed).unit
-        case Left(e)      => r.promise.fail(e).unit
-    yield ()
+      _ <- raftState.set(newRaftState)
+    yield ()).catchAll(e => r.promise.fail(e).unit)
 
   def readState: ZIO[Any, NotALeaderError, S] =
     for

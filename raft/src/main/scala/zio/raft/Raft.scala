@@ -596,6 +596,7 @@ class Raft[S, A <: Command](
       _ <- s match
         case l: Leader[S] if l.heartbeatDue.due(now, peer) =>
           for
+            _ <- ZIO.debug(s"memberId=${this.memberId} sendHeartbeatRule $peer")
             currentTerm <- stable.currentTerm
             lastIndex <- logStore.lastIndex
             matchIndex = l.matchIndex.get(peer)
@@ -781,17 +782,18 @@ class Raft[S, A <: Command](
         case _ => ZIO.unit
     yield ()
 
-  private def preRules =
+  private def preRules: ZIO[Any, Nothing, Unit] =
     for
       _ <- startNewElectionRule
       _ <- ZIO.foreachDiscard(peers)(p => sendRequestVoteRule(p) <*> sendHeartbeatRule(p))
     yield ()
 
-  private def postRules =
+  private def postRules: ZIO[Any, Nothing, Unit] =
     for
+      _ <- ZIO.foreachDiscard(peers)(p => sendHeartbeatRule(p)) // this needs to be before becomeLeaderRule
       _ <- becomeLeaderRule
       _ <- advanceCommitIndexRule
-      _ <- ZIO.foreachDiscard(peers)(p => sendAppendEntriesRule(p) <*> sendRequestVoteRule(p) <*> sendHeartbeatRule(p))
+      _ <- ZIO.foreachDiscard(peers)(p => sendAppendEntriesRule(p) <*> sendRequestVoteRule(p))
       changed <- applyToStateMachineRule
       _ <- ZIO.when(changed)(takeSnapshotRule)
     yield ()

@@ -8,8 +8,9 @@ import zio.raft.RequestVoteResult.Rejected
 import zio.raft.State.{Candidate, Follower, Leader}
 import zio.raft.StreamItem.{Bootstrap, CommandMessage, Message, Tick}
 import zio.stream.ZStream
-import zio.{Chunk, Promise, Queue, Ref, UIO, URIO, ZIO, durationInt}
+import zio.{Chunk, Promise, Queue, Ref, UIO, URIO, ZIO, durationInt, durationLong, Schedule}
 import zio.raft.StreamItem.Read
+import zio.raft.Raft.heartbeartInterval
 
 sealed trait StreamItem[A <: Command, S]
 object StreamItem:
@@ -790,7 +791,7 @@ class Raft[S, A <: Command](
     for
       _ <- becomeLeaderRule
       _ <- advanceCommitIndexRule
-      _ <- ZIO.foreachDiscard(peers)(p => sendAppendEntriesRule(p) <*> sendRequestVoteRule(p))
+      _ <- ZIO.foreachDiscard(peers)(p => sendAppendEntriesRule(p) <*> sendRequestVoteRule(p) <*> sendHeartbeatRule(p))
       changed <- applyToStateMachineRule
       _ <- ZIO.when(changed)(takeSnapshotRule)
     yield ()
@@ -953,7 +954,8 @@ class Raft[S, A <: Command](
     yield ()
 
   def run =
-    val tick = ZStream.repeat(StreamItem.Tick[A, S]())
+    val tickInterval = (math.min(heartbeartInterval.toMillis(), rpcTimeout.toMillis) / 2).millis
+    val tick = ZStream.repeatWithSchedule(StreamItem.Tick[A, S](), Schedule.spaced(tickInterval))
     val messages = rpc.incomingMessages
       .map(Message[A, S](_))
     val commandMessage =

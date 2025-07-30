@@ -596,7 +596,6 @@ class Raft[S, A <: Command](
       _ <- s match
         case l: Leader[S] if l.heartbeatDue.due(now, peer) =>
           for
-            _ <- ZIO.debug(s"memberId=${this.memberId} sendHeartbeatRule $peer")
             currentTerm <- stable.currentTerm
             lastIndex <- logStore.lastIndex
             matchIndex = l.matchIndex.get(peer)

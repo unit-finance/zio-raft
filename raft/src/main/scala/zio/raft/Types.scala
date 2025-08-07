@@ -53,6 +53,9 @@ case class ClusterConfiguration(
 trait Command:
   type Response
 
+case object NoopCommand extends Command:
+  type Response = Unit
+
 case class NotALeaderError(leaderId: Option[MemberId])
 
 type CommandPromise[A] = Promise[NotALeaderError, A]

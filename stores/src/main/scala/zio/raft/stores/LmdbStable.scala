@@ -40,8 +40,9 @@ object LmdbStable:
       database <- Database.open("stable").orDie
       key = "stable".getBytes("UTF-8")
       bytes <- environment.transactReadOnly(database.get(key)).orDie
-      (term, votedFor) <- bytes match
+      tuple <- bytes match
         case None        => ZIO.succeed(Term(0), None)
         case Some(value) => ZIO.fromTry(codecs.stableCodec.decodeValue(BitVector(value)).toTry).orDie
+      (term, votedFor) = tuple
       ref <- Ref.make((term, votedFor))
     yield LmdbStable(environment, ref, database, key)

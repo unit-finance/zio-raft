@@ -76,7 +76,7 @@ object FileStable:
       finalFileExists <- Files.exists(finalPath)
       backupFileExists <- Files.exists(backupPath)
 
-      (term, votedFor) <-
+      tuple <-
         (finalFileExists, backupFileExists) match
           case (true, true) =>
             read(finalPath)
@@ -88,6 +88,8 @@ object FileStable:
             read(backupPath).orDieWith(err => new Throwable(s"Error occurred: ${err.messageWithContext}"))
           case (false, false) =>
             ZIO.succeed((Term(0), None))
+
+      (term, votedFor) = tuple
 
       ref <- Ref.make((term, votedFor))
     yield FileStable(ref, finalPath, backupPath, tempPath)

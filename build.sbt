@@ -12,6 +12,7 @@ lazy val mainScalaVersion = scala3Version
 
 lazy val supportedScalaVersions = List(scala3Version, scala213Version)
 
+// If you change the organization, you need to update publish.yml github workflow
 ThisBuild / organization := "io.github.unit-finance"
 // ThisBuild / organization := "co.unit"
 ThisBuild / organizationName := "Unit"

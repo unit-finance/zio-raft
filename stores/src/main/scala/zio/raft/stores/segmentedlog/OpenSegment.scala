@@ -5,7 +5,7 @@ import java.nio.file.StandardOpenOption
 import zio.nio.channels.AsynchronousFileChannel
 import zio.nio.file.Path
 import zio.raft.stores.segmentedlog.internal.*
-import zio.raft.{Command, Index, LogEntry}
+import zio.raft.{Command, Index, CommandLogEntry}
 import zio.{Scope, UIO, ZIO}
 import scodec.zio.*
 
@@ -33,7 +33,7 @@ class OpenSegment[A <: Command: Codec](
         .via(decode)
     else stream.takeWhile(_.index <= toInclusive).via(decode)
 
-  def getEntry(index: Index): ZIO[Any, Nothing, Option[LogEntry[A]]] =
+  def getEntry(index: Index): ZIO[Any, Nothing, Option[CommandLogEntry[A]]] =
     if index >= firstIndex then
       makeStream(channel)
         .via(recordsOnly)
@@ -53,12 +53,12 @@ class OpenSegment[A <: Command: Codec](
       case None    => (previousTerm, firstIndex.minusOne)
       case Some(e) => (e.term, e.index)
 
-  def writeEntry(entry: LogEntry[A]): ZIO[Any, Nothing, Int] = writeEntries(List(entry))
+  def writeEntry(entry: CommandLogEntry[A]): ZIO[Any, Nothing, Int] = writeEntries(List(entry))
 
   // Write entries write all of the entries, regardless if the segment size will be exceeded
   // segment size is just a recommendation at this moment.
   // TODO: we should only write entries that will fit in the segment and return the rest to be written in the next segment
-  def writeEntries(entries: List[LogEntry[A]]): ZIO[Any, Nothing, Int] =
+  def writeEntries(entries: List[CommandLogEntry[A]]): ZIO[Any, Nothing, Int] =
     for {
       bytes <- ZIO.attempt(entriesCodec.encode(entries).require.toByteVector).orDie
       position <- positionRef.get

@@ -1,6 +1,6 @@
 package zio.raft.stores.segmentedlog
 
-import zio.raft.{Command, Index, LogEntry, Term}
+import zio.raft.{Command, Index, CommandLogEntry, Term}
 import zio.{Scope, ScopedRef, ZIO}
 
 import scodec.Codec
@@ -14,10 +14,10 @@ object internal:
   private def termCodec = int64.xmap(Term(_), _.value)
   private def indexCodec = int64.xmap(Index(_), _.value)
 
-  def entryCodec[A <: Command](using codec: Codec[A]): Codec[LogEntry[A]] =
-    (codec :: termCodec :: indexCodec).as[LogEntry[A]]
-  def entriesCodec[A <: Command: Codec]: ChecksummedList[LogEntry[A]] =
-    new ChecksummedList[LogEntry[A]](entryCodec)
+  def entryCodec[A <: Command](using codec: Codec[A]): Codec[CommandLogEntry[A]] =
+    (codec :: termCodec :: indexCodec).as[CommandLogEntry[A]]
+  def entriesCodec[A <: Command: Codec]: ChecksummedList[CommandLogEntry[A]] =
+    new ChecksummedList[CommandLogEntry[A]](entryCodec)
 
   val fileVersion = constant(uint16.encode(1).require)
   val fileHeaderCodec = (signature :: fileVersion).unit(((), ()))

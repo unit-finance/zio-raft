@@ -53,15 +53,14 @@ case class ClusterConfiguration(
 trait Command:
   type Response
 
-case object NoopCommand extends Command:
-  type Response = Unit
-
 case class NotALeaderError(leaderId: Option[MemberId])
 
 type CommandPromise[A] = Promise[NotALeaderError, A]
 
-case class EntryKey(term: Term, index: Index)
-case class LogEntry[A <: Command](command: A, term: Term, index: Index)
+sealed trait LogEntry(val term: Term, val index: Index)
+object LogEntry:
+  case class CommandLogEntry[A <: Command](command: A, override val term: Term, override val index: Index) extends LogEntry(term, index)
+  case class NoopLogEntry(override val term: Term, override val index: Index) extends LogEntry(term, index)
 
 sealed trait RPCMessage[A <: Command]:
   val term: Term
@@ -83,7 +82,7 @@ case class AppendEntriesRequest[A <: Command](
     leaderId: MemberId,
     previousIndex: Index,
     previousTerm: Term,
-    entries: List[LogEntry[A]],
+    entries: List[LogEntry],
     leaderCommitIndex: Index
 ) extends RPCMessage[A]
 

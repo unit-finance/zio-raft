@@ -8,6 +8,7 @@ case class PendingCommands(map: Map[Index, Any]):
       .foreach(map.get(index).asInstanceOf[Option[CommandPromise[R]]])(_.succeed(response))
       .as(PendingCommands(map.removed(index)))
 
+  // TODO (eran): we need Option[CommandPromise[R]] instead of CommandPromise[R] to handle NoopCommandMessage
   def withAdded[R](index: Index, promise: CommandPromise[R]): PendingCommands =
     PendingCommands(map + (index -> promise))
 

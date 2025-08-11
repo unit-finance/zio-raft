@@ -86,7 +86,7 @@ object RaftSpec extends ZIOSpecDefault:
       leaderId: MemberId,
       previousIndex: Index,
       previousTerm: Term,
-      entries: List[LogEntry[TestCommands]],
+      entries: List[CommandLogEntry[TestCommands]],
       leaderCommitIndex: Index
   ) =
     raft.handleStreamItem(
@@ -228,7 +228,7 @@ object RaftSpec extends ZIOSpecDefault:
           Array(MemberId("peer2"), MemberId("peer3")),
           false
         )
-        logEntry: LogEntry[TestCommands] = LogEntry(
+        logEntry: CommandLogEntry[TestCommands] = CommandLogEntry(
           Increase,
           Term(1),
           Index(1)
@@ -268,7 +268,7 @@ object RaftSpec extends ZIOSpecDefault:
           MemberId("peer1"),
           Index(0),
           Term(0),
-          List(LogEntry(Increase, Term(1), Index(1))),
+          List(CommandLogEntry(Increase, Term(1), Index(1))),
           Index(0)
         )
         expectedMessages = List(
@@ -291,7 +291,7 @@ object RaftSpec extends ZIOSpecDefault:
           MemberId("peer2"),
           Index(0),
           Term(0),
-          List(LogEntry(Increase, Term(1), Index(1))),
+          List(CommandLogEntry(Increase, Term(1), Index(1))),
           Index(0)
         )
 

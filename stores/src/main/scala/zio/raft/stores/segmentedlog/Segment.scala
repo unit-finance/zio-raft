@@ -11,7 +11,7 @@ import zio.raft.Command
 import scodec.Codec
 import zio.stream.ZPipeline
 import zio.raft.stores.segmentedlog.internal.entryCodec
-import zio.raft.LogEntry
+import zio.raft.CommandLogEntry
 import zio.stream.ZSink
 import zio.stream.ZStream
 
@@ -19,7 +19,7 @@ trait Segment[A <: Command: Codec]:
   val path: Path
   val firstIndex: Index
 
-  def getEntry(index: Index): ZIO[Any, Nothing, Option[LogEntry[A]]]
+  def getEntry(index: Index): ZIO[Any, Nothing, Option[CommandLogEntry[A]]]
 
   def makeStream(channel: AsynchronousFileChannel, validateChecksum: Boolean = false): ZStream[Any, Throwable, Result] =
     channel
@@ -30,8 +30,8 @@ trait Segment[A <: Command: Codec]:
     ZPipeline.collect[BaseTransducer.Result, BaseTransducer.Result.Record]:
       case r: BaseTransducer.Result.Record => r
 
-  def decode: ZPipeline[Any, Throwable, Result.Record, LogEntry[A]] =
-    ZPipeline.mapZIO[Any, Throwable, BaseTransducer.Result.Record, LogEntry[A]](record =>
+  def decode: ZPipeline[Any, Throwable, Result.Record, CommandLogEntry[A]] =
+    ZPipeline.mapZIO[Any, Throwable, BaseTransducer.Result.Record, CommandLogEntry[A]](record =>
       ZIO
         .attemptBlocking(entryCodec[A].decodeValue(record.payload))
         .flatMap {
@@ -40,7 +40,7 @@ trait Segment[A <: Command: Codec]:
         }
     )
 
-  def lastAndDecode: ZSink[Any, Throwable, Result.Record, Result.Record, Option[LogEntry[A]]] =
+  def lastAndDecode: ZSink[Any, Throwable, Result.Record, Result.Record, Option[CommandLogEntry[A]]] =
     ZSink
       .last[BaseTransducer.Result.Record]
       .mapZIO:

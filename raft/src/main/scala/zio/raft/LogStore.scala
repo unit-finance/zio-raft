@@ -2,6 +2,7 @@ package zio.raft
 
 import zio.stream.ZStream
 import zio.{Ref, UIO, ZIO}
+import zio.raft.LogEntry.NoopLogEntry
 
 trait LogStore[A <: Command]:
   // def firstIndex: UIO[Index]
@@ -11,13 +12,13 @@ trait LogStore[A <: Command]:
   def logTerm(index: Index): UIO[Option[Term]]
 
   // Should return None if the firstEntry on the store is greater than from
-  def getLogs(from: Index, toInclusive: Index): UIO[Option[List[LogEntry[A]]]]
+  def getLogs(from: Index, toInclusive: Index): UIO[Option[List[LogEntry]]]
 
   // Should Die if the firstEntry on the store is greater than from
-  def stream(fromInclusive: Index, toInclusive: Index): ZStream[Any, Nothing, LogEntry[A]]
+  def stream(fromInclusive: Index, toInclusive: Index): ZStream[Any, Nothing, LogEntry]
 
-  def storeLog(logEntry: LogEntry[A]): UIO[Unit]
-  def storeLogs(entries: List[LogEntry[A]]): UIO[Unit]
+  def storeLog(logEntry: LogEntry): UIO[Unit]
+  def storeLogs(entries: List[LogEntry]): UIO[Unit]
 
   def deleteFrom(minInclusive: Index): UIO[Unit]
   def discardEntireLog(previousIndex: Index, previousTerm: Term): UIO[Unit]
@@ -37,18 +38,20 @@ end LogStore
 
 object LogStore:
   def makeInMemory[A <: Command] =
-    for logs <- Ref.make(List.empty[LogEntry[A]])
+    for logs <- Ref.make(List.empty[LogEntry])
     yield new InMemoryLogStore(logs)
 
   class InMemoryLogStore[A <: Command](
-      logs: Ref[List[LogEntry[A]]]
+      logs: Ref[List[LogEntry]]
   ) extends LogStore[A]:
 
     override def discardLogUpTo(index: Index): UIO[Unit] =
       logs.update(_.filter(e => e.index >= index))
 
+    // TODO (eran): TBD with Doron on null.asInstanceOf with CommandLogEntry, in theory we also utilize this approach as noop command, for now swicthed to NoopLogEntry
+    // TODO (eran): It is a bit weird that the log store is responsible to keep the previous term and index, shouldn't Raft do that in a separate step?
     override def discardEntireLog(previousIndex: Index, previousTerm: Term): UIO[Unit] =
-      logs.set(LogEntry(null.asInstanceOf, previousTerm, previousIndex) :: List.empty[LogEntry[A]])
+      logs.set(NoopLogEntry(previousTerm, previousIndex) :: List.empty[LogEntry])
 
     override def lastIndex = logs.get.map(_.headOption.map(_.index).getOrElse(Index.zero))
     override def lastTerm = logs.get.map(_.headOption.map(_.term).getOrElse(Term.zero))
@@ -75,10 +78,10 @@ object LogStore:
         case None        => ZStream.die(new Throwable("No logs found"))
         case Some(value) => ZStream.fromIterable(value)
 
-    override def storeLog(logEntry: LogEntry[A]) =
+    override def storeLog(logEntry: LogEntry) =
       logs.update(logEntry :: _)
 
-    override def storeLogs(entries: List[LogEntry[A]]): UIO[Unit] =
+    override def storeLogs(entries: List[LogEntry]): UIO[Unit] =
       logs.update(entries.toList ++ _)
 
     override def deleteFrom(minInclusive: Index): UIO[Unit] =

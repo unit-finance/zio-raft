@@ -28,11 +28,13 @@ object RpcMessageCodec:
   private def chunkCodec =
     variableSizeBytes(int32, bytes).xmap(bv => Chunk.fromIterable(bv.toIterable), c => ByteVector(c.toIterable))
 
-  private def logEntryCodec[A <: Command](commandCodec: Codec[A]) =
-    (commandCodec :: termCodec :: indexCodec).as[LogEntry[A]]
+  private def commandLogEntryCodec[A <: Command](commandCodec: Codec[A]) =
+    (commandCodec :: termCodec :: indexCodec).as[CommandLogEntry[A]]
 
-  private def entriesCodec[A <: Command](commandCodec: Codec[A]): Codec[List[LogEntry[A]]] =
-    listOfN(int32, logEntryCodec(commandCodec))
+  private def noopLogEntryCodec = (termCodec :: indexCodec).as[NoopLogEntry]
+
+  private def entriesCodec[A <: Command](commandCodec: Codec[A]): Codec[List[CommandLogEntry[A]]] =
+    listOfN(int32, commandLogEntryCodec(commandCodec))
 
   private def heartbeatCodec[A <: Command] = (termCodec :: memberIdCodec :: indexCodec).as[HeartbeatRequest[A]]
 

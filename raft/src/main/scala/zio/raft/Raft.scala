@@ -6,11 +6,11 @@ import zio.raft.AppendEntriesResult.{Failure, Success}
 import zio.raft.Raft.electionTimeout
 import zio.raft.RequestVoteResult.Rejected
 import zio.raft.State.{Candidate, Follower, Leader}
-import zio.raft.StreamItem.{Bootstrap, CommandMessage, Message, Tick}
+import zio.raft.StreamItem.{Bootstrap, CommandMessage, Message, Tick, Read, NoopCommandMessage}
 import zio.stream.ZStream
 import zio.{Chunk, Promise, Queue, Ref, UIO, URIO, ZIO, durationInt, durationLong, Schedule}
-import zio.raft.StreamItem.Read
 import zio.raft.Raft.heartbeartInterval
+import zio.raft.LogEntry.{CommandLogEntry, NoopLogEntry}
 
 sealed trait StreamItem[A <: Command, S]
 object StreamItem:
@@ -18,6 +18,7 @@ object StreamItem:
   case class Message[A <: Command, S](message: RPCMessage[A]) extends StreamItem[A, S]
   case class Bootstrap[A <: Command, S]() extends StreamItem[A, S]
   case class Read[A <: Command, S](promise: Promise[NotALeaderError, S]) extends StreamItem[A, S]
+  case class NoopCommandMessage[A <: Command, S]() extends StreamItem[A, S] // TODO (eran): can use Any, Any instead of A, S ?
   trait CommandMessage[A <: Command, S] extends StreamItem[A, S]:
     val command: A
     val promise: CommandPromise[command.Response]
@@ -502,6 +503,8 @@ class Raft[S, A <: Command](
             PendingCommands.empty
           )
         )
+        _ <- commandsQueue.offer(NoopCommandMessage[A, S]())
+
       yield ()
 
     for
@@ -579,12 +582,19 @@ class Raft[S, A <: Command](
           .stream(state.lastApplied.plusOne, state.commitIndex)
           .runFoldZIO(state)((state, logEntry) =>
             for
-              appState <- appStateRef.get
-              (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState)
-              _ <- appStateRef.set(newState)
-              newRaftState <- state match
-                case l: Leader[S] => l.completeCommands(logEntry.index, response, newState)
-                case _            => ZIO.succeed(state)
+              // only apply to state machine if the log entry is not a NoopLogEntry
+              newRaftState <- logEntry match
+                case _: NoopLogEntry => ZIO.succeed(state)
+                case logEntry: CommandLogEntry[A] =>
+                  for
+                    appState <- appStateRef.get
+                    (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState)
+                    _ <- appStateRef.set(newState)
+
+                    newRaftState <- state match
+                      case l: Leader[S] => l.completeCommands(logEntry.index, response, newState)
+                      case _            => ZIO.succeed(state)
+                  yield newRaftState
             yield newRaftState.increaseLastApplied
           )
     else ZIO.succeed(state)
@@ -835,6 +845,22 @@ class Raft[S, A <: Command](
       case r: InstallSnapshotResult[A] =>
         handleInstallSnapshotReply(r)
 
+  private def handleNoopCommandMessage(): ZIO[Any, Nothing, Unit] =
+    raftState.get.flatMap:
+      case l: Leader[S] =>
+        for
+          lastIndex <- logStore.lastIndex
+          currentTerm <- stable.currentTerm
+          entry = NoopLogEntry(
+            currentTerm,
+            lastIndex.plusOne
+          )
+          _ <- ZIO.logDebug(s"memberId=${this.memberId} handleNoopCommandMessage $entry")
+          _ <- logStore.storeLog(entry)
+        yield ()
+      case _ => ZIO.unit // Follower and Candidate can just ignore noop command messages (it shouldn't really happen)
+
+
   private def handleRequestFromClient(
       command: A,
       promise: CommandPromise[command.Response]
@@ -844,7 +870,7 @@ class Raft[S, A <: Command](
         for
           lastIndex <- logStore.lastIndex
           currentTerm <- stable.currentTerm
-          entry = LogEntry[A](
+          entry = CommandLogEntry[A](
             command,
             currentTerm,
             lastIndex.plusOne
@@ -884,6 +910,13 @@ class Raft[S, A <: Command](
         for
           _ <- ZIO.logDebug(s"[Read] memberId=${this.memberId} $r")
           _ <- handleRead(r)
+        yield ()
+      case NoopCommandMessage() =>
+        for
+          _ <- ZIO.logDebug(s"[NoopCommandMessage] memberId=${this.memberId}")
+          _ <- preRules
+          _ <- handleNoopCommandMessage()
+          _ <- postRules
         yield ()
       case Bootstrap() =>
         for

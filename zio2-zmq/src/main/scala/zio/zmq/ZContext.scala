@@ -1,7 +1,7 @@
 package zio.zmq
 
 import zio.{ZIO, ZLayer}
-
+import zio.durationInt
 import org.zeromq.ZMQException
 import zmq.Ctx
 
@@ -27,6 +27,7 @@ object ZContext {
             case e: ZMQException if e.getErrorCode == InterruptedFunction =>
               ZIO.unit
           }
+          .timeoutFail(new Exception("shutdown context timedout"))(60.seconds)
           .orDie
       )
     )

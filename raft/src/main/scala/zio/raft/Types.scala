@@ -59,7 +59,8 @@ type CommandPromise[A] = Promise[NotALeaderError, A]
 
 sealed trait LogEntry(val term: Term, val index: Index)
 object LogEntry:
-  case class CommandLogEntry[A <: Command](command: A, override val term: Term, override val index: Index) extends LogEntry(term, index)
+  case class CommandLogEntry[A <: Command](command: A, override val term: Term, override val index: Index)
+      extends LogEntry(term, index)
   case class NoopLogEntry(override val term: Term, override val index: Index) extends LogEntry(term, index)
 
 sealed trait RPCMessage[A <: Command]:

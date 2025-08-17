@@ -1,10 +1,13 @@
 package zio.raft.stores.segmentedlog
 
-import zio.raft.{Command, Index, CommandLogEntry, Term}
+import zio.raft.{Command, Index, Term}
 import zio.{Scope, ScopedRef, ZIO}
 
 import scodec.Codec
-import scodec.codecs.{constant, int64, uint16, uint32, int32, bool}
+import scodec.codecs.{constant, int64, uint16, uint32, int32, bool, discriminated, uint8, listOfN}
+import zio.raft.LogEntry
+import zio.raft.LogEntry.CommandLogEntry
+import zio.raft.LogEntry.NoopLogEntry
 
 object internal:
   val entrySizeCodec = int32
@@ -14,10 +17,19 @@ object internal:
   private def termCodec = int64.xmap(Term(_), _.value)
   private def indexCodec = int64.xmap(Index(_), _.value)
 
-  def entryCodec[A <: Command](using codec: Codec[A]): Codec[CommandLogEntry[A]] =
-    (codec :: termCodec :: indexCodec).as[CommandLogEntry[A]]
-  def entriesCodec[A <: Command: Codec]: ChecksummedList[CommandLogEntry[A]] =
-    new ChecksummedList[CommandLogEntry[A]](entryCodec)
+  // TODO (Eran): improve this codec? maybe move it to where LogEntry is defined?
+  def logEntryCodec[A <: Command](using commandCodec: Codec[A]) = discriminated[LogEntry]
+    .by(uint8)
+    .typecase(0, commandLogEntryCodec(commandCodec))
+    .typecase(1, noopLogEntryCodec)
+
+  def logEntriesCodec[A <: Command: Codec](using commandCodec: Codec[A]) =
+    new ChecksummedList[LogEntry](logEntryCodec[A](using commandCodec))
+
+  private def commandLogEntryCodec[A <: Command](commandCodec: Codec[A]) =
+    (commandCodec :: termCodec :: indexCodec).as[CommandLogEntry[A]]
+
+  private def noopLogEntryCodec = (termCodec :: indexCodec).as[NoopLogEntry]
 
   val fileVersion = constant(uint16.encode(1).require)
   val fileHeaderCodec = (signature :: fileVersion).unit(((), ()))

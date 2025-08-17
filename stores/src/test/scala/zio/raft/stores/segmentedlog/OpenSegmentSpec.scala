@@ -7,7 +7,6 @@ import zio.Scope
 import zio.raft.Command
 import zio.raft.Term
 import zio.raft.Index
-import zio.raft.CommandLogEntry
 import zio.nio.channels.AsynchronousFileChannel
 import java.nio.file.StandardOpenOption
 import zio.Chunk
@@ -17,6 +16,8 @@ import zio.test.Spec
 import zio.test.TestEnvironment
 import zio.test.check
 import zio.test.assertTrue
+import zio.raft.LogEntry.CommandLogEntry
+import zio.raft.LogEntry
 
 object OpenSegmentSpec extends ZIOSpecDefault:
 
@@ -57,7 +58,7 @@ object OpenSegmentSpec extends ZIOSpecDefault:
       segment: OpenSegment[TestCommand],
       from: Index,
       to: Index
-  ): ZIO[Scope, Throwable, List[CommandLogEntry[TestCommand]]] =
+  ): ZIO[Scope, Throwable, List[LogEntry]] =
     segment.stream(from, to).runCollect.map(_.toList)
 
   /** Truncate the file by removing the specified number of bytes from the end.
@@ -168,7 +169,9 @@ object OpenSegmentSpec extends ZIOSpecDefault:
             .openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
           _ <- recoveredSegment.recoverFromCrash
           fileSizeAfterRecover <- recoveredSegment.size
-          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one.plusOne)
+          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one.plusOne).map(_.collect {
+            case l: CommandLogEntry[?] => l.asInstanceOf[CommandLogEntry[TestCommand]]
+          })
         yield assertTrue(
           fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
           recoveredEntries.size == 1,
@@ -197,7 +200,9 @@ object OpenSegmentSpec extends ZIOSpecDefault:
             .openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
           _ <- recoveredSegment.recoverFromCrash
           fileSizeAfterRecover <- recoveredSegment.size
-          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one.plusOne)
+          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one.plusOne).map(_.collect {
+            case l: CommandLogEntry[?] => l.asInstanceOf[CommandLogEntry[TestCommand]]
+          })
         yield assertTrue(
           fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
           recoveredEntries.size == 1,
@@ -245,7 +250,9 @@ object OpenSegmentSpec extends ZIOSpecDefault:
           recoveredSegment <- OpenSegment.openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
           _ <- recoveredSegment.recoverFromCrash
           fileSizeAfterRecover <- recoveredSegment.size
-          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one)
+          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one).map(_.collect {
+            case l: CommandLogEntry[?] => l.asInstanceOf[CommandLogEntry[TestCommand]]
+          })
         yield assertTrue(
           fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
           recoveredEntries.size == 1,

@@ -7,6 +7,7 @@ import zio.raft.AppendEntriesResult.Success
 import scodec.Codec
 import scodec.bits.ByteVector
 import scodec.codecs.{bool, bytes, discriminated, int32, int64, listOfN, optional, uint8, utf8_32, variableSizeBytes}
+import zio.raft.LogEntry.{CommandLogEntry, NoopLogEntry}
 
 object RpcMessageCodec:
   def codec[A <: Command](using commandCodec: Codec[A]): Codec[RPCMessage[A]] = discriminated[RPCMessage[A]]
@@ -28,12 +29,20 @@ object RpcMessageCodec:
   private def chunkCodec =
     variableSizeBytes(int32, bytes).xmap(bv => Chunk.fromIterable(bv.toIterable), c => ByteVector(c.toIterable))
 
+  // TODO (Eran): improve this codec? maybe move it to where LogEntry is defined?
+  private def logEntryCodec[A <: Command](commandCodec: Codec[A]) = discriminated[LogEntry]
+    .by(uint8)
+    .typecase(0, commandLogEntryCodec(commandCodec))
+    .typecase(1, noopLogEntryCodec)
+
+  private def logEntriesCodec[A <: Command](commandCodec: Codec[A]) = listOfN(int32, logEntryCodec(commandCodec))
+
   private def commandLogEntryCodec[A <: Command](commandCodec: Codec[A]) =
     (commandCodec :: termCodec :: indexCodec).as[CommandLogEntry[A]]
 
   private def noopLogEntryCodec = (termCodec :: indexCodec).as[NoopLogEntry]
 
-  private def entriesCodec[A <: Command](commandCodec: Codec[A]): Codec[List[CommandLogEntry[A]]] =
+  private def commandEntriesCodec[A <: Command](commandCodec: Codec[A]): Codec[List[CommandLogEntry[A]]] =
     listOfN(int32, commandLogEntryCodec(commandCodec))
 
   private def heartbeatCodec[A <: Command] = (termCodec :: memberIdCodec :: indexCodec).as[HeartbeatRequest[A]]
@@ -41,7 +50,7 @@ object RpcMessageCodec:
   private def heartbeatResponseCodec[A <: Command] = (memberIdCodec :: termCodec).as[HeartbeatResponse[A]]
 
   private def appendEntriesCodec[A <: Command](commandCodec: Codec[A]) =
-    (termCodec :: memberIdCodec :: indexCodec :: termCodec :: entriesCodec(commandCodec) :: indexCodec)
+    (termCodec :: memberIdCodec :: indexCodec :: termCodec :: logEntriesCodec(commandCodec) :: indexCodec)
       .as[AppendEntriesRequest[A]]
 
   private def appendEntriesResultCodec[A <: Command] = discriminated[AppendEntriesResult[A]]

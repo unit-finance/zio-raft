@@ -2,12 +2,13 @@ package zio.raft.stores.segmentedlog
 
 import zio.ZIO
 import zio.nio.file.{Files, Path}
-import zio.raft.{Command, Index, CommandLogEntry}
+import zio.raft.{Command, Index}
 
 import scodec.Codec
 import zio.stream.ZStream
 import zio.nio.channels.AsynchronousFileChannel
 import java.nio.file.StandardOpenOption
+import zio.raft.LogEntry
 
 class ReadOnlySegment[A <: Command: Codec](
     val path: Path,
@@ -31,7 +32,7 @@ class ReadOnlySegment[A <: Command: Codec](
     case Some(lastIndexExclusive) =>
       fromInclusive.value < lastIndexExclusive.value && toInclusive >= firstIndex
 
-  def getEntry(index: Index): ZIO[Any, Nothing, Option[CommandLogEntry[A]]] =
+  def getEntry(index: Index): ZIO[Any, Nothing, Option[LogEntry]] =
     if (isInSegment(index))
       ZStream
         .scoped(AsynchronousFileChannel.open(path, StandardOpenOption.READ))

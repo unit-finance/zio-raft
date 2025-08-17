@@ -55,7 +55,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
       snapshotStore1 <- SnapshotStore.makeInMemory
       snapshotStore2 <- SnapshotStore.makeInMemory
       snapshotStore3 <- SnapshotStore.makeInMemory
-      raft1 <- Raft.makeScoped(
+      raft1 <- Raft.makeScoped[Int, TestCommands](
         MemberId("peer1"),
         peers.filter(_ != MemberId("peer1")),
         stable1,

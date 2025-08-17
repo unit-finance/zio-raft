@@ -37,7 +37,7 @@ trait LogStore[A <: Command]:
 end LogStore
 
 object LogStore:
-  def makeInMemory[A <: Command] =
+  def makeInMemory[A <: Command]: ZIO[Any, Nothing, InMemoryLogStore[A]] =
     for logs <- Ref.make(List.empty[LogEntry])
     yield new InMemoryLogStore(logs)
 

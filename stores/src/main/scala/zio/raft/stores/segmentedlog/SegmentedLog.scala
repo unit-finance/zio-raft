@@ -1,13 +1,14 @@
 package zio.raft.stores.segmentedlog
 
 import zio.raft.stores.segmentedlog.internal.*
-import zio.raft.{Command, Index, CommandLogEntry, LogStore, Term}
+import zio.raft.{Command, Index, LogStore, Term}
 import zio.stream.ZStream
 import zio.{UIO, ZIO}
 import zio.raft.stores.segmentedlog.SegmentMetadataDatabase.{SegmentMetadata, SegmentStatus}
 import scodec.Codec
 import zio.Scope
 import zio.lmdb.Environment
+import zio.raft.LogEntry
 
 class SegmentedLog[A <: Command: Codec](
     logDirectory: String,
@@ -43,7 +44,7 @@ class SegmentedLog[A <: Command: Codec](
                 yield if index == previousIndex then Some(previousTerm) else None
       yield term
 
-  private def getLog(index: Index): UIO[Option[CommandLogEntry[A]]] =
+  private def getLog(index: Index): UIO[Option[LogEntry]] =
     for
       current <- currentSegment.get
       segment <-
@@ -54,7 +55,7 @@ class SegmentedLog[A <: Command: Codec](
         case Some(segment) => segment.getEntry(index)
     yield entry
 
-  override def getLogs(from: Index, toInclusive: Index): UIO[Option[List[CommandLogEntry[A]]]] =
+  override def getLogs(from: Index, toInclusive: Index): UIO[Option[List[LogEntry]]] =
     for
       entries <- stream(from, toInclusive).runCollect
       result <- entries.headOption match
@@ -62,7 +63,7 @@ class SegmentedLog[A <: Command: Codec](
         case _                                  => ZIO.none
     yield result
 
-  override def stream(fromInclusive: Index, toInclusive: Index): ZStream[Any, Nothing, CommandLogEntry[A]] =
+  override def stream(fromInclusive: Index, toInclusive: Index): ZStream[Any, Nothing, LogEntry] =
     // very good chance that everything we need is in the current segment, let's optimize for that
     ZStream
       .fromZIO(currentSegment.get)
@@ -76,7 +77,7 @@ class SegmentedLog[A <: Command: Codec](
             .flatMap(_.stream(fromInclusive, toInclusive).orDie)
       )
 
-  override def storeLog(entry: CommandLogEntry[A]) =
+  override def storeLog(entry: LogEntry) =
     for {
       logFile <- currentSegment.get
       _ <- logFile.writeEntry(entry)
@@ -91,7 +92,7 @@ class SegmentedLog[A <: Command: Codec](
       _ <- ZIO.when(logFileSize > maxLogFileSize)(createNextSegment())
     } yield ()
 
-  override def storeLogs(entries: List[CommandLogEntry[A]]): UIO[Unit] =
+  override def storeLogs(entries: List[LogEntry]): UIO[Unit] =
     for {
       logFile <- currentSegment.get
       _ <- logFile.writeEntries(entries)

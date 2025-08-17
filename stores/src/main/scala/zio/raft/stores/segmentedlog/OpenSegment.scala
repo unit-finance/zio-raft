@@ -5,7 +5,7 @@ import java.nio.file.StandardOpenOption
 import zio.nio.channels.AsynchronousFileChannel
 import zio.nio.file.Path
 import zio.raft.stores.segmentedlog.internal.*
-import zio.raft.{Command, Index, CommandLogEntry}
+import zio.raft.{Command, Index}
 import zio.{Scope, UIO, ZIO}
 import scodec.zio.*
 
@@ -15,6 +15,7 @@ import scodec.bits.crc.crc32Builder
 import zio.raft.stores.segmentedlog.BaseTransducer.Result
 import scodec.bits.crc.CrcBuilder
 import scodec.bits.BitVector
+import zio.raft.LogEntry
 
 class OpenSegment[A <: Command: Codec](
     val path: Path,
@@ -35,7 +36,7 @@ class OpenSegment[A <: Command: Codec](
         .via(decode)
     else stream.takeWhile(_.index <= toInclusive).via(decode)
 
-  def getEntry(index: Index): ZIO[Any, Nothing, Option[CommandLogEntry[A]]] =
+  def getEntry(index: Index): ZIO[Any, Nothing, Option[LogEntry]] =
     if index >= firstIndex then
       makeStream(channel)
         .via(recordsOnly)
@@ -55,14 +56,14 @@ class OpenSegment[A <: Command: Codec](
       case None    => (previousTerm, firstIndex.minusOne)
       case Some(e) => (e.term, e.index)
 
-  def writeEntry(entry: CommandLogEntry[A]): ZIO[Any, Nothing, Int] = writeEntries(List(entry))
+  def writeEntry(entry: LogEntry): ZIO[Any, Nothing, Int] = writeEntries(List(entry))
 
   // Write entries write all of the entries, regardless if the segment size will be exceeded
   // segment size is just a recommendation at this moment.
   // TODO: we should only write entries that will fit in the segment and return the rest to be written in the next segment
-  def writeEntries(entries: List[CommandLogEntry[A]]): ZIO[Any, Nothing, Int] =
+  def writeEntries(entries: List[LogEntry]): ZIO[Any, Nothing, Int] =
     for {
-      bytes <- ZIO.attempt(entriesCodec.encode(entries).require.toByteVector).orDie
+      bytes <- ZIO.attempt(logEntriesCodec[A].encode(entries).require.toByteVector).orDie
       position <- positionRef.get
       written <- channel.write(bytes, position).orDie
       _ <- channel.force(true).orDie

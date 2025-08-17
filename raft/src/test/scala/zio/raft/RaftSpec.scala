@@ -5,6 +5,7 @@ import zio.raft.StreamItem.CommandMessage
 import zio.test.*
 import zio.{Scope, ZIO}
 import zio.durationInt
+import zio.raft.LogEntry.CommandLogEntry
 
 object RaftSpec extends ZIOSpecDefault:
   def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean): ZIO[Any, Nothing, (Raft[Int, TestCommands], MockRpc[TestCommands])] =
@@ -86,7 +87,7 @@ object RaftSpec extends ZIOSpecDefault:
       leaderId: MemberId,
       previousIndex: Index,
       previousTerm: Term,
-      entries: List[CommandLogEntry[TestCommands]],
+      entries: List[LogEntry],
       leaderCommitIndex: Index
   ) =
     raft.handleStreamItem(

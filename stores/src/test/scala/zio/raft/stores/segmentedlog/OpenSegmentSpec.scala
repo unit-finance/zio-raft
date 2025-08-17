@@ -58,7 +58,7 @@ object OpenSegmentSpec extends ZIOSpecDefault:
       segment: OpenSegment[TestCommand],
       from: Index,
       to: Index
-  ): ZIO[Scope, Throwable, List[LogEntry]] =
+  ): ZIO[Scope, Throwable, List[LogEntry[TestCommand]]] =
     segment.stream(from, to).runCollect.map(_.toList)
 
   /** Truncate the file by removing the specified number of bytes from the end.

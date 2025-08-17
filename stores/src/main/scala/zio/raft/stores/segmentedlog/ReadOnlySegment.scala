@@ -32,7 +32,7 @@ class ReadOnlySegment[A <: Command: Codec](
     case Some(lastIndexExclusive) =>
       fromInclusive.value < lastIndexExclusive.value && toInclusive >= firstIndex
 
-  def getEntry(index: Index): ZIO[Any, Nothing, Option[LogEntry]] =
+  def getEntry(index: Index): ZIO[Any, Nothing, Option[LogEntry[A]]] =
     if (isInSegment(index))
       ZStream
         .scoped(AsynchronousFileChannel.open(path, StandardOpenOption.READ))

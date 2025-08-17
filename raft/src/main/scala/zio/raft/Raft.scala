@@ -18,8 +18,7 @@ object StreamItem:
   case class Message[A <: Command, S](message: RPCMessage[A]) extends StreamItem[A, S]
   case class Bootstrap[A <: Command, S]() extends StreamItem[A, S]
   case class Read[A <: Command, S](promise: Promise[NotALeaderError, S]) extends StreamItem[A, S]
-  case class NoopCommandMessage[A <: Command, S]()
-      extends StreamItem[A, S] // TODO (eran): can use Any, Any instead of A, S ?
+  case class NoopCommandMessage[A <: Command, S]() extends StreamItem[A, S]
   trait CommandMessage[A <: Command, S] extends StreamItem[A, S]:
     val command: A
     val promise: CommandPromise[command.Response]
@@ -584,14 +583,11 @@ class Raft[S, A <: Command](
             for
               // only apply to state machine if the log entry is not a NoopLogEntry
               newRaftState <- logEntry match
-                case _: NoopLogEntry              => ZIO.succeed(state)
+                case _: NoopLogEntry => ZIO.succeed(state)
                 case logEntry: CommandLogEntry[?] =>
-                  // TODO (Eran): once it works, can try refactoring to LogEntry[-A] and see if it cleans the code a little
                   for
                     appState <- appStateRef.get
-                    (newState, response) <- stateMachine
-                      .apply(logEntry.command.asInstanceOf[A])
-                      .toZIOWithState(appState)
+                    (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState)
                     _ <- appStateRef.set(newState)
 
                     newRaftState <- state match

@@ -87,7 +87,7 @@ object RaftSpec extends ZIOSpecDefault:
       leaderId: MemberId,
       previousIndex: Index,
       previousTerm: Term,
-      entries: List[LogEntry],
+      entries: List[LogEntry[TestCommands]],
       leaderCommitIndex: Index
   ) =
     raft.handleStreamItem(

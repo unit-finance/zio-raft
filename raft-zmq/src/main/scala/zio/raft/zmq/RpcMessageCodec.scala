@@ -29,8 +29,8 @@ object RpcMessageCodec:
   private def chunkCodec =
     variableSizeBytes(int32, bytes).xmap(bv => Chunk.fromIterable(bv.toIterable), c => ByteVector(c.toIterable))
 
-  // TODO (Eran): improve this codec? maybe move it to where LogEntry is defined?
-  private def logEntryCodec[A <: Command](commandCodec: Codec[A]) = discriminated[LogEntry]
+  // TODO (Eran): improve this codec? add version?
+  private def logEntryCodec[A <: Command](commandCodec: Codec[A]) = discriminated[LogEntry[A]]
     .by(uint8)
     .typecase(0, commandLogEntryCodec(commandCodec))
     .typecase(1, noopLogEntryCodec)

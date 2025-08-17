@@ -4,7 +4,7 @@ import zio.raft.{Command, Index, Term}
 import zio.{Scope, ScopedRef, ZIO}
 
 import scodec.Codec
-import scodec.codecs.{constant, int64, uint16, uint32, int32, bool, discriminated, uint8, listOfN}
+import scodec.codecs.{constant, int64, uint16, uint32, int32, bool, discriminated, uint8}
 import zio.raft.LogEntry
 import zio.raft.LogEntry.CommandLogEntry
 import zio.raft.LogEntry.NoopLogEntry
@@ -17,14 +17,14 @@ object internal:
   private def termCodec = int64.xmap(Term(_), _.value)
   private def indexCodec = int64.xmap(Index(_), _.value)
 
-  // TODO (Eran): improve this codec? maybe move it to where LogEntry is defined?
-  def logEntryCodec[A <: Command](using commandCodec: Codec[A]) = discriminated[LogEntry]
+  // TODO (Eran): improve this codec? add version?
+  def logEntryCodec[A <: Command](using commandCodec: Codec[A]) = discriminated[LogEntry[A]]
     .by(uint8)
     .typecase(0, commandLogEntryCodec(commandCodec))
     .typecase(1, noopLogEntryCodec)
 
   def logEntriesCodec[A <: Command: Codec](using commandCodec: Codec[A]) =
-    new ChecksummedList[LogEntry](logEntryCodec[A](using commandCodec))
+    new ChecksummedList[LogEntry[A]](logEntryCodec[A](using commandCodec))
 
   private def commandLogEntryCodec[A <: Command](commandCodec: Codec[A]) =
     (commandCodec :: termCodec :: indexCodec).as[CommandLogEntry[A]]

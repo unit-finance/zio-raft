@@ -13,12 +13,14 @@ object RpcMessageCodec:
     .by(uint8)
     .typecase(0, heartbeatCodec[A])
     .typecase(1, heartbeatResponseCodec[A])
-    .typecase(2, appendEntriesCodec(commandCodec))
+    .typecase(2, appendEntriesCodec(optionalCommandCodec[A]))
     .typecase(3, appendEntriesResultCodec[A])
     .typecase(4, requestVoteRequestCodec[A])
     .typecase(5, requestVoteResultCodec[A])
     .typecase(6, installSnapshotCodec[A])
     .typecase(7, installSnapshotResultCodec[A])
+
+  def optionalCommandCodec[A <: Command](using codec: Codec[A]): Codec[Option[A]] = optional(bool(8), codec)
 
   private def termCodec = int64.xmap(Term(_), _.value)
   private def indexCodec = int64.xmap(Index(_), _.value)
@@ -28,17 +30,17 @@ object RpcMessageCodec:
   private def chunkCodec =
     variableSizeBytes(int32, bytes).xmap(bv => Chunk.fromIterable(bv.toIterable), c => ByteVector(c.toIterable))
 
-  private def logEntryCodec[A <: Command](commandCodec: Codec[A]) =
+  private def logEntryCodec[A <: Command](commandCodec: Codec[Option[A]]) =
     (commandCodec :: termCodec :: indexCodec).as[LogEntry[A]]
 
-  private def entriesCodec[A <: Command](commandCodec: Codec[A]): Codec[List[LogEntry[A]]] =
+  private def entriesCodec[A <: Command](commandCodec: Codec[Option[A]]): Codec[List[LogEntry[A]]] =
     listOfN(int32, logEntryCodec(commandCodec))
 
   private def heartbeatCodec[A <: Command] = (termCodec :: memberIdCodec :: indexCodec).as[HeartbeatRequest[A]]
 
   private def heartbeatResponseCodec[A <: Command] = (memberIdCodec :: termCodec).as[HeartbeatResponse[A]]
 
-  private def appendEntriesCodec[A <: Command](commandCodec: Codec[A]) =
+  private def appendEntriesCodec[A <: Command](commandCodec: Codec[Option[A]]) =
     (termCodec :: memberIdCodec :: indexCodec :: termCodec :: entriesCodec(commandCodec) :: indexCodec)
       .as[AppendEntriesRequest[A]]
 

@@ -228,11 +228,7 @@ object RaftSpec extends ZIOSpecDefault:
           Array(MemberId("peer2"), MemberId("peer3")),
           false
         )
-        logEntry: LogEntry[TestCommands] = LogEntry(
-          Increase,
-          Term(1),
-          Index(1)
-        )
+        logEntry: LogEntry[TestCommands] = LogEntry.command(Increase, Term(1), Index(1))
         _ <- handelAppendEntries(
           raft,
           Term(1),
@@ -268,7 +264,7 @@ object RaftSpec extends ZIOSpecDefault:
           MemberId("peer1"),
           Index(0),
           Term(0),
-          List(LogEntry(Increase, Term(1), Index(1))),
+          List(LogEntry.command(Increase, Term(1), Index(1))),
           Index(0)
         )
         expectedMessages = List(
@@ -291,7 +287,7 @@ object RaftSpec extends ZIOSpecDefault:
           MemberId("peer2"),
           Index(0),
           Term(0),
-          List(LogEntry(Increase, Term(1), Index(1))),
+          List(LogEntry.command(Increase, Term(1), Index(1))),
           Index(0)
         )
 

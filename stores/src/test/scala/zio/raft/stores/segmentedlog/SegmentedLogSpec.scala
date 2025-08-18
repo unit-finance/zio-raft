@@ -23,7 +23,7 @@ object SegmentedLogSpec extends ZIOSpecDefault:
         logDirectory <- tempDirectory
         log <- SegmentedLog.make[TestCommand](logDirectory.toString())
         command <- TestCommand.generator.runHead.someOrFail(new Exception("No command"))
-        logEntry = LogEntry[TestCommand](command, Term.one, Index.one)
+        logEntry = LogEntry.command(command, Term.one, Index.one)
         _ <- log.storeLog(logEntry)
         entries <- log.getLogs(Index.one, Index.one)
       yield assertTrue(entries.head.head == logEntry && entries.size == 1)
@@ -34,7 +34,7 @@ object SegmentedLogSpec extends ZIOSpecDefault:
           logDirectory <- tempDirectory
           log <- SegmentedLog.make[TestCommand](logDirectory.toString(), maxLogFileSize = 1024)
           entries = commands.zipWithIndex.map((command, index) =>
-            LogEntry[TestCommand](command, Term.one, Index(index.toLong + 1))
+            LogEntry.command(command, Term.one, Index(index.toLong + 1))
           )
           _ <- log.storeLogs(entries)
 
@@ -48,7 +48,7 @@ object SegmentedLogSpec extends ZIOSpecDefault:
           logDirectory <- tempDirectory
           log <- SegmentedLog.make[TestCommand](logDirectory.toString())
           command <- TestCommand.generator.runHead.someOrFail(new Exception("No command"))
-          logEntry = LogEntry[TestCommand](command, Term.one, Index.one)
+          logEntry = LogEntry.command(command, Term.one, Index.one)
           _ <- log.storeLog(logEntry)
           term <- log.logTerm(Index.zero)
         yield assertTrue(term.get == Term.zero)
@@ -58,7 +58,7 @@ object SegmentedLogSpec extends ZIOSpecDefault:
           logDirectory <- tempDirectory
           log <- SegmentedLog.make[TestCommand](logDirectory.toString())
           command <- TestCommand.generator.runHead.someOrFail(new Exception("No command"))
-          logEntry = LogEntry[TestCommand](command, Term.one, Index.one)
+          logEntry = LogEntry.command(command, Term.one, Index.one)
           _ <- log.storeLog(logEntry)
           term <- log.logTerm(Index.one)
         yield assertTrue(term.get == Term.one)
@@ -68,13 +68,13 @@ object SegmentedLogSpec extends ZIOSpecDefault:
           logDirectory <- tempDirectory
           log <- SegmentedLog.make[TestCommand](logDirectory.toString())
           command <- TestCommand.generator.runHead.someOrFail(new Exception("No command"))
-          logEntry = LogEntry[TestCommand](command, Term.one, Index.one)
+          logEntry = LogEntry.command(command, Term.one, Index.one)
           _ <- log.storeLog(logEntry)
           command <- TestCommand.generator.runHead.someOrFail(new Exception("No command"))
-          logEntry = LogEntry[TestCommand](command, Term(10L), Index(2L))
+          logEntry = LogEntry.command(command, Term(10L), Index(2L))
           _ <- log.storeLog(logEntry)
           command <- TestCommand.generator.runHead.someOrFail(new Exception("No command"))
-          logEntry = LogEntry[TestCommand](command, Term(30L), Index(3L))
+          logEntry = LogEntry.command(command, Term(30L), Index(3L))
           _ <- log.storeLog(logEntry)
 
           term <- log.logTerm(Index(2))
@@ -89,7 +89,7 @@ object SegmentedLogSpec extends ZIOSpecDefault:
         // Create entries that will exceed the max size
         commands <- Gen.listOfBounded(5, 10)(TestCommand.generator).runHead.someOrFail(new Exception("No commands"))
         entries = commands.zipWithIndex.map((command, index) =>
-          LogEntry[TestCommand](command, Term.one, Index(index.toLong + 1))
+          LogEntry.command(command, Term.one, Index(index.toLong + 1))
         )
 
         // Store entries which should trigger segment rollover
@@ -120,7 +120,7 @@ object SegmentedLogSpec extends ZIOSpecDefault:
           log <- SegmentedLog.make[TestCommand](logDirectory.toString(), maxLogFileSize = 100)
           commands <- Gen.listOfBounded(5, 10)(TestCommand.generator).runHead.someOrFail(new Exception("No commands"))
           entries = commands.zipWithIndex.map((command, index) =>
-            LogEntry[TestCommand](command, Term.one, Index(index.toLong + 1))
+            LogEntry.command(command, Term.one, Index(index.toLong + 1))
           )
           _ <- log.storeLogs(entries)
           recoveredLog <- SegmentedLog.make[TestCommand](logDirectory.toString(), maxLogFileSize = 100)
@@ -146,7 +146,7 @@ object SegmentedLogSpec extends ZIOSpecDefault:
           log <- SegmentedLog.make[TestCommand](logDirectory.toString(), maxLogFileSize = 100)
           commands <- Gen.listOfBounded(5, 10)(TestCommand.generator).runHead.someOrFail(new Exception("No commands"))
           entries = commands.zipWithIndex.map((command, index) =>
-            LogEntry[TestCommand](command, Term.one, Index(index.toLong + 1))
+            LogEntry.command(command, Term.one, Index(index.toLong + 1))
           )
           _ <- log.storeLogs(entries)
           // Recover with larger segment size

@@ -20,7 +20,7 @@ object MessageCodecSpec extends ZIOSpecDefault:
       leaderId = MemberId("leader"),
       previousIndex = Index.zero,
       previousTerm = Term.zero,
-      entries = List(LogEntry(TestCommand("test"), Term.zero, Index.one)),
+      entries = List(LogEntry.command(TestCommand("test"), Term.zero, Index.one)),
       leaderCommitIndex = Index.zero
     )
 

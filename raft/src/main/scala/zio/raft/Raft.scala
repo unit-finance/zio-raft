@@ -578,14 +578,17 @@ class Raft[S, A <: Command](
         logStore
           .stream(state.lastApplied.plusOne, state.commitIndex)
           .runFoldZIO(state)((state, logEntry) =>
-            for
-              appState <- appStateRef.get
-              (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState)
-              _ <- appStateRef.set(newState)
-              newRaftState <- state match
-                case l: Leader[S] => l.completeCommands(logEntry.index, response, newState)
-                case _            => ZIO.succeed(state)
-            yield newRaftState.increaseLastApplied
+            logEntry.command match
+              case Some(command) =>
+                for
+                  appState <- appStateRef.get
+                  (newState, response) <- stateMachine.apply(command).toZIOWithState(appState)
+                  _ <- appStateRef.set(newState)
+                  newRaftState <- state match
+                    case l: Leader[S] => l.completeCommands(logEntry.index, response, newState)
+                    case _            => ZIO.succeed(state)
+                yield newRaftState.increaseLastApplied
+              case None => ZIO.succeed(state)
           )
     else ZIO.succeed(state)
 
@@ -844,11 +847,7 @@ class Raft[S, A <: Command](
         for
           lastIndex <- logStore.lastIndex
           currentTerm <- stable.currentTerm
-          entry = LogEntry[A](
-            command,
-            currentTerm,
-            lastIndex.plusOne
-          )
+          entry = LogEntry.command(command, currentTerm, lastIndex.plusOne)
           _ <- ZIO.logDebug(s"memberId=${this.memberId} handleCommand $entry")
           _ <- logStore.storeLog(entry)
 

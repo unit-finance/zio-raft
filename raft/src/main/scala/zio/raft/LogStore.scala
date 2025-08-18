@@ -48,7 +48,7 @@ object LogStore:
       logs.update(_.filter(e => e.index >= index))
 
     override def discardEntireLog(previousIndex: Index, previousTerm: Term): UIO[Unit] =
-      logs.set(LogEntry(null.asInstanceOf, previousTerm, previousIndex) :: List.empty[LogEntry[A]])
+      logs.set(LogEntry.noop(previousTerm, previousIndex) :: List.empty[LogEntry[A]])
 
     override def lastIndex = logs.get.map(_.headOption.map(_.index).getOrElse(Index.zero))
     override def lastTerm = logs.get.map(_.headOption.map(_.term).getOrElse(Term.zero))

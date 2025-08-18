@@ -3,6 +3,8 @@ package zio.raft
 import zio.test.*
 import zio.test.TestAspect.withLiveClock
 import zio.{ZIO, durationInt}
+import zio.Ref
+import zio.Scope
 
 object RaftIntegrationSpec extends ZIOSpecDefault:
 
@@ -35,7 +37,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
       .repeatUntil(_.isDefined)
       .map(_.get)
 
-  private def makeRaft(enableSnapshot: Boolean = false) =
+  private def makeRaft(enableSnapshot: Boolean = false): ZIO[Scope, Nothing, (Raft[Int, TestCommands], Ref[Boolean], Raft[Int, TestCommands], Ref[Boolean], Raft[Int, TestCommands], Ref[Boolean])] =
     for
       rpc <- TestRpc.make[TestCommands](3)
       stateMachine1 = TestStateMachine.make(enableSnapshot)
@@ -149,6 +151,31 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         _ <- leader.sendCommand(Increase)
         x <- leader.sendCommand(Get)
       yield assertTrue(x == 3)
+    },
+    test("raft, noop command sent after leader elected") {
+      for
+        (
+          r1,
+          killSwitch1,
+          r2,
+          killSwitch2,
+          r3,
+          killSwitch3
+        ) <- makeRaft()
+
+        _ <- r1.sendCommand(Increase)
+
+        // stop the leader
+        _ <- killSwitch1.set(false)
+
+        // find the new leader
+        leader <- waitForNewLeader(r1, r1, r2, r3)
+        _ <- leader.sendCommand(Increase)
+        actualState <- leader.sendCommand(Get)
+        logs = leader.logStore.stream(Index.one, Index(10))
+        actualLogs <- logs.runCollect.map(_.map(_.command))
+        expectedLogs = List(None, Some(Increase), None, Some(Increase), Some(Get))
+      yield assertTrue(actualLogs == expectedLogs && actualState == 2)
     },
     test("read returns the correct state with multiple writes") {
       for

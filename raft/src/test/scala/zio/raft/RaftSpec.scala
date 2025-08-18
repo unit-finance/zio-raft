@@ -111,10 +111,7 @@ object RaftSpec extends ZIOSpecDefault:
   def sendCommand(raft: Raft[Int, TestCommands], commandArg: TestCommands) =
     for
       promiseArg <- zio.Promise.make[NotALeaderError, Int]
-      _ <- raft.handleStreamItem(new CommandMessage[TestCommands, Int] {
-        val command: TestCommands = commandArg
-        val promise: CommandPromise[Int] = promiseArg
-      })
+      _ <- raft.handleStreamItem(CommandMessage.command(commandArg, promiseArg))
     yield ()
 
   def bootstrap(raft: Raft[Int, TestCommands]) =
@@ -228,11 +225,7 @@ object RaftSpec extends ZIOSpecDefault:
           Array(MemberId("peer2"), MemberId("peer3")),
           false
         )
-        logEntry: LogEntry[TestCommands] = LogEntry(
-          Increase,
-          Term(1),
-          Index(1)
-        )
+        logEntry: LogEntry[TestCommands] = LogEntry.command(Increase, Term(1), Index(1))
         _ <- handelAppendEntries(
           raft,
           Term(1),
@@ -268,7 +261,7 @@ object RaftSpec extends ZIOSpecDefault:
           MemberId("peer1"),
           Index(0),
           Term(0),
-          List(LogEntry(Increase, Term(1), Index(1))),
+          List(LogEntry.command(Increase, Term(1), Index(1))),
           Index(0)
         )
         expectedMessages = List(
@@ -291,7 +284,7 @@ object RaftSpec extends ZIOSpecDefault:
           MemberId("peer2"),
           Index(0),
           Term(0),
-          List(LogEntry(Increase, Term(1), Index(1))),
+          List(LogEntry.command(Increase, Term(1), Index(1))),
           Index(0)
         )
 

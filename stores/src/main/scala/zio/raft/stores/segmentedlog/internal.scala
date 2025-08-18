@@ -4,7 +4,7 @@ import zio.raft.{Command, Index, LogEntry, Term}
 import zio.{Scope, ScopedRef, ZIO}
 
 import scodec.Codec
-import scodec.codecs.{constant, int64, uint16, uint32, int32, bool}
+import scodec.codecs.{constant, int64, uint16, uint32, int32, bool, optional}
 
 object internal:
   val entrySizeCodec = int32
@@ -14,7 +14,9 @@ object internal:
   private def termCodec = int64.xmap(Term(_), _.value)
   private def indexCodec = int64.xmap(Index(_), _.value)
 
-  def entryCodec[A <: Command](using codec: Codec[A]): Codec[LogEntry[A]] =
+  def optionalCommandCodec[A <: Command](using codec: Codec[A]): Codec[Option[A]] = optional(bool(8), codec)
+
+  def entryCodec[A <: Command](using codec: Codec[Option[A]]): Codec[LogEntry[A]] =
     (codec :: termCodec :: indexCodec).as[LogEntry[A]]
   def entriesCodec[A <: Command: Codec]: ChecksummedList[LogEntry[A]] =
     new ChecksummedList[LogEntry[A]](entryCodec)

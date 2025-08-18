@@ -12,6 +12,8 @@ import zio.{Chunk, Promise, Queue, Ref, UIO, URIO, ZIO, durationInt, durationLon
 import zio.raft.StreamItem.Read
 import zio.raft.Raft.heartbeartInterval
 
+class CommandWithCallback[A <: Command](val command: A, val promise: CommandPromise[command.Response])
+
 sealed trait StreamItem[A <: Command, S]
 object StreamItem:
   case class Tick[A <: Command, S]() extends StreamItem[A, S]
@@ -19,8 +21,15 @@ object StreamItem:
   case class Bootstrap[A <: Command, S]() extends StreamItem[A, S]
   case class Read[A <: Command, S](promise: Promise[NotALeaderError, S]) extends StreamItem[A, S]
   trait CommandMessage[A <: Command, S] extends StreamItem[A, S]:
-    val command: A
-    val promise: CommandPromise[command.Response]
+    val commandWithCallback: Option[CommandWithCallback[A]]
+
+  object CommandMessage:
+    def command[A <: Command, S](command: A, promise: CommandPromise[command.Response]) = new CommandMessage[A, S] {
+      override val commandWithCallback: Option[CommandWithCallback[A]] = Some(new CommandWithCallback(command, promise))
+    }
+    def noop[A <: Command, S] = new CommandMessage[A, S] {
+      override val commandWithCallback: Option[CommandWithCallback[A]] = None
+    }
 
 class Raft[S, A <: Command](
     val memberId: MemberId,
@@ -28,7 +37,7 @@ class Raft[S, A <: Command](
     private[raft] val raftState: Ref[State[S]],
     commandsQueue: Queue[StreamItem[A, S]],
     stable: Stable,
-    logStore: LogStore[A],
+    private[raft] val logStore: LogStore[A],
     snapshotStore: SnapshotStore,
     rpc: RPC[A],
     stateMachine: StateMachine[S, A],
@@ -502,6 +511,7 @@ class Raft[S, A <: Command](
             PendingCommands.empty
           )
         )
+        _ <- commandsQueue.offer(CommandMessage.noop[A, S])
       yield ()
 
     for
@@ -588,7 +598,7 @@ class Raft[S, A <: Command](
                     case l: Leader[S] => l.completeCommands(logEntry.index, response, newState)
                     case _            => ZIO.succeed(state)
                 yield newRaftState.increaseLastApplied
-              case None => ZIO.succeed(state)
+              case None => ZIO.succeed(state.increaseLastApplied)
           )
     else ZIO.succeed(state)
 
@@ -839,9 +849,30 @@ class Raft[S, A <: Command](
         handleInstallSnapshotReply(r)
 
   private def handleRequestFromClient(
-      command: A,
-      promise: CommandPromise[command.Response]
+      commandWithCallback: Option[CommandWithCallback[A]]
   ): ZIO[Any, Nothing, Unit] =
+    commandWithCallback match
+      case Some(commandWithCallback) =>
+        handleCommand(commandWithCallback.command, commandWithCallback.promise)
+      case None =>
+        handleNoopCommand()
+
+  private def handleNoopCommand(): ZIO[Any, Nothing, Unit] =
+    raftState.get.flatMap:
+      case l: Leader[S] =>
+        for
+          lastIndex <- logStore.lastIndex
+          currentTerm <- stable.currentTerm
+          entry = LogEntry.noop(
+            currentTerm,
+            lastIndex.plusOne
+          )
+          _ <- ZIO.logDebug(s"memberId=${this.memberId} handleNoopCommandMessage $entry")
+          _ <- logStore.storeLog(entry)
+        yield ()
+      case _ => ZIO.unit // Follower and Candidate can just ignore noop command messages (it shouldn't really happen)
+
+  private def handleCommand(command: A, promise: CommandPromise[command.Response]): ZIO[Any, Nothing, Unit] =
     raftState.get.flatMap:
       case l: Leader[S] =>
         for
@@ -871,12 +902,11 @@ class Raft[S, A <: Command](
         yield ()
       case commandMessage: CommandMessage[A, S] =>
         for
-          _ <- ZIO.logDebug(s"[CommandMessage] memberId=${this.memberId} ${commandMessage.command}")
-          _ <- preRules
-          _ <- handleRequestFromClient(
-            commandMessage.command,
-            commandMessage.promise
+          _ <- ZIO.logDebug(
+            s"[CommandMessage] memberId=${this.memberId} ${commandMessage.commandWithCallback.map(_.command)}"
           )
+          _ <- preRules
+          _ <- handleRequestFromClient(commandMessage.commandWithCallback)
           _ <- postRules
         yield ()
       case r: Read[A, S] =>
@@ -903,10 +933,7 @@ class Raft[S, A <: Command](
     // todo: leader only
     for
       promiseArg <- Promise.make[NotALeaderError, commandArg.Response]
-      _ <- commandsQueue.offer(new CommandMessage {
-        val command = commandArg
-        val promise = promiseArg.asInstanceOf
-      })
+      _ <- commandsQueue.offer(CommandMessage.command(commandArg, promiseArg))
       res <- promiseArg.await
     yield (res)
 

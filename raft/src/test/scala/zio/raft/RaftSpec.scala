@@ -111,10 +111,7 @@ object RaftSpec extends ZIOSpecDefault:
   def sendCommand(raft: Raft[Int, TestCommands], commandArg: TestCommands) =
     for
       promiseArg <- zio.Promise.make[NotALeaderError, Int]
-      _ <- raft.handleStreamItem(new CommandMessage[TestCommands, Int] {
-        val command: TestCommands = commandArg
-        val promise: CommandPromise[Int] = promiseArg
-      })
+      _ <- raft.handleStreamItem(CommandMessage.command(commandArg, promiseArg))
     yield ()
 
   def bootstrap(raft: Raft[Int, TestCommands]) =

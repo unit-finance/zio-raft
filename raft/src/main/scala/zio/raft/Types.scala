@@ -58,11 +58,11 @@ case class NotALeaderError(leaderId: Option[MemberId])
 type CommandPromise[A] = Promise[NotALeaderError, A]
 
 case class EntryKey(term: Term, index: Index)
-case class LogEntry[A <: Command](command: Option[A], term: Term, index: Index)
+case class LogEntry[+A <: Command](command: Option[A], term: Term, index: Index)
 
 object LogEntry:
   def command[A <: Command](command: A, term: Term, index: Index) = LogEntry(Some(command), term, index)
-  def noop(term: Term, index: Index) = LogEntry(None, term, index)
+  def noop(term: Term, index: Index) = LogEntry[Nothing](None, term, index)
 
 sealed trait RPCMessage[A <: Command]:
   val term: Term

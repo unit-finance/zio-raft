@@ -29,7 +29,7 @@ class Raft[S, A <: Command](
     private[raft] val raftState: Ref[State[S]],
     commandsQueue: Queue[StreamItem[A, S]],
     stable: Stable,
-    logStore: LogStore[A],
+    private[raft] val logStore: LogStore[A],
     snapshotStore: SnapshotStore,
     rpc: RPC[A],
     stateMachine: StateMachine[S, A],

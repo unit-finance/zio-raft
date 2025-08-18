@@ -100,7 +100,7 @@ object KVStoreApp extends zio.ZIOAppDefault:
 
         raft <- Raft.make(
           memberId,
-          peers.removed(memberId).keys.toArray,
+          peers.removed(memberId).keySet,
           stable,
           logStore,
           snapshotStore,

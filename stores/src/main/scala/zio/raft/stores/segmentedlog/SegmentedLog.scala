@@ -1,13 +1,14 @@
 package zio.raft.stores.segmentedlog
 
 import zio.raft.stores.segmentedlog.internal.*
-import zio.raft.{Command, Index, LogEntry, LogStore, Term}
+import zio.raft.{Command, Index, LogStore, Term}
 import zio.stream.ZStream
 import zio.{UIO, ZIO}
 import zio.raft.stores.segmentedlog.SegmentMetadataDatabase.{SegmentMetadata, SegmentStatus}
 import scodec.Codec
 import zio.Scope
 import zio.lmdb.Environment
+import zio.raft.LogEntry
 
 class SegmentedLog[A <: Command: Codec](
     logDirectory: String,

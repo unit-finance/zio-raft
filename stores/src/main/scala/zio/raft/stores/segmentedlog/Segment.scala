@@ -10,10 +10,10 @@ import zio.raft.stores.segmentedlog.BaseTransducer.Result
 import zio.raft.Command
 import scodec.Codec
 import zio.stream.ZPipeline
-import zio.raft.stores.segmentedlog.internal.entryCodec
-import zio.raft.LogEntry
 import zio.stream.ZSink
 import zio.stream.ZStream
+import zio.raft.LogEntry
+import zio.raft.stores.segmentedlog.internal.logEntryCodec
 
 trait Segment[A <: Command: Codec]:
   val path: Path
@@ -33,7 +33,7 @@ trait Segment[A <: Command: Codec]:
   def decode: ZPipeline[Any, Throwable, Result.Record, LogEntry[A]] =
     ZPipeline.mapZIO[Any, Throwable, BaseTransducer.Result.Record, LogEntry[A]](record =>
       ZIO
-        .attemptBlocking(entryCodec[A].decodeValue(record.payload))
+        .attemptBlocking(logEntryCodec[A].decodeValue(record.payload))
         .flatMap {
           case Attempt.Successful(value) => ZIO.succeed(value)
           case Attempt.Failure(f)        => ZIO.fail(new Throwable(s"Error occurred: ${f.messageWithContext}"))
@@ -46,7 +46,7 @@ trait Segment[A <: Command: Codec]:
       .mapZIO:
         case Some(record) =>
           ZIO
-            .attemptBlocking(entryCodec[A].decodeValue(record.payload))
+            .attemptBlocking(logEntryCodec[A].decodeValue(record.payload))
             .flatMap:
               case Attempt.Successful(value) => ZIO.some(value)
               case Attempt.Failure(f)        => ZIO.fail(new Throwable(s"Error occurred: ${f.messageWithContext}"))

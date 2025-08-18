@@ -2,12 +2,13 @@ package zio.raft.stores.segmentedlog
 
 import zio.ZIO
 import zio.nio.file.{Files, Path}
-import zio.raft.{Command, Index, LogEntry}
+import zio.raft.{Command, Index}
 
 import scodec.Codec
 import zio.stream.ZStream
 import zio.nio.channels.AsynchronousFileChannel
 import java.nio.file.StandardOpenOption
+import zio.raft.LogEntry
 
 class ReadOnlySegment[A <: Command: Codec](
     val path: Path,

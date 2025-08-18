@@ -5,6 +5,7 @@ import zio.raft.StreamItem.CommandMessage
 import zio.test.*
 import zio.{Scope, ZIO}
 import zio.durationInt
+import zio.raft.LogEntry.CommandLogEntry
 
 object RaftSpec extends ZIOSpecDefault:
   def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean): ZIO[Any, Nothing, (Raft[Int, TestCommands], MockRpc[TestCommands])] =
@@ -228,7 +229,7 @@ object RaftSpec extends ZIOSpecDefault:
           Array(MemberId("peer2"), MemberId("peer3")),
           false
         )
-        logEntry: LogEntry[TestCommands] = LogEntry(
+        logEntry: CommandLogEntry[TestCommands] = CommandLogEntry(
           Increase,
           Term(1),
           Index(1)
@@ -268,7 +269,7 @@ object RaftSpec extends ZIOSpecDefault:
           MemberId("peer1"),
           Index(0),
           Term(0),
-          List(LogEntry(Increase, Term(1), Index(1))),
+          List(CommandLogEntry(Increase, Term(1), Index(1))),
           Index(0)
         )
         expectedMessages = List(
@@ -291,7 +292,7 @@ object RaftSpec extends ZIOSpecDefault:
           MemberId("peer2"),
           Index(0),
           Term(0),
-          List(LogEntry(Increase, Term(1), Index(1))),
+          List(CommandLogEntry(Increase, Term(1), Index(1))),
           Index(0)
         )
 

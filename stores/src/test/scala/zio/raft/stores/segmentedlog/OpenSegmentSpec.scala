@@ -7,7 +7,6 @@ import zio.Scope
 import zio.raft.Command
 import zio.raft.Term
 import zio.raft.Index
-import zio.raft.LogEntry
 import zio.nio.channels.AsynchronousFileChannel
 import java.nio.file.StandardOpenOption
 import zio.Chunk
@@ -17,6 +16,8 @@ import zio.test.Spec
 import zio.test.TestEnvironment
 import zio.test.check
 import zio.test.assertTrue
+import zio.raft.LogEntry.CommandLogEntry
+import zio.raft.LogEntry
 
 object OpenSegmentSpec extends ZIOSpecDefault:
 
@@ -30,9 +31,9 @@ object OpenSegmentSpec extends ZIOSpecDefault:
   def multipleBatchesGen =
 
     def loop(
-        entries: List[LogEntry[TestCommand]],
-        acc: List[List[LogEntry[TestCommand]]]
-    ): Gen[Any, List[List[LogEntry[TestCommand]]]] =
+        entries: List[CommandLogEntry[TestCommand]],
+        acc: List[List[CommandLogEntry[TestCommand]]]
+    ): Gen[Any, List[List[CommandLogEntry[TestCommand]]]] =
       entries match
         case Nil => Gen.const(acc.reverse)
         case entries =>
@@ -45,10 +46,10 @@ object OpenSegmentSpec extends ZIOSpecDefault:
     Gen
       .listOfBounded(1, 1000)(TestCommand.generator)
       .map(_.zipWithIndex)
-      .map(_.map((command, index) => LogEntry[TestCommand](command, Term.one, Index(index.toLong + 1))))
+      .map(_.map((command, index) => CommandLogEntry[TestCommand](command, Term.one, Index(index.toLong + 1))))
       .flatMap(loop(_, Nil))
 
-  def writeBatches(segment: OpenSegment[TestCommand], batches: List[List[LogEntry[TestCommand]]]) =
+  def writeBatches(segment: OpenSegment[TestCommand], batches: List[List[CommandLogEntry[TestCommand]]]) =
     ZIO.foreachDiscard(batches)(entries => segment.writeEntries(entries))
 
   /** Get entries from the segment.
@@ -131,7 +132,7 @@ object OpenSegmentSpec extends ZIOSpecDefault:
           segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
 
           // Add entries to the segment - this also adds a checksum
-          entries = List(LogEntry[TestCommand](TestCommand("test"), Term.one, Index.one))
+          entries = List(CommandLogEntry[TestCommand](TestCommand("test"), Term.one, Index.one))
           _ <- segment.flatMap(_.writeEntries(entries))
           _ <- segment.flatMap(_.close())
 
@@ -152,8 +153,8 @@ object OpenSegmentSpec extends ZIOSpecDefault:
           tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
           segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
 
-          entries1 = List(LogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))
-          entries2 = List(LogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne))
+          entries1 = List(CommandLogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))
+          entries2 = List(CommandLogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne))
           _ <- segment.flatMap(_.writeEntries(entries1))
           entries2Size <- segment.flatMap(_.writeEntries(entries2))
 
@@ -168,7 +169,9 @@ object OpenSegmentSpec extends ZIOSpecDefault:
             .openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
           _ <- recoveredSegment.recoverFromCrash
           fileSizeAfterRecover <- recoveredSegment.size
-          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one.plusOne)
+          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one.plusOne).map(_.collect {
+            case l: CommandLogEntry[?] => l.asInstanceOf[CommandLogEntry[TestCommand]]
+          })
         yield assertTrue(
           fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
           recoveredEntries.size == 1,
@@ -182,9 +185,9 @@ object OpenSegmentSpec extends ZIOSpecDefault:
           segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
 
           // Add two batches of entries - this adds checksums after each batch
-          _ <- segment.flatMap(_.writeEntries(List(LogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))))
+          _ <- segment.flatMap(_.writeEntries(List(CommandLogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))))
           entries2Size <- segment.flatMap(
-            _.writeEntries(List(LogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne)))
+            _.writeEntries(List(CommandLogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne)))
           )
           fileSizeBeforeRecover <- segment.flatMap(_.size)
           _ <- segment.flatMap(_.close())
@@ -197,7 +200,9 @@ object OpenSegmentSpec extends ZIOSpecDefault:
             .openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
           _ <- recoveredSegment.recoverFromCrash
           fileSizeAfterRecover <- recoveredSegment.size
-          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one.plusOne)
+          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one.plusOne).map(_.collect {
+            case l: CommandLogEntry[?] => l.asInstanceOf[CommandLogEntry[TestCommand]]
+          })
         yield assertTrue(
           fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
           recoveredEntries.size == 1,
@@ -208,7 +213,7 @@ object OpenSegmentSpec extends ZIOSpecDefault:
         for
           tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
           segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          entries = List(LogEntry[TestCommand](TestCommand("test"), Term.one, Index.one))
+          entries = List(CommandLogEntry[TestCommand](TestCommand("test"), Term.one, Index.one))
           _ <- segment.flatMap(_.writeEntries(entries))
           fileSizeBeforeRecover <- segment.flatMap(_.size)
           _ <- segment.flatMap(_.close())
@@ -230,9 +235,9 @@ object OpenSegmentSpec extends ZIOSpecDefault:
         for
           tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
           segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          _ <- segment.flatMap(_.writeEntries(List(LogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))))
+          _ <- segment.flatMap(_.writeEntries(List(CommandLogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))))
           entries2Size <- segment.flatMap(
-            _.writeEntries(List(LogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne)))
+            _.writeEntries(List(CommandLogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne)))
           )
 
           fileSizeBeforeRecover <- segment.flatMap(_.size)
@@ -245,7 +250,9 @@ object OpenSegmentSpec extends ZIOSpecDefault:
           recoveredSegment <- OpenSegment.openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
           _ <- recoveredSegment.recoverFromCrash
           fileSizeAfterRecover <- recoveredSegment.size
-          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one)
+          recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one).map(_.collect {
+            case l: CommandLogEntry[?] => l.asInstanceOf[CommandLogEntry[TestCommand]]
+          })
         yield assertTrue(
           fileSizeAfterRecover == fileSizeBeforeRecover - entries2Size,
           recoveredEntries.size == 1,

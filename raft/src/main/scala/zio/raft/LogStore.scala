@@ -2,6 +2,7 @@ package zio.raft
 
 import zio.stream.ZStream
 import zio.{Ref, UIO, ZIO}
+import zio.raft.LogEntry.NoopLogEntry
 
 trait LogStore[A <: Command]:
   // def firstIndex: UIO[Index]
@@ -36,7 +37,7 @@ trait LogStore[A <: Command]:
 end LogStore
 
 object LogStore:
-  def makeInMemory[A <: Command] =
+  def makeInMemory[A <: Command]: ZIO[Any, Nothing, InMemoryLogStore[A]] =
     for logs <- Ref.make(List.empty[LogEntry[A]])
     yield new InMemoryLogStore(logs)
 
@@ -47,8 +48,10 @@ object LogStore:
     override def discardLogUpTo(index: Index): UIO[Unit] =
       logs.update(_.filter(e => e.index >= index))
 
+    // TODO (eran): TBD with Doron on null.asInstanceOf with CommandLogEntry, in theory we also utilize this approach as noop command, for now swicthed to NoopLogEntry
+    // TODO (eran): It is a bit weird that the log store is responsible to keep the previous term and index, shouldn't Raft do that in a separate step?
     override def discardEntireLog(previousIndex: Index, previousTerm: Term): UIO[Unit] =
-      logs.set(LogEntry(null.asInstanceOf, previousTerm, previousIndex) :: List.empty[LogEntry[A]])
+      logs.set(NoopLogEntry(previousTerm, previousIndex) :: List.empty[LogEntry[A]])
 
     override def lastIndex = logs.get.map(_.headOption.map(_.index).getOrElse(Index.zero))
     override def lastTerm = logs.get.map(_.headOption.map(_.term).getOrElse(Term.zero))

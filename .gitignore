@@ -4,7 +4,9 @@ raft/target
 project/target
 project/.bloop
 project/project
+metals.sbt
 .metals
 .bloop
 .bsp
 .DS_Store
+

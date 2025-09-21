@@ -31,10 +31,25 @@ jobs:
         passphrase: ${{ secrets.PGP_PASSPHRASE }}
         # Optional: Use if your key is not the default in the secret
         # key_id: ${{ secrets.PGP_KEY_ID }} 
-    - name: Publish
+    - name: Publish to Central Portal
+      id: publish_to_central
       env:
         SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
         SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
         # Provide passphrase to sbt-pgp
         PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }} 
       run: sbt +publishSigned
+    - name: Ensure deployment visibility in Central Portal
+      if: steps.publish_to_central.outcome == 'success'
+      env:
+        SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+        SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+      run: |
+        # Base64 encode credentials for Bearer token authentication
+        AUTH_TOKEN=$(echo -n "${SONATYPE_USERNAME}:${SONATYPE_PASSWORD}" | base64)
+        
+        # Make POST request to upload deployment to Central Publisher Portal
+        curl -X POST \
+          -H "Authorization: Bearer ${AUTH_TOKEN}" \
+          -H "Content-Type: application/json" \
+          "https://ossrh-staging-api.central.sonatype.com/manual/upload/defaultRepository/io.github.unit-finance"

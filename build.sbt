@@ -21,7 +21,7 @@ ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
 ThisBuild / licenses := List(
-  "MPL 2.0" -> new URL("https://www.mozilla.org/en-US/MPL/2.0/")
+  "MPL 2.0" -> url("https://www.mozilla.org/en-US/MPL/2.0/")
 )
 
 ThisBuild / scmInfo := Some(
@@ -34,15 +34,14 @@ ThisBuild / scmInfo := Some(
 ThisBuild / homepage := Some(url("https://github.com/unit-finance/zio-raft"))
 
 ThisBuild / publishTo := {
-  val nexus = "https://s01.oss.sonatype.org/"
   if (isSnapshot.value)
-    Some("snapshots" at nexus + "content/repositories/snapshots")
-  else Some("releases" at nexus + "service/local/staging/deploy/maven2")
+    Some("snapshots" at "https://central.sonatype.com/repository/maven-snapshots/")
+  else Some("releases" at "https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2")
 }
 
 ThisBuild / credentials += Credentials(
-  "Sonatype Nexus Repository Manager",
-  "s01.oss.sonatype.org",
+  "OSSRH Staging API Service",
+  "ossrh-staging-api.central.sonatype.com",
   sys.env.getOrElse("SONATYPE_USERNAME", ""),
   sys.env.getOrElse("SONATYPE_PASSWORD", "")
 )
@@ -59,7 +58,7 @@ ThisBuild / developers := List(
 scalaVersion := mainScalaVersion
 
 resolvers +=
-  "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots"
+  "Sonatype OSS Snapshots" at "https://central.sonatype.com/repository/maven-snapshots/"
 
 lazy val root = project
   .in(file("."))

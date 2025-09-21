@@ -5,11 +5,13 @@ import zio.{ZIO, ZLayer}
 import org.zeromq.ZMQException
 import zio.Duration
 import zio.durationInt
+import zmq.Ctx
+
 
 class ZContext {
-  private val ctx = new org.zeromq.ZContext()
+  private val ctx = new Ctx()
 
-  def shutdown() = ctx.close()
+  def shutdown() = ctx.terminate()
 
   private[zmq] def createSocket(socketType: Int) = ctx.createSocket(socketType)
 }

@@ -3,7 +3,7 @@ lazy val zioLoggingVersion = "2.2.4"
 
 lazy val zio1Version = "1.0.18"
 
-lazy val jeromqVersion = "0.6.0"
+lazy val jeromqVersion = "0.5.4"
 
 lazy val scala3Version = "3.4.2"
 lazy val scala213Version = "2.13.14"

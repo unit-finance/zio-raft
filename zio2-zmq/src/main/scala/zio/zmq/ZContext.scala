@@ -3,12 +3,13 @@ package zio.zmq
 import zio.{ZIO, ZLayer}
 
 import org.zeromq.ZMQException
-import zmq.Ctx
+import zio.Duration
+import zio.durationInt
 
 class ZContext {
-  private val ctx = new Ctx()
+  private val ctx = new org.zeromq.ZContext()
 
-  def shutdown() = ctx.terminate()
+  def shutdown() = ctx.close()
 
   private[zmq] def createSocket(socketType: Int) = ctx.createSocket(socketType)
 }
@@ -16,7 +17,9 @@ class ZContext {
 object ZContext {
   val InterruptedFunction = 4
 
-  val live: ZLayer[Any, ZMQException, ZContext] =
+  val live = liveWithTimeout()
+
+  def liveWithTimeout(shutdownTimeout: Duration = 60.seconds): ZLayer[Any, ZMQException, ZContext] =
     ZLayer.scoped(
       ZIO.acquireRelease(
         ZIO.attemptBlocking(new ZContext).refineToOrDie[ZMQException]
@@ -27,6 +30,8 @@ object ZContext {
             case e: ZMQException if e.getErrorCode == InterruptedFunction =>
               ZIO.unit
           }
+          .disconnect
+          .timeoutFail(new Exception(s"""ZContext shutdown timed out, timeout="${shutdownTimeout.toMillis()}ms" """))(shutdownTimeout)
           .orDie
       )
     )

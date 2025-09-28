@@ -48,10 +48,9 @@ object LogStore:
     override def discardLogUpTo(index: Index): UIO[Unit] =
       logs.update(_.filter(e => e.index >= index))
 
-    // TODO (eran): TBD with Doron on null.asInstanceOf with CommandLogEntry, in theory we also utilize this approach as noop command, for now swicthed to NoopLogEntry
-    // TODO (eran): It is a bit weird that the log store is responsible to keep the previous term and index, shouldn't Raft do that in a separate step?
     override def discardEntireLog(previousIndex: Index, previousTerm: Term): UIO[Unit] =
-      logs.set(NoopLogEntry(previousTerm, previousIndex) :: List.empty[LogEntry[A]])
+      // null.asInstanceOf[LogEntry[A]] as it should never be accessed, this way we guarantee that if accessed it will fail fast
+      logs.set(null.asInstanceOf[LogEntry[A]] :: List.empty[LogEntry[A]]) 
 
     override def lastIndex = logs.get.map(_.headOption.map(_.index).getOrElse(Index.zero))
     override def lastTerm = logs.get.map(_.headOption.map(_.term).getOrElse(Term.zero))

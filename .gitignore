@@ -5,6 +5,7 @@ project/target
 project/.bloop
 project/project
 .metals
+metals.sbt
 .bloop
 .bsp
 .DS_Store

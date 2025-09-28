@@ -2,7 +2,6 @@ package zio.raft
 
 import zio.stream.ZStream
 import zio.{Ref, UIO, ZIO}
-import zio.raft.LogEntry.NoopLogEntry
 
 trait LogStore[A <: Command]:
   // def firstIndex: UIO[Index]
@@ -50,7 +49,7 @@ object LogStore:
 
     override def discardEntireLog(previousIndex: Index, previousTerm: Term): UIO[Unit] =
       // null.asInstanceOf[LogEntry[A]] as it should never be accessed, this way we guarantee that if accessed it will fail fast
-      logs.set(null.asInstanceOf[LogEntry[A]] :: List.empty[LogEntry[A]]) 
+      logs.set(null.asInstanceOf[LogEntry[A]] :: List.empty[LogEntry[A]])
 
     override def lastIndex = logs.get.map(_.headOption.map(_.index).getOrElse(Index.zero))
     override def lastTerm = logs.get.map(_.headOption.map(_.term).getOrElse(Term.zero))

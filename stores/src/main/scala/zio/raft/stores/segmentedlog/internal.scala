@@ -14,22 +14,39 @@ object internal:
 
   val signature: Codec[Unit] = constant(uint32.encode(0xdeadbeef).require)
 
+  def Version(v: Int): Codec[Unit] = constant(uint8.encode(v).require)
+
   private def termCodec = int64.xmap(Term(_), _.value)
   private def indexCodec = int64.xmap(Index(_), _.value)
 
-  // TODO (Eran): improve this codec? add version?
   def logEntryCodec[A <: Command](using commandCodec: Codec[A]) = discriminated[LogEntry[A]]
     .by(uint8)
-    .typecase(0, commandLogEntryCodec(commandCodec))
-    .typecase(1, noopLogEntryCodec)
+    .typecase(0, versionedCommandLogEntryCodec(commandCodec))
+    .typecase(1, versionedNoopLogEntryCodec)
 
   def logEntriesCodec[A <: Command: Codec](using commandCodec: Codec[A]) =
     new ChecksummedList[LogEntry[A]](logEntryCodec[A](using commandCodec))
 
-  private def commandLogEntryCodec[A <: Command](commandCodec: Codec[A]) =
+  private def versionedCommandLogEntryCodec[A <: Command](commandCodec: Codec[A]) =
+    Codec(
+      Version(1) ~> commandLogEntryCodecV1(commandCodec),
+      uint8.flatMap { case 1 =>
+        commandLogEntryCodecV1(commandCodec)
+      }
+    )
+
+  private def commandLogEntryCodecV1[A <: Command](commandCodec: Codec[A]) =
     (commandCodec :: termCodec :: indexCodec).as[CommandLogEntry[A]]
 
-  private def noopLogEntryCodec = (termCodec :: indexCodec).as[NoopLogEntry]
+  private def versionedNoopLogEntryCodec =
+    Codec(
+      Version(1) ~> noopLogEntryCodecV1,
+      uint8.flatMap { case 1 =>
+        noopLogEntryCodecV1
+      }
+    )
+
+  private def noopLogEntryCodecV1 = (termCodec :: indexCodec).as[NoopLogEntry]
 
   val fileVersion = constant(uint16.encode(1).require)
   val fileHeaderCodec = (signature :: fileVersion).unit(((), ()))

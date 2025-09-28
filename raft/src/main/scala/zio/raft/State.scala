@@ -96,3 +96,7 @@ object State:
         pendingCommands <- pendingCommands.withCompleted(index, commandResponse)
         pendingReads <- pendingReads.withCompleted(index, readState)
       yield this.copy(pendingCommands = pendingCommands, pendingReads = pendingReads)
+
+    def completeReads(index: Index, readState: S): UIO[Leader[S]] =
+      for pendingReads <- pendingReads.withCompleted(index, readState)
+      yield this.copy(pendingReads = pendingReads)

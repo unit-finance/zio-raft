@@ -492,13 +492,14 @@ class Raft[S, A <: Command](
           s"memberId=${this.memberId} become leader currentTerm=$currentTerm lastLogIndex=$lastLogIndex"
         )
 
-        nextIndex = lastLogIndex.plusOne
-        entry = NoopLogEntry(currentTerm, nextIndex)
+        noopIndex = lastLogIndex.plusOne
+        entry = NoopLogEntry(currentTerm, noopIndex)
         _ <- logStore.storeLog(entry)
 
         _ <- raftState.set(
           Leader[S](
-            NextIndex(nextIndex),
+            // noopIndex and not noopIndex.plusOne so we reduce the hops during append entries
+            NextIndex(noopIndex),
             MatchIndex(peers),
             HeartbeatDue.empty,
             ReplicationStatus(peers),

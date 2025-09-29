@@ -181,10 +181,14 @@ object RaftSpec extends ZIOSpecDefault:
         _ <- handleBootstrap(raft)
         _ <- handleVoteGranted(raft, Term(1), MemberId("peer2"))
 
-        _ <- rpc.queue.takeAll
-        
-        _ <- ZIO.sleep(Raft.heartbeartInterval).withClock(zio.Clock.ClockLive) // force heartbeats to be sent
+        // First tick sends the no-op append entries after leader election
+        _ <- handleTick(raft)
+        _ <- rpc.queue.takeAll // Clear no-op append entries messages
 
+        // After append entries are sent, heartbeat timer is reset, so we need to wait again
+        _ <- ZIO.sleep(Raft.heartbeartInterval.plus(10.millis)).withClock(zio.Clock.ClockLive) // force heartbeats to be sent
+
+        // Second tick should send heartbeats since no more entries to send
         _ <- handleTick(raft)
 
         messages <- rpc.queue.takeAll

@@ -46,7 +46,7 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val sessionId = SessionId.generate()
+            val sessionId = SessionId.fromString("test-session-1")
             
             connectionManager.startConnection()
             connectionManager.sessionEstablished(sessionId)
@@ -61,7 +61,7 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val request = ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
+            val request = ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             
             connectionManager.startConnection() // Connecting state
             val (queued, _) = connectionManager.submitRequest(request)
@@ -75,7 +75,7 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create() // Disconnected state
-            val request = ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
+            val request = ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             
             val (queued, _) = connectionManager.submitRequest(request)
             
@@ -88,8 +88,8 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val sessionId = SessionId.generate()
-            val request = ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
+            val sessionId = SessionId.fromString("test-session-1")
+            val request = ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             
             connectionManager.startConnection()
             connectionManager.sessionEstablished(sessionId) // Connected state
@@ -106,13 +106,13 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val sessionId = SessionId.generate()
+            val sessionId = SessionId.fromString("test-session-1")
             
             connectionManager.startConnection() // Connecting
             
             // Queue multiple requests
-            val request1 = ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
-            val request2 = ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
+            val request1 = ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
+            val request2 = ClientRequest(RequestId.fromLong(2L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             connectionManager.submitRequest(request1)
             connectionManager.submitRequest(request2)
             
@@ -130,14 +130,14 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val sessionId = SessionId.generate()
+            val sessionId = SessionId.fromString("test-session-1")
             
             // Establish connection
             connectionManager.startConnection()
             connectionManager.sessionEstablished(sessionId)
             
             // Send request while connected (becomes pending)
-            val request = ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
+            val request = ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             connectionManager.submitRequest(request)
             
             val pendingBefore = connectionManager.pendingRequestCount
@@ -156,15 +156,15 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val sessionId = SessionId.generate()
+            val sessionId = SessionId.fromString("test-session-1")
             
             // Establish connection
             connectionManager.startConnection()
             connectionManager.sessionEstablished(sessionId)
             
             // Send requests while connected
-            val request1 = ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
-            val request2 = ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
+            val request1 = ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
+            val request2 = ClientRequest(RequestId.fromLong(2L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             connectionManager.submitRequest(request1)
             connectionManager.submitRequest(request2)
             
@@ -182,7 +182,7 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val sessionId = SessionId.generate()
+            val sessionId = SessionId.fromString("test-session-1")
             
             connectionManager.startConnection()
             connectionManager.sessionEstablished(sessionId)
@@ -196,7 +196,7 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val sessionId = SessionId.generate()
+            val sessionId = SessionId.fromString("test-session-1")
             
             // Initial session
             connectionManager.startConnection()
@@ -246,7 +246,7 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val sessionId = SessionId.generate()
+            val sessionId = SessionId.fromString("test-session-1")
             
             connectionManager.startConnection()
             connectionManager.sessionEstablished(sessionId)
@@ -261,8 +261,8 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val sessionId = SessionId.generate()
-            val timestamp = Instant.now()
+            val sessionId = SessionId.fromString("test-session-1")
+            val timestamp = Instant.parse("2023-01-01T00:00:00Z")
             
             connectionManager.startConnection()
             connectionManager.sessionEstablished(sessionId)
@@ -282,7 +282,7 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val request = ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
+            val request = ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             
             val (_, requestPromise) = connectionManager.submitRequest(request)
             val hasPendingRequest = connectionManager.hasPendingRequest(request.requestId)
@@ -296,9 +296,9 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val sessionId = SessionId.generate()
-            val requestId = RequestId.next()
-            val request = ClientRequest(requestId, scodec.bits.ByteVector.empty, Instant.now())
+            val sessionId = SessionId.fromString("test-session-1")
+            val requestId = RequestId.fromLong(1L)
+            val request = ClientRequest(requestId, scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             
             connectionManager.startConnection()
             connectionManager.sessionEstablished(sessionId)
@@ -349,9 +349,9 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             ZIO.attempt {
               val connectionManager = ConnectionManager.create()
               val request = ClientRequest(
-                RequestId.next(), 
+                RequestId.fromLong(1L), 
                 scodec.bits.ByteVector.fromValidHex(f"$i%08x"), 
-                Instant.now()
+                Instant.parse("2023-01-01T00:00:00Z")
               )
               
               connectionManager.submitRequest(request)

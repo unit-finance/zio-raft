@@ -70,7 +70,7 @@ object SessionManagerSpec extends ZIOSpecDefault {
           result <- ZIO.attempt {
             val sessionManager = SessionManager.create()
             val routingId = RoutingId("client-route-1".getBytes)
-            val sessionId = SessionId.generate()
+            val sessionId = SessionId.fromString("test-session-1")
             
             // Simulate session in disconnected state
             sessionManager.addDisconnectedSession(sessionId, Map("worker" -> "v1.0"))
@@ -86,7 +86,7 @@ object SessionManagerSpec extends ZIOSpecDefault {
           result <- ZIO.attempt {
             val sessionManager = SessionManager.create()
             val routingId = RoutingId("client-route-1".getBytes)
-            val unknownSessionId = SessionId.generate()
+            val unknownSessionId = SessionId.fromString("test-session-1")
             
             val continueResult = sessionManager.continueSession(unknownSessionId, routingId)
             continueResult.isLeft // Should reject
@@ -101,7 +101,7 @@ object SessionManagerSpec extends ZIOSpecDefault {
           result <- ZIO.attempt {
             val sessionManager = SessionManager.create()
             val routingId = RoutingId("client-route-1".getBytes)
-            val sessionId = SessionId.generate()
+            val sessionId = SessionId.fromString("test-session-1")
             
             // Create connected session
             sessionManager.createSession(routingId, Map("worker" -> "v1.0"))
@@ -122,7 +122,7 @@ object SessionManagerSpec extends ZIOSpecDefault {
             val sessionManager = SessionManager.create()
             val oldRoutingId = RoutingId("old-route".getBytes)
             val newRoutingId = RoutingId("new-route".getBytes)
-            val sessionId = SessionId.generate()
+            val sessionId = SessionId.fromString("test-session-1")
             
             // Create session with old routing ID
             sessionManager.createSession(oldRoutingId, Map("worker" -> "v1.0"))
@@ -162,7 +162,7 @@ object SessionManagerSpec extends ZIOSpecDefault {
           result <- ZIO.attempt {
             val sessionManager = SessionManager.create()
             val routingId = RoutingId("client-route-1".getBytes)
-            val sessionId = SessionId.generate()
+            val sessionId = SessionId.fromString("test-session-1")
             
             sessionManager.createSession(routingId, Map("worker" -> "v1.0"))
             
@@ -184,7 +184,7 @@ object SessionManagerSpec extends ZIOSpecDefault {
             val routingId = RoutingId("client-route-1".getBytes)
             
             val createResult = sessionManager.createSession(routingId, Map("test" -> "v1"))
-            val continueResult = sessionManager.continueSession(SessionId.generate(), routingId)
+            val continueResult = sessionManager.continueSession(SessionId.fromString("test-session-1"), routingId)
             
             createResult.isLeft && continueResult.isLeft
           }.catchAll(_ => ZIO.succeed(false))

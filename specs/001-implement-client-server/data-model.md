@@ -30,12 +30,12 @@ Server-specific session management with all session data consolidated into conne
 - Session cleanup removes entries from both maps
 
 **Expiration Management**:
-- Updated via `copy(expiredAt = Instant.now() + timeoutDuration)` on session state
+- Updated via `copy(expiredAt = currentTime + timeoutDuration)` on session state (using ZIO Clock)
 - Flexible timeout durations based on server state:
   - Normal operation: `normalTimeout` (e.g., 30 seconds)
   - Leader transition: `leaderTransitionTimeout` (e.g., 60 seconds)
   - Session continuation: `normalTimeout` (refreshed after successful reconnection)
-- Timeout detection scans all session states for `expiredAt < Instant.now()`
+- Timeout detection scans all session states for `expiredAt < currentTime` (using ZIO Clock)
 - No separate timeout tracking structures needed
 
 **Connection Management**:

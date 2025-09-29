@@ -29,7 +29,7 @@ object ServerRequestsSpec extends ZIOSpecDefault {
             val request = ServerRequest(
               requestId = requestId,
               payload = payload,
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             
             request.requestId == requestId &&
@@ -45,7 +45,7 @@ object ServerRequestsSpec extends ZIOSpecDefault {
             val request = ServerRequest(
               requestId = RequestId.fromLong(1L),
               payload = ByteVector.fromValidHex("workpayload"),
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             
             // Verify no sessionId field - server targets via ZeroMQ routing ID
@@ -60,7 +60,7 @@ object ServerRequestsSpec extends ZIOSpecDefault {
             val request = ServerRequest(
               requestId = RequestId.fromLong(1L),
               payload = ByteVector.fromValidHex("cleanpayload"),
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             
             // Should not contain task type, timeout, attempts (server-side concerns)
@@ -119,7 +119,7 @@ object ServerRequestsSpec extends ZIOSpecDefault {
             val workRequest = ServerRequest(
               requestId = requestId,
               payload = ByteVector.fromValidHex("processthis"),
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             
             // Client sends immediate acknowledgment
@@ -141,7 +141,7 @@ object ServerRequestsSpec extends ZIOSpecDefault {
               ServerRequest(
                 requestId = RequestId.fromLong(1L),
                 payload = ByteVector.fromValidHex(f"work$i%04x"),
-                createdAt = Instant.now()
+                createdAt = Instant.parse("2023-01-01T00:00:00Z")
               )
             }
             
@@ -164,8 +164,8 @@ object ServerRequestsSpec extends ZIOSpecDefault {
             val payload = ByteVector.fromValidHex("duplicateme")
             
             // Same request sent twice (due to network issues)
-            val request1 = ServerRequest(requestId, payload, Instant.now())
-            val request2 = ServerRequest(requestId, payload, Instant.now())
+            val request1 = ServerRequest(requestId, payload, Instant.parse("2023-01-01T00:00:00Z"))
+            val request2 = ServerRequest(requestId, payload, Instant.parse("2023-01-01T00:00:00Z"))
             
             // Client can detect duplicate and send cached ack
             val ack = ServerRequestAck(requestId)
@@ -202,11 +202,11 @@ object ServerRequestsSpec extends ZIOSpecDefault {
             val request = ServerRequest(
               requestId = RequestId.fromLong(1L),
               payload = ByteVector.fromValidHex("needsack"),
-              createdAt = Instant.now().minusSeconds(60) // Old request
+              createdAt = Instant.parse("2022-12-31T23:59:00Z") // Old request
             )
             
             // Server implementation can detect and handle timeout
-            val isOld = java.time.Duration.between(request.createdAt, Instant.now()).getSeconds > 30
+            val isOld = java.time.Duration.between(request.createdAt, Instant.parse("2023-01-01T00:00:00Z")).getSeconds > 30
             
             isOld // requestId is always present
           }.catchAll(_ => ZIO.succeed(false))
@@ -223,7 +223,7 @@ object ServerRequestsSpec extends ZIOSpecDefault {
               val request = ServerRequest(
                 requestId = RequestId.fromLong(1L),
                 payload = ByteVector.fromValidHex(f"payload$i%08x"),
-                createdAt = Instant.now()
+                createdAt = Instant.parse("2023-01-01T00:00:00Z")
               )
               val ack = ServerRequestAck(request.requestId)
               
@@ -244,7 +244,7 @@ object ServerRequestsSpec extends ZIOSpecDefault {
             val request = ServerRequest(
               requestId = RequestId.fromLong(1L),
               payload = ByteVector.fromValidHex("minimal"),
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             val ack = ServerRequestAck(request.requestId)
             
@@ -263,13 +263,13 @@ object ServerRequestsSpec extends ZIOSpecDefault {
             val workerRequest = ServerRequest(
               requestId = RequestId.fromLong(1L),
               payload = ByteVector.fromValidHex("workerdata"),
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             
             val processorRequest = ServerRequest(
               requestId = RequestId.fromLong(1L),
               payload = ByteVector.fromValidHex("processdata"),
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             
             // Different request types should be valid

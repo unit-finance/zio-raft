@@ -59,7 +59,7 @@ object ActionStreamSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val actionStream = ActionStream.create()
-            val sessionCreated = SessionCreated(SessionId.generate(), 12345L)
+            val sessionCreated = SessionCreated(SessionId.fromString("test-session-1"), 12345L)
             val action = NetworkMessageAction(sessionCreated)
             
             val processed = actionStream.processAction(action)
@@ -72,7 +72,7 @@ object ActionStreamSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val actionStream = ActionStream.create()
-            val response = ClientResponse(RequestId.next(), scodec.bits.ByteVector.empty)
+            val response = ClientResponse(RequestId.fromLong(1L), scodec.bits.ByteVector.empty)
             val action = NetworkMessageAction(response)
             
             val processed = actionStream.processAction(action)
@@ -85,7 +85,7 @@ object ActionStreamSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val actionStream = ActionStream.create()
-            val keepAliveResponse = KeepAliveResponse(Instant.now())
+            val keepAliveResponse = KeepAliveResponse(Instant.parse("2023-01-01T00:00:00Z"))
             val action = NetworkMessageAction(keepAliveResponse)
             
             val processed = actionStream.processAction(action)
@@ -100,7 +100,7 @@ object ActionStreamSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val actionStream = ActionStream.create(connectionState = Connected)
-            val request = ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
+            val request = ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             val action = UserClientRequestAction(request)
             
             val processed = actionStream.processAction(action)
@@ -113,7 +113,7 @@ object ActionStreamSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val actionStream = ActionStream.create(connectionState = Connecting)
-            val request = ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
+            val request = ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             val action = UserClientRequestAction(request)
             
             val processed = actionStream.processAction(action)
@@ -165,7 +165,7 @@ object ActionStreamSpec extends ZIOSpecDefault {
       test("should behave differently based on connection state") {
         for {
           result <- ZIO.attempt {
-            val request = ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
+            val request = ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             val action = UserClientRequestAction(request)
             
             val connectedStream = ActionStream.create(connectionState = Connected)
@@ -189,7 +189,7 @@ object ActionStreamSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val actionStream = ActionStream.create()
-            val serverRequest = ServerRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
+            val serverRequest = ServerRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             val networkAction = NetworkMessageAction(serverRequest)
             
             // Should appear in dedicated server request stream
@@ -205,7 +205,7 @@ object ActionStreamSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val actionStream = ActionStream.create()
-            val serverRequest = ServerRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now())
+            val serverRequest = ServerRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             val networkAction = NetworkMessageAction(serverRequest)
             
             // Main processing should handle acknowledgment only
@@ -224,8 +224,8 @@ object ActionStreamSpec extends ZIOSpecDefault {
               val actionStream = ActionStream.create()
               
               // Simulate concurrent events from different streams
-              val networkEvent = NetworkMessageAction(SessionCreated(SessionId.generate(), 123L))
-              val userEvent = UserClientRequestAction(ClientRequest(RequestId.next(), scodec.bits.ByteVector.empty, Instant.now()))
+              val networkEvent = NetworkMessageAction(SessionCreated(SessionId.fromString("test-session-1"), 123L))
+              val userEvent = UserClientRequestAction(ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z")))
               val timerEvent = SendKeepAliveAction
               
               val results = Seq(
@@ -250,7 +250,7 @@ object ActionStreamSpec extends ZIOSpecDefault {
               } else if (i % 3 == 1) {
                 TimeoutCheckAction  
               } else {
-                val request = ClientRequest(RequestId.next(), scodec.bits.ByteVector.fromValidHex(f"$i%08x"), Instant.now())
+                val request = ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.fromValidHex(f"$i%08x"), Instant.parse("2023-01-01T00:00:00Z"))
                 UserClientRequestAction(request)
               }
               

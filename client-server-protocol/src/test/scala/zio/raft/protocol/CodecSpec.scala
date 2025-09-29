@@ -78,7 +78,7 @@ object CodecSpec extends ZIOSpecDefault {
       test("should encode/decode KeepAlive messages") {
         for {
           result <- ZIO.attempt {
-            val message = KeepAlive(timestamp = Instant.now())
+            val message = KeepAlive(timestamp = Instant.parse("2023-01-01T00:00:00Z"))
             
             val encoded = clientMessageCodec.encode(message)
             val decoded = encoded.flatMap(clientMessageCodec.decode)
@@ -95,7 +95,7 @@ object CodecSpec extends ZIOSpecDefault {
             val message = ClientRequest(
               requestId = requestId,
               payload = ByteVector.fromValidHex("deadbeef"),
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             
             val encoded = clientMessageCodec.encode(message)
@@ -159,7 +159,7 @@ object CodecSpec extends ZIOSpecDefault {
       test("should encode/decode KeepAliveResponse messages") {
         for {
           result <- ZIO.attempt {
-            val message = KeepAliveResponse(timestamp = Instant.now())
+            val message = KeepAliveResponse(timestamp = Instant.parse("2023-01-01T00:00:00Z"))
             
             val encoded = serverMessageCodec.encode(message)
             val decoded = encoded.flatMap(serverMessageCodec.decode)
@@ -174,8 +174,8 @@ object CodecSpec extends ZIOSpecDefault {
           result <- ZIO.attempt {
             val message = ServerRequest(
               requestId = RequestId.fromLong(1L),
-              payload = ByteVector.fromValidHex("workdata"),
-              createdAt = Instant.now()
+              payload = ByteVector.fromValidHex("deadbeef"),
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             
             val encoded = serverMessageCodec.encode(message)
@@ -192,17 +192,18 @@ object CodecSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             val createSession = CreateSession(Map("test" -> "v1"), Nonce.fromLong(123L))
-            val keepAlive = KeepAlive(Instant.now())
-            val clientRequest = ClientRequest(RequestId.fromLong(1L), ByteVector.empty, Instant.now())
+            val keepAlive = KeepAlive(Instant.parse("2023-01-01T00:00:00Z"))
+            val clientRequest = ClientRequest(RequestId.fromLong(1L), ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
             
             val encoded1 = clientMessageCodec.encode(createSession)
             val encoded2 = clientMessageCodec.encode(keepAlive) 
             val encoded3 = clientMessageCodec.encode(clientRequest)
             
-            // Different message types should have different discriminator bytes
-            encoded1.map(_.take(5)) != encoded2.map(_.take(5)) &&
-            encoded2.map(_.take(5)) != encoded3.map(_.take(5)) &&
-            encoded1.map(_.take(5)) != encoded3.map(_.take(5))
+            // Check that discriminator bytes match expected values (after 6-byte protocol header)
+            encoded1.isSuccessful && encoded2.isSuccessful && encoded3.isSuccessful &&
+            encoded1.require.bytes(6) == 1.toByte && // CreateSession
+            encoded2.require.bytes(6) == 3.toByte && // KeepAlive  
+            encoded3.require.bytes(6) == 4.toByte    // ClientRequest
           }.catchAll(_ => ZIO.succeed(false))
         } yield assert(result)(isTrue) // Should succeed - codecs are implemented
       },
@@ -210,7 +211,7 @@ object CodecSpec extends ZIOSpecDefault {
       test("should include protocol signature in encoded messages") {
         for {
           result <- ZIO.attempt {
-            val message = KeepAlive(Instant.now())
+            val message = KeepAlive(Instant.parse("2023-01-01T00:00:00Z"))
             val encoded = clientMessageCodec.encode(message)
             
             // First bytes should be protocol signature
@@ -254,7 +255,7 @@ object CodecSpec extends ZIOSpecDefault {
               val message = ClientRequest(
                 requestId = RequestId.fromLong(1L),
                 payload = ByteVector.fromValidHex(f"$i%08x"),
-                createdAt = Instant.now()
+                createdAt = Instant.parse("2023-01-01T00:00:00Z")
               )
               
               clientMessageCodec.encode(message).isSuccessful
@@ -271,19 +272,19 @@ object CodecSpec extends ZIOSpecDefault {
       test("should have reasonable message sizes") {
         for {
           result <- ZIO.attempt {
-            val smallMessage = KeepAlive(Instant.now())
+            val smallMessage = KeepAlive(Instant.parse("2023-01-01T00:00:00Z"))
             val largeMessage = ClientRequest(
               requestId = RequestId.fromLong(1L),
               payload = ByteVector.fill(1000)(0xFF.toByte), // 1KB payload
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             
             val smallEncoded = clientMessageCodec.encode(smallMessage)
             val largeEncoded = clientMessageCodec.encode(largeMessage)
             
-            // Small message should be compact, large message reasonable
-            smallEncoded.fold(_ => false, _.size < 100) &&
-            largeEncoded.fold(_ => false, bits => bits.size > 1000 && bits.size < 1200) // Some overhead
+            // Small message should be compact, large message reasonable (accounting for 6-byte protocol header)
+            smallEncoded.fold(_ => false, bits => bits.size > 80 && bits.size < 200) &&
+            largeEncoded.fold(_ => false, bits => bits.size > 8000 && bits.size < 8500) // Some overhead + protocol header
           }.catchAll(_ => ZIO.succeed(false))
         } yield assert(result)(isTrue) // Should succeed - codecs are implemented
       }

@@ -41,10 +41,17 @@ object Codecs {
   }
 
   /**
+   * Codec for constant protocol version.
+   */
+  val constantProtocolVersionCodec: Codec[Unit] = {
+    constant(ByteVector(PROTOCOL_VERSION))
+  }
+
+  /**
    * Protocol header codec (signature + version).
    */
-  val protocolHeaderCodec: Codec[Byte] = {
-    protocolSignatureCodec ~> protocolVersionCodec
+  val protocolHeaderCodec: Codec[Unit] = {
+    protocolSignatureCodec ~> constantProtocolVersionCodec
   }
 
   // ============================================================================
@@ -205,7 +212,7 @@ object Codecs {
    * Discriminated codec for all ClientMessage types.
    */
   implicit val clientMessageCodec: Codec[ClientMessage] = {
-    discriminated[ClientMessage].by(uint8)
+    protocolHeaderCodec ~> discriminated[ClientMessage].by(uint8)
       .typecase(1, createSessionCodec)
       .typecase(2, continueSessionCodec)
       .typecase(3, keepAliveCodec)
@@ -278,7 +285,7 @@ object Codecs {
    * Discriminated codec for all ServerMessage types.
    */
   implicit val serverMessageCodec: Codec[ServerMessage] = {
-    discriminated[ServerMessage].by(uint8)
+    protocolHeaderCodec ~> discriminated[ServerMessage].by(uint8)
       .typecase(1, sessionCreatedCodec)
       .typecase(2, sessionContinuedCodec)
       .typecase(3, sessionRejectedCodec)

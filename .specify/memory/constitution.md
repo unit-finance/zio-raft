@@ -38,9 +38,9 @@ Existing abstractions MUST be preserved and extended, not replaced; Changes to c
 **Rationale**: The current codebase represents validated architectural decisions. Preserving proven abstractions reduces risk and maintains system stability while allowing controlled evolution.
 
 ### IV. ZIO Ecosystem Consistency
-All concurrent operations MUST use ZIO primitives (Fiber, Ref, Queue, Semaphore); Streaming MUST use ZStream, not external libraries; Resource management MUST use ZIO Scope and Resource patterns; Configuration and dependency injection MUST use ZLayer when applicable.
+All concurrent operations MUST use ZIO primitives (Fiber, Ref, Queue, Semaphore); Streaming MUST use ZStream, not external libraries; Resource management MUST use ZIO Scope and Resource patterns; Configuration and dependency injection MUST use ZLayer when applicable; Time operations MUST use ZIO Clock service, never `java.time.Instant.now()` or `System.currentTimeMillis()`; Random operations MUST use ZIO Random service, never `java.util.UUID.randomUUID()` or `scala.util.Random`; All side effects MUST be captured in ZIO effects for testability and composability.
 
-**Rationale**: Consistent use of ZIO ecosystem provides composability, testability, and integration benefits. Mixed paradigms create maintenance burden and reduce the benefits of ZIO's comprehensive effect system.
+**Rationale**: Consistent use of ZIO ecosystem provides composability, testability, and integration benefits. Mixed paradigms create maintenance burden and reduce the benefits of ZIO's comprehensive effect system. Java time/random operations break functional purity and cannot be mocked for testing.
 
 ### V. Test-Driven Maintenance
 All bug fixes MUST include failing test cases that reproduce the issue; Performance changes MUST include benchmark tests; Public API changes MUST include integration tests; Complex Raft scenarios (leader election, log replication) MUST have dedicated property-based tests.

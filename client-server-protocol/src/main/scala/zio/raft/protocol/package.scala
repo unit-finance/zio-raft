@@ -2,7 +2,6 @@ package zio.raft
 
 import zio.prelude.*
 import zio.*
-import java.time.Instant
 
 /**
  * Protocol definitions for ZIO Raft client-server communication.
@@ -40,13 +39,6 @@ package object protocol {
      * across distributed servers and time periods.
      */
     def generate(): UIO[SessionId] = Random.nextUUID.map(uuid => SessionId(uuid.toString))
-    
-    /**
-     * Generate a new unique session ID (unsafe version for testing).
-     * 
-     * @deprecated Use the pure ZIO version `generate()` instead.
-     */
-    def generateUnsafe(): SessionId = SessionId(java.util.UUID.randomUUID().toString)
     
     /**
      * Create a SessionId from a string (for testing/deserialization).
@@ -134,19 +126,7 @@ package object protocol {
         Nonce(if (value == 0L) 1L else value)
       }
     }
-    
-    /**
-     * Generate a cryptographically secure random nonce (unsafe version for testing).
-     * 
-     * @deprecated Use the pure ZIO version `generate()` instead.
-     */
-    def generateUnsafe(): Nonce = {
-      val random = new scala.util.Random()
-      val value = random.nextLong()
-      // Ensure non-zero (zero is reserved for "no nonce")
-      Nonce(if (value == 0L) 1L else value)
-    }
-    
+
     /**
      * Create from long value (for testing).
      */
@@ -251,16 +231,7 @@ package object protocol {
      */
     def isValidByteArray(bytes: Array[Byte]): Boolean = {
       bytes != null && bytes.nonEmpty
-    }
-    
-    /**
-     * Validate that a timestamp is not too far in the past or future.
-     */
-    def isValidTimestamp(timestamp: Instant, maxSkew: java.time.Duration = java.time.Duration.ofMinutes(5)): Boolean = {
-      val now = Instant.now()
-      val diff = java.time.Duration.between(now, timestamp).abs()
-      diff.compareTo(maxSkew) <= 0
-    }
+    }      
     
     /**
      * Validate that capabilities contain required keys.

@@ -29,7 +29,7 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
             val request = ClientRequest(
               requestId = requestId,
               payload = payload,
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             
             request.requestId == requestId &&
@@ -55,7 +55,7 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
             ClientRequest(
               requestId = RequestId.fromLong(1L),
               payload = ByteVector.fromValidHex("cafebabe"), // write command
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
           }.either
           
@@ -63,7 +63,7 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
             ClientRequest(
               requestId = RequestId.fromLong(1L), 
               payload = ByteVector.fromValidHex("feedface"), // read query
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
           }.either
         } yield assert(writeResult)(isLeft(anything)) && assert(readResult)(isLeft(anything))
@@ -123,7 +123,7 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
             val request = ClientRequest(
               requestId = RequestId.fromLong(1L),
               payload = ByteVector.fromValidHex("12345678"),
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             
             // Follower responds with leader redirect
@@ -148,8 +148,8 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
             val payload = ByteVector.fromValidHex("deadbeef")
             
             // Same request sent twice (retry scenario)
-            val request1 = ClientRequest(requestId, payload, Instant.now())
-            val request2 = ClientRequest(requestId, payload, Instant.now())
+            val request1 = ClientRequest(requestId, payload, Instant.parse("2023-01-01T00:00:00Z"))
+            val request2 = ClientRequest(requestId, payload, Instant.parse("2023-01-01T00:00:00Z"))
             
             // Should be considered identical for deduplication
             request1.requestId == request2.requestId &&
@@ -167,7 +167,7 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
             val request = ClientRequest(
               requestId = RequestId.fromLong(1L),
               payload = ByteVector.fromValidHex("queueme"),
-              createdAt = Instant.now()
+              createdAt = Instant.parse("2023-01-01T00:00:00Z")
             )
             
             // In real implementation, this would be queued based on connection state
@@ -186,7 +186,7 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
               ClientRequest(
                 requestId = RequestId.fromLong(1L),
                 payload = ByteVector.fromValidHex(f"$i%08x"),
-                createdAt = Instant.now()
+                createdAt = Instant.parse("2023-01-01T00:00:00Z")
               )
             }.catchAll(_ => ZIO.fail("Failed to create request"))
           }.either

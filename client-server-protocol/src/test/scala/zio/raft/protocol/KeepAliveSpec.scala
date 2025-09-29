@@ -23,7 +23,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
       test("should include client timestamp") {
         for {
           result <- ZIO.attempt {
-            val timestamp = Instant.now()
+            val timestamp = Instant.parse("2023-01-01T00:00:00Z")
             val keepAlive = KeepAlive(timestamp = timestamp)
             
             keepAlive.timestamp == timestamp
@@ -34,7 +34,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
       test("should not include session ID (derived from routing ID)") {
         for {
           result <- ZIO.attempt {
-            val keepAlive = KeepAlive(timestamp = Instant.now())
+            val keepAlive = KeepAlive(timestamp = Instant.parse("2023-01-01T00:00:00Z"))
             
             // Verify no sessionId field exists - should be derived from ZeroMQ routing ID
             !keepAlive.toString.contains("sessionId")
@@ -47,7 +47,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
       test("should echo client timestamp") {
         for {
           result <- ZIO.attempt {
-            val clientTimestamp = Instant.now()
+            val clientTimestamp = Instant.parse("2023-01-01T00:00:00Z")
             val response = KeepAliveResponse(timestamp = clientTimestamp)
             
             response.timestamp == clientTimestamp
@@ -58,12 +58,12 @@ object KeepAliveSpec extends ZIOSpecDefault {
       test("should enable RTT measurement") {
         for {
           result <- ZIO.attempt {
-            val sendTime = Instant.now()
+            val sendTime = Instant.parse("2023-01-01T00:00:00Z")
             val keepAlive = KeepAlive(timestamp = sendTime)
             val response = KeepAliveResponse(timestamp = keepAlive.timestamp)
             
             // Client can measure RTT: now() - response.timestamp  
-            val receiveTime = Instant.now()
+            val receiveTime = Instant.parse("2023-01-01T00:00:00Z")
             val rtt = java.time.Duration.between(response.timestamp, receiveTime)
             
             response.timestamp == sendTime && rtt.toMillis >= 0
@@ -74,8 +74,8 @@ object KeepAliveSpec extends ZIOSpecDefault {
       test("should enable stale response detection") {
         for {
           result <- ZIO.attempt {
-            val oldTimestamp = Instant.now().minusSeconds(60)
-            val currentTimestamp = Instant.now()
+            val oldTimestamp = Instant.parse("2022-12-31T23:59:00Z")
+            val currentTimestamp = Instant.parse("2023-01-01T00:00:00Z")
             
             val oldResponse = KeepAliveResponse(timestamp = oldTimestamp)
             val currentResponse = KeepAliveResponse(timestamp = currentTimestamp)
@@ -91,7 +91,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
       test("should support normal heartbeat exchange") {
         for {
           result <- ZIO.attempt {
-            val clientTime = Instant.now()
+            val clientTime = Instant.parse("2023-01-01T00:00:00Z")
             
             // Client sends heartbeat
             val heartbeat = KeepAlive(timestamp = clientTime)
@@ -112,7 +112,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.foreach(1 to 10) { i =>
             ZIO.attempt {
-              val timestamp = Instant.now().plusMillis(i * 100)
+              val timestamp = Instant.parse("2023-01-01T00:00:00Z").plusMillis(i * 100)
               val heartbeat = KeepAlive(timestamp = timestamp)
               val response = KeepAliveResponse(timestamp = heartbeat.timestamp)
               
@@ -126,7 +126,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             // Simulate client clock ahead of server
-            val futureTime = Instant.now().plusSeconds(30)
+            val futureTime = Instant.parse("2023-01-01T00:00:30Z")
             val heartbeat = KeepAlive(timestamp = futureTime)
             val response = KeepAliveResponse(timestamp = heartbeat.timestamp)
             
@@ -142,11 +142,11 @@ object KeepAliveSpec extends ZIOSpecDefault {
         for {
           result <- ZIO.attempt {
             // After session creation
-            val sessionId = SessionId.generateUnsafe()
+            val sessionId = SessionId.fromString("test-session-1")
             val sessionCreated = SessionCreated(sessionId, Nonce.fromLong(12345L))
             
             // Client can send heartbeats (no sessionId in message)
-            val heartbeat = KeepAlive(timestamp = Instant.now())
+            val heartbeat = KeepAlive(timestamp = Instant.parse("2023-01-01T00:00:00Z"))
             val response = KeepAliveResponse(timestamp = heartbeat.timestamp)
             
             // Both should be valid
@@ -159,14 +159,14 @@ object KeepAliveSpec extends ZIOSpecDefault {
       test("should work with session continuation flow") {
         for {
           result <- ZIO.attempt {
-            val sessionId = SessionId.generateUnsafe()
+            val sessionId = SessionId.fromString("test-session-1")
             
             // After session continuation
             val continueRequest = ContinueSession(sessionId, Nonce.fromLong(67890L))
             val continueResponse = SessionContinued(Nonce.fromLong(67890L))
             
             // Client can immediately send heartbeats
-            val heartbeat = KeepAlive(timestamp = Instant.now())
+            val heartbeat = KeepAlive(timestamp = Instant.parse("2023-01-01T00:00:00Z"))
             val heartbeatResponse = KeepAliveResponse(timestamp = heartbeat.timestamp)
             
             // All should be valid
@@ -181,7 +181,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
       test("should have minimal message overhead") {
         for {
           result <- ZIO.attempt {
-            val heartbeat = KeepAlive(timestamp = Instant.now())
+            val heartbeat = KeepAlive(timestamp = Instant.parse("2023-01-01T00:00:00Z"))
             val response = KeepAliveResponse(timestamp = heartbeat.timestamp)
             
             // Messages should be lightweight (only timestamp)
@@ -195,7 +195,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
           startTime <- Clock.instant
           results <- ZIO.foreach(1 to 1000) { _ =>
             ZIO.attempt {
-              val heartbeat = KeepAlive(timestamp = Instant.now())
+              val heartbeat = KeepAlive(timestamp = Instant.parse("2023-01-01T00:00:00Z"))
               val response = KeepAliveResponse(timestamp = heartbeat.timestamp)
               heartbeat.timestamp == response.timestamp
             }.catchAll(_ => ZIO.succeed(false))

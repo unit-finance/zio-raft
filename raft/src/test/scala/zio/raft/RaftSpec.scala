@@ -8,6 +8,16 @@ import zio.durationInt
 import zio.raft.LogEntry.CommandLogEntry
 
 object RaftSpec extends ZIOSpecDefault:
+
+  // override val bootstrap: zio.ZLayer[Any, Nothing, TestEnvironment] =
+  //   (zio.Runtime.removeDefaultLoggers >>> zio.logging.consoleLogger(
+  //     zio.logging.ConsoleLoggerConfig(
+  //       zio.logging.LogFormat.colored,
+  //       zio.logging.LogFilter.LogLevelByNameConfig(zio.LogLevel.Debug)
+  //     )
+  //   )) ++ testEnvironment
+
+
   def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean): ZIO[Any, Nothing, (Raft[Int, TestCommands], MockRpc[TestCommands])] =
     (for
       stable <- Stable.makeInMemory

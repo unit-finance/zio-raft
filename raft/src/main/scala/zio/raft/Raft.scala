@@ -498,7 +498,7 @@ class Raft[S, A <: Command](
 
         _ <- raftState.set(
           Leader[S](
-            NextIndex(nextIndex.plusOne),
+            NextIndex(nextIndex),
             MatchIndex(peers),
             HeartbeatDue.empty,
             ReplicationStatus(peers),

@@ -93,6 +93,7 @@ lazy val raft = project
     scalacOptions ++= commonScalacOptions.value,
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,
+      "dev.zio" %% "zio-logging" % zioLoggingVersion,
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "dev.zio" %% "zio-nio" % "2.0.0",

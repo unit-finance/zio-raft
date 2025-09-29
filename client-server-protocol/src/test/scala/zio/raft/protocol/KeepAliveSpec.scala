@@ -17,19 +17,15 @@ import java.time.Instant
  */
 object KeepAliveSpec extends ZIOSpecDefault {
 
-  override def spec: Spec[Environment with TestEnvironment with Scope, Any] = suite("Keep-Alive Protocol Contract")(
+  override def spec: Spec[Environment with TestEnvironment with Scope, Any] = suiteAll("Keep-Alive Protocol Contract") {
     
-    suite("KeepAlive Message")(
+    suiteAll("KeepAlive Message") {
       test("should include client timestamp") {
-        for {
-          result <- ZIO.attempt {
-            val timestamp = Instant.parse("2023-01-01T00:00:00Z")
-            val keepAlive = KeepAlive(timestamp = timestamp)
-            
-            keepAlive.timestamp == timestamp
-          }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isTrue) // Should succeed - codecs are implemented
-      },
+        val timestamp = Instant.parse("2023-01-01T00:00:00Z")
+        val keepAlive = KeepAlive(timestamp = timestamp)
+        
+        assertTrue(keepAlive.timestamp == timestamp)
+      }
       
       test("should not include session ID (derived from routing ID)") {
         for {
@@ -41,9 +37,9 @@ object KeepAliveSpec extends ZIOSpecDefault {
           }.catchAll(_ => ZIO.succeed(false))
         } yield assert(result)(isTrue) // Should succeed - codecs are implemented
       }
-    ),
+    }
 
-    suite("KeepAliveResponse")(
+    suiteAll("KeepAliveResponse") {
       test("should echo client timestamp") {
         for {
           result <- ZIO.attempt {
@@ -53,7 +49,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
             response.timestamp == clientTimestamp
           }.catchAll(_ => ZIO.succeed(false))
         } yield assert(result)(isTrue) // Should succeed - codecs are implemented
-      },
+      }
       
       test("should enable RTT measurement") {
         for {
@@ -69,7 +65,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
             response.timestamp == sendTime && rtt.toMillis >= 0
           }.catchAll(_ => ZIO.succeed(false))
         } yield assert(result)(isTrue) // Should succeed - codecs are implemented
-      },
+      }
       
       test("should enable stale response detection") {
         for {
@@ -85,9 +81,9 @@ object KeepAliveSpec extends ZIOSpecDefault {
           }.catchAll(_ => ZIO.succeed(false))
         } yield assert(result)(isTrue) // Should succeed - codecs are implemented
       }
-    ),
-
-    suite("Heartbeat Flow")(
+    }
+    
+    suiteAll("Heartbeat Flow") {
       test("should support normal heartbeat exchange") {
         for {
           result <- ZIO.attempt {
@@ -105,9 +101,9 @@ object KeepAliveSpec extends ZIOSpecDefault {
           }.catchAll(_ => ZIO.succeed(false))
         } yield assert(result)(isTrue) // Should succeed - codecs are implemented
       }
-    ),
+    }
 
-    suite("Timing Requirements")(
+    suiteAll("Timing Requirements") {
       test("should handle rapid heartbeat sequences") {
         for {
           result <- ZIO.foreach(1 to 10) { i =>
@@ -120,7 +116,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
             }.catchAll(_ => ZIO.succeed(false))
           }
         } yield assert(result)(forall(isTrue)) // Should succeed - codecs are implemented
-      },
+      }
       
       test("should handle clock skew scenarios") {
         for {
@@ -135,9 +131,9 @@ object KeepAliveSpec extends ZIOSpecDefault {
           }.catchAll(_ => ZIO.succeed(false))
         } yield assert(result)(isTrue) // Should succeed - codecs are implemented
       }
-    ),
+    }
 
-    suite("Session Lifecycle Integration")(
+    suiteAll("Session Lifecycle Integration") {
       test("should work with session creation flow") {
         for {
           result <- ZIO.attempt {
@@ -154,7 +150,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
             response.timestamp == heartbeat.timestamp
           }.catchAll(_ => ZIO.succeed(false))
         } yield assert(result)(isTrue) // Should succeed - codecs are implemented
-      },
+      }
       
       test("should work with session continuation flow") {
         for {
@@ -175,9 +171,9 @@ object KeepAliveSpec extends ZIOSpecDefault {
           }.catchAll(_ => ZIO.succeed(false))
         } yield assert(result)(isTrue) // Should succeed - codecs are implemented
       }
-    ),
+    }
 
-    suite("Performance Validation")(
+    suiteAll("Performance Validation") {
       test("should have minimal message overhead") {
         for {
           result <- ZIO.attempt {
@@ -188,7 +184,7 @@ object KeepAliveSpec extends ZIOSpecDefault {
             heartbeat.toString.length < 100 && response.toString.length < 100
           }.catchAll(_ => ZIO.succeed(false))
         } yield assert(result)(isTrue) // Should succeed - codecs are implemented
-      },
+      }
       
       test("should support high frequency heartbeats") {
         for {
@@ -207,6 +203,6 @@ object KeepAliveSpec extends ZIOSpecDefault {
           assert(duration)(isLessThan(1000L)) // Should be fast when implemented
         }
       }
-    )
-  )
+    }
+  }
 }

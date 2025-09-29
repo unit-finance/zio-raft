@@ -43,9 +43,9 @@ All concurrent operations MUST use ZIO primitives (Fiber, Ref, Queue, Semaphore)
 **Rationale**: Consistent use of ZIO ecosystem provides composability, testability, and integration benefits. Mixed paradigms create maintenance burden and reduce the benefits of ZIO's comprehensive effect system. Java time/random operations break functional purity and cannot be mocked for testing.
 
 ### V. Test-Driven Maintenance
-All bug fixes MUST include failing test cases that reproduce the issue; Performance changes MUST include benchmark tests; Public API changes MUST include integration tests; Complex Raft scenarios (leader election, log replication) MUST have dedicated property-based tests.
+All bug fixes MUST include failing test cases that reproduce the issue; Performance changes MUST include benchmark tests; Public API changes MUST include integration tests; Complex Raft scenarios (leader election, log replication) MUST have dedicated property-based tests; All tests MUST use ZIO Test's `suiteAll` macro and `assertTrue` smart assertions for better readability and macro-based error reporting; Test suites MUST avoid comma separation between tests for cleaner formatting.
 
-**Rationale**: Consensus algorithms are notoriously difficult to implement correctly. Comprehensive testing prevents regressions and builds confidence in the system's correctness under various failure scenarios.
+**Rationale**: Consensus algorithms are notoriously difficult to implement correctly. Comprehensive testing prevents regressions and builds confidence in the system's correctness under various failure scenarios. Modern ZIO Test features provide superior readability and debugging experience.
 
 ## Scala & ZIO Standards
 

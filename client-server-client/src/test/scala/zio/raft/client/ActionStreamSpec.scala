@@ -20,9 +20,9 @@ import java.time.Instant
  */
 object ActionStreamSpec extends ZIOSpecDefault {
 
-  override def spec = suite("Client Action Stream Contract")(
+  override def spec = suiteAll("Client Action Stream Contract") {
     
-    suite("Action Stream Creation")(
+    suiteAll("Action Stream Creation") {
       test("should create unified action stream from multiple sources") {
         for {
           result <- ZIO.attempt {
@@ -39,8 +39,8 @@ object ActionStreamSpec extends ZIOSpecDefault {
             timerStream != null && 
             unified != null
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should provide separate server-initiated request stream") {
         for {
@@ -50,23 +50,23 @@ object ActionStreamSpec extends ZIOSpecDefault {
             
             serverRequestStream != null
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Network Message Actions")(
+    suiteAll("Network Message Actions") {
       test("should process NetworkMessageAction correctly") {
         for {
           result <- ZIO.attempt {
             val actionStream = ActionStream.create()
-            val sessionCreated = SessionCreated(SessionId.fromString("test-session-1"), 12345L)
+            val sessionCreated = SessionCreated(SessionId.fromString("test-session-1"), Nonce.fromLong(12345L))
             val action = NetworkMessageAction(sessionCreated)
             
             val processed = actionStream.processAction(action)
             processed.isRight // Should process successfully
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should handle ClientResponse messages") {
         for {
@@ -78,8 +78,8 @@ object ActionStreamSpec extends ZIOSpecDefault {
             val processed = actionStream.processAction(action)
             processed.isRight
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should handle KeepAliveResponse messages") {
         for {
@@ -91,11 +91,11 @@ object ActionStreamSpec extends ZIOSpecDefault {
             val processed = actionStream.processAction(action)
             processed.isRight
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("User Request Actions")(
+    suiteAll("User Request Actions") {
       test("should process UserClientRequestAction based on connection state") {
         for {
           result <- ZIO.attempt {
@@ -106,8 +106,8 @@ object ActionStreamSpec extends ZIOSpecDefault {
             val processed = actionStream.processAction(action)
             processed.isRight && processed.toOption.exists(_.sent) // Should send when connected
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should queue requests when not connected") {
         for {
@@ -119,11 +119,11 @@ object ActionStreamSpec extends ZIOSpecDefault {
             val processed = actionStream.processAction(action)
             processed.isRight && processed.toOption.exists(_.queued) // Should queue when connecting
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Timer-Based Actions")(
+    suiteAll("Timer-Based Actions") {
       test("should process TimeoutCheckAction") {
         for {
           result <- ZIO.attempt {
@@ -133,8 +133,8 @@ object ActionStreamSpec extends ZIOSpecDefault {
             val processed = actionStream.processAction(action)
             processed.isRight // Should process timeout checks
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should process SendKeepAliveAction when connected") {
         for {
@@ -145,8 +145,8 @@ object ActionStreamSpec extends ZIOSpecDefault {
             val processed = actionStream.processAction(action)
             processed.isRight && processed.toOption.exists(_.keepAliveSent)
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should skip SendKeepAliveAction when not connected") {
         for {
@@ -157,11 +157,11 @@ object ActionStreamSpec extends ZIOSpecDefault {
             val processed = actionStream.processAction(action)
             processed.isRight && processed.toOption.exists(!_.keepAliveSent) // Should skip
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Connection State Awareness")(
+    suiteAll("Connection State Awareness") {
       test("should behave differently based on connection state") {
         for {
           result <- ZIO.attempt {
@@ -180,11 +180,11 @@ object ActionStreamSpec extends ZIOSpecDefault {
             connectedResult != connectingResult || 
             connectingResult != disconnectedResult
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Server-Initiated Request Stream")(
+    suiteAll("Server-Initiated Request Stream") {
       test("should filter server requests to separate stream") {
         for {
           result <- ZIO.attempt {
@@ -198,8 +198,8 @@ object ActionStreamSpec extends ZIOSpecDefault {
             
             filtered.isDefined && filtered.get == serverRequest
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should not include server requests in main action processing") {
         for {
@@ -212,11 +212,11 @@ object ActionStreamSpec extends ZIOSpecDefault {
             val processed = actionStream.processAction(networkAction)
             processed.isRight && processed.toOption.exists(_.acknowledgmentSent)
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Stream Integration")(
+    suiteAll("Stream Integration") {
       test("should integrate multiple streams reactively") {
         for {
           result <- ZIO.collectAll(Seq(
@@ -224,7 +224,7 @@ object ActionStreamSpec extends ZIOSpecDefault {
               val actionStream = ActionStream.create()
               
               // Simulate concurrent events from different streams
-              val networkEvent = NetworkMessageAction(SessionCreated(SessionId.fromString("test-session-1"), 123L))
+              val networkEvent = NetworkMessageAction(SessionCreated(SessionId.fromString("test-session-1"), Nonce.fromLong(123L)))
               val userEvent = UserClientRequestAction(ClientRequest(RequestId.fromLong(1L), scodec.bits.ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z")))
               val timerEvent = SendKeepAliveAction
               
@@ -237,8 +237,8 @@ object ActionStreamSpec extends ZIOSpecDefault {
               results.forall(_.isRight)
             }.catchAll(_ => ZIO.succeed(false))
           )).map(_.forall(identity))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should handle high-frequency events") {
         for {
@@ -257,11 +257,11 @@ object ActionStreamSpec extends ZIOSpecDefault {
               actionStream.processAction(action).isRight
             }.catchAll(_ => ZIO.succeed(false))
           }.map(_.forall(identity))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Error Handling")(
+    suiteAll("Error Handling") {
       test("should handle malformed network messages gracefully") {
         for {
           result <- ZIO.attempt {
@@ -273,8 +273,8 @@ object ActionStreamSpec extends ZIOSpecDefault {
             val processed = actionStream.processAction(action)
             processed.isLeft // Should handle error gracefully
           }.catchAll(_ => ZIO.succeed(true)) // Exception handling is also valid
-        } yield assert(result)(isTrue) // This test should pass (error handling works)
-      },
+        } yield assertTrue(result) // This test should pass (error handling works)
+      }
       
       test("should recover from processing errors") {
         for {
@@ -287,11 +287,11 @@ object ActionStreamSpec extends ZIOSpecDefault {
             
             processed.isRight // Should continue working after errors
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Performance")(
+    suiteAll("Performance") {
       test("should process actions efficiently") {
         for {
           startTime <- Clock.instant
@@ -306,10 +306,9 @@ object ActionStreamSpec extends ZIOSpecDefault {
           duration = java.time.Duration.between(startTime, endTime).toMillis
           successCount = results.count(_.isRight)
         } yield {
-          assert(successCount)(equalTo(0)) && // Should fail until implemented
-          assert(duration)(isLessThan(1000L)) // Should be fast when implemented
+          assertTrue(successCount == 0 && duration < 1000L) // Should fail until implemented
         }
       }
-    )
-  )
+    }
+  }
 }

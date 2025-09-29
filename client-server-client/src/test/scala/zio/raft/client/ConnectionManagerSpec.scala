@@ -19,17 +19,17 @@ import java.time.Instant
  */
 object ConnectionManagerSpec extends ZIOSpecDefault {
 
-  override def spec = suite("Client Connection Manager Contract")(
+  override def spec = suiteAll("Client Connection Manager Contract") {
     
-    suite("Connection States")(
+    suiteAll("Connection States") {
       test("should start in Disconnected state") {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
             connectionManager.currentState == Disconnected
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should transition to Connecting when starting connection") {
         for {
@@ -39,8 +39,8 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             connectionManager.startConnection()
             connectionManager.currentState == Connecting
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should transition to Connected after successful session creation") {
         for {
@@ -52,11 +52,11 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             connectionManager.sessionEstablished(sessionId)
             connectionManager.currentState == Connected
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Request Queuing")(
+    suiteAll("Request Queuing") {
       test("should queue requests when in Connecting state") {
         for {
           result <- ZIO.attempt {
@@ -68,8 +68,8 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             queued && connectionManager.pendingRequestCount > 0
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should queue requests when in Disconnected state") {
         for {
@@ -81,8 +81,8 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             queued && connectionManager.pendingRequestCount > 0
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should send requests immediately when in Connected state") {
         for {
@@ -97,11 +97,11 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             !queued && sent
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("State Transitions")(
+    suiteAll("State Transitions") {
       test("should resend all pending requests on Connecting -> Connected") {
         for {
           result <- ZIO.attempt {
@@ -123,8 +123,8 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             pendingBefore == 2 && resentRequests.length == 2
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should retain pending requests on Connected -> Connecting") {
         for {
@@ -149,8 +149,8 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             pendingBefore == pendingAfter && connectionManager.currentState == Connecting
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should error pending requests on Connected -> Disconnected") {
         for {
@@ -173,11 +173,11 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             erroredRequests.length == 2 && connectionManager.currentState == Disconnected
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Session Management")(
+    suiteAll("Session Management") {
       test("should store session ID when established") {
         for {
           result <- ZIO.attempt {
@@ -189,8 +189,8 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             connectionManager.currentSessionId.contains(sessionId)
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should support session continuation after reconnection") {
         for {
@@ -209,11 +209,11 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             continuationAttempt.isDefined && continuationAttempt.get == sessionId
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Leader Redirection")(
+    suiteAll("Leader Redirection") {
       test("should handle leader redirection") {
         for {
           result <- ZIO.attempt {
@@ -225,8 +225,8 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             redirected && connectionManager.currentState == Connecting
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should update leader information") {
         for {
@@ -237,11 +237,11 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             connectionManager.updateLeaderInfo(leaderId)
             connectionManager.currentLeader.contains(leaderId)
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Keep-Alive Management")(
+    suiteAll("Keep-Alive Management") {
       test("should track keep-alive timing") {
         for {
           result <- ZIO.attempt {
@@ -254,8 +254,8 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             val shouldSendKeepAlive = connectionManager.shouldSendKeepAlive()
             shouldSendKeepAlive // Should need keep-alive initially
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should handle keep-alive responses") {
         for {
@@ -273,11 +273,11 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             handled // Should handle response correctly
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Request Tracking")(
+    suiteAll("Request Tracking") {
       test("should track pending requests with promises") {
         for {
           result <- ZIO.attempt {
@@ -289,8 +289,8 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             requestPromise.isDefined && hasPendingRequest
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should complete requests when responses received") {
         for {
@@ -309,11 +309,11 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             completed && !connectionManager.hasPendingRequest(requestId)
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Error Handling")(
+    suiteAll("Error Handling") {
       test("should handle connection timeouts") {
         for {
           result <- ZIO.attempt {
@@ -324,25 +324,25 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
             
             timedOut // Should detect timeout
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should handle session rejections") {
         for {
           result <- ZIO.attempt {
             val connectionManager = ConnectionManager.create()
-            val rejection = SessionRejected(NotLeader, Some(MemberId("leader-2")))
+            val rejection = SessionRejected(NotLeader, Nonce.fromLong(123L), Some(MemberId.fromString("leader-2")))
             
             connectionManager.startConnection()
             val handled = connectionManager.handleSessionRejected(rejection)
             
             handled && connectionManager.currentState == Connecting
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Concurrency")(
+    suiteAll("Concurrency") {
       test("should handle concurrent request submissions") {
         for {
           results <- ZIO.foreachPar(1 to 10) { i =>
@@ -359,8 +359,8 @@ object ConnectionManagerSpec extends ZIOSpecDefault {
           }
           
           successCount = results.count(_._1)
-        } yield assert(successCount)(equalTo(0)) // Should fail until implemented
+        } yield assertTrue(successCount == 0) // Should fail until implemented
       }
-    )
-  )
+    }
+  }
 }

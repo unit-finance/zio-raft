@@ -79,7 +79,7 @@ lazy val commonScalacOptions = Def.setting{
 
 lazy val root = project
   .in(file("."))
-  .aggregate(raft, kvstore, zio1zmq, zio2zmq, raftZmq, stores, ziolmdb)
+  .aggregate(raft, kvstore, zio1zmq, zio2zmq, raftZmq, stores, ziolmdb, clientServerProtocol, clientServerServer, clientServerClient)
   .settings(
     publish / skip := true,
     crossScalaVersions := Nil
@@ -208,3 +208,64 @@ lazy val stores = project
     excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
   .dependsOn(raft, ziolmdb)
+
+lazy val clientServerProtocol = project
+  .in(file("client-server-protocol"))
+  .settings(
+    name := "zio-raft-client-server-protocol",
+    crossScalaVersions := supportedScalaVersions,
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
+    scalacOptions ++= commonScalacOptions.value,
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio" % zio2Version,
+      "dev.zio" %% "zio-prelude" % zioPreludeVersion,
+      "org.scodec" %% "scodec-bits" % "1.1.37",
+      "dev.zio" %% "zio-test" % zio2Version % Test,
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test
+    ) ++ (CrossVersion.partialVersion(scalaVersion.value) match {
+      case Some((2, _)) => Seq(
+        "org.scodec" %% "scodec-core" % "1.11.10"
+      )
+      case Some((3, _)) => Seq(
+        "org.scodec" %% "scodec-core" % "2.3.2"
+      )
+      case _ => Seq.empty
+    }),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
+  )
+
+lazy val clientServerServer = project
+  .in(file("client-server-server"))
+  .settings(
+    name := "zio-raft-client-server-server",
+    scalaVersion := mainScalaVersion,
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
+    scalacOptions ++= commonScalacOptions.value,
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio" % zio2Version,
+      "dev.zio" %% "zio-streams" % zio2Version,
+      "dev.zio" %% "zio-prelude" % zioPreludeVersion,
+      "dev.zio" %% "zio-test" % zio2Version % Test,
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test
+    ),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
+  )
+  .dependsOn(raft, clientServerProtocol, zio2zmq)
+
+lazy val clientServerClient = project
+  .in(file("client-server-client"))
+  .settings(
+    name := "zio-raft-client-server-client",
+    crossScalaVersions := supportedScalaVersions,
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
+    scalacOptions ++= commonScalacOptions.value,
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio" % zio2Version,
+      "dev.zio" %% "zio-streams" % zio2Version,
+      "dev.zio" %% "zio-prelude" % zioPreludeVersion,
+      "dev.zio" %% "zio-test" % zio2Version % Test,
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test
+    ),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
+  )
+  .dependsOn(clientServerProtocol, zio2zmq)

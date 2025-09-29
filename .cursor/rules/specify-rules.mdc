@@ -1,14 +1,12 @@
 # ZIO Raft Development Guidelines
 
-Auto-generated from all feature plans. Last updated: [DATE]
+Auto-generated from all feature plans. Last updated: 2025-09-24
 
 ## Active Technologies
-- **Language**: 
-  - **Server components**: Scala 3.3+ only (leverages latest features)
-  - **Client/Protocol libraries**: Scala 2.13.8+ and Scala 3.3+ (cross-compiled for compatibility)
-- **Effect System**: ZIO 2.1+ (UIO, URIO, ZIO types required)
+- **Language**: Scala 3.3+ with ZIO 2.1+
+- **Effect System**: ZIO (UIO, URIO, ZIO types required)
 - **Testing**: ZIO Test with property-based testing
-- **Build**: SBT with cross-compilation support and strict compilation flags
+- **Build**: SBT with strict compilation flags
 - **Code Quality**: scalafmt, scalafix, unused import warnings
 
 ## Project Structure
@@ -41,7 +39,7 @@ All code changes must adhere to ZIO Raft Constitution v1.0.0:
 - Functional programming patterns (no var, mutable collections)
 
 ## Recent Changes
-[LAST 3 FEATURES AND WHAT THEY ADDED]
+- 001-implement-client-server: Added Scala 3.3+ with ZIO 2.1+ + ZeroMQ (zio-zmq), scodec (protocol serialization), ZIO (effects), ZIO Test (testing)
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

@@ -19,9 +19,9 @@ import java.time.Instant
  */
 object SessionManagerSpec extends ZIOSpecDefault {
 
-  override def spec = suite("Server Session Manager Contract")(
-    
-    suite("Session Creation")(
+  override def spec = suiteAll("Server Session Manager Contract") {
+
+    suiteAll("Session Creation") {
       test("should create new sessions with server-generated IDs") {
         for {
           result <- ZIO.attempt {
@@ -32,8 +32,8 @@ object SessionManagerSpec extends ZIOSpecDefault {
             val createResult = sessionManager.createSession(routingId, capabilities)
             createResult.isRight // Should succeed until implemented
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should reject session creation when not leader") {
         for {
@@ -45,8 +45,8 @@ object SessionManagerSpec extends ZIOSpecDefault {
             val createResult = sessionManager.createSession(routingId, capabilities)
             createResult.isLeft // Should reject when not leader
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should generate unique session IDs") {
         for {
@@ -60,11 +60,11 @@ object SessionManagerSpec extends ZIOSpecDefault {
             
             session1.map(_.sessionId) != session2.map(_.sessionId)
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Session Continuation")(
+    suiteAll("Session Continuation") {
       test("should continue existing sessions") {
         for {
           result <- ZIO.attempt {
@@ -78,8 +78,8 @@ object SessionManagerSpec extends ZIOSpecDefault {
             val continueResult = sessionManager.continueSession(sessionId, routingId)
             continueResult.isRight // Should succeed
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should reject continuation of non-existent sessions") {
         for {
@@ -91,11 +91,11 @@ object SessionManagerSpec extends ZIOSpecDefault {
             val continueResult = sessionManager.continueSession(unknownSessionId, routingId)
             continueResult.isLeft // Should reject
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Connection State Management")(
+    suiteAll("Connection State Management") {
       test("should track connection states correctly") {
         for {
           result <- ZIO.attempt {
@@ -113,8 +113,8 @@ object SessionManagerSpec extends ZIOSpecDefault {
             
             isConnected1 && !isConnected2
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should update routing ID mappings on continuation") {
         for {
@@ -137,11 +137,11 @@ object SessionManagerSpec extends ZIOSpecDefault {
             
             sessionFromNew.isDefined && sessionFromOld.isEmpty
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Session Expiration")(
+    suiteAll("Session Expiration") {
       test("should expire sessions based on timeout") {
         for {
           result <- ZIO.attempt {
@@ -154,8 +154,8 @@ object SessionManagerSpec extends ZIOSpecDefault {
             val expiredSessions = sessionManager.removeExpiredSessions()
             expiredSessions.nonEmpty // Should find expired sessions
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should update expiration on keep-alive") {
         for {
@@ -172,11 +172,11 @@ object SessionManagerSpec extends ZIOSpecDefault {
             val expiredSessions = sessionManager.removeExpiredSessions()
             expiredSessions.isEmpty // Should not expire after keep-alive
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Leader Awareness")(
+    suiteAll("Leader Awareness") {
       test("should reject operations when not leader") {
         for {
           result <- ZIO.attempt {
@@ -188,8 +188,8 @@ object SessionManagerSpec extends ZIOSpecDefault {
             
             createResult.isLeft && continueResult.isLeft
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should allow operations when leader") {
         for {
@@ -200,11 +200,11 @@ object SessionManagerSpec extends ZIOSpecDefault {
             val createResult = sessionManager.createSession(routingId, Map("test" -> "v1"))
             createResult.isRight // Should succeed as leader
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Action Stream Integration")(
+    suiteAll("Action Stream Integration") {
       test("should generate CreateSessionAction for new sessions") {
         for {
           result <- ZIO.attempt {
@@ -217,8 +217,8 @@ object SessionManagerSpec extends ZIOSpecDefault {
             createResult.isRight &&
             actions.exists(_.isInstanceOf[CreateSessionAction])
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
-      },
+        } yield assertTrue(!result) // Should fail until implemented
+      }
       
       test("should generate ExpireSessionAction for expired sessions") {
         for {
@@ -233,11 +233,11 @@ object SessionManagerSpec extends ZIOSpecDefault {
             expiredSessions.nonEmpty &&
             actions.exists(_.isInstanceOf[ExpireSessionAction])
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Capability Management")(
+    suiteAll("Capability Management") {
       test("should store session capabilities correctly") {
         for {
           result <- ZIO.attempt {
@@ -252,11 +252,11 @@ object SessionManagerSpec extends ZIOSpecDefault {
             
             storedCapabilities.contains(Some(capabilities))
           }.catchAll(_ => ZIO.succeed(false))
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    ),
+    }
 
-    suite("Concurrent Access")(
+    suiteAll("Concurrent Access") {
       test("should handle concurrent session operations safely") {
         for {
           result <- ZIO.foreach(1 to 10) { i =>
@@ -267,8 +267,8 @@ object SessionManagerSpec extends ZIOSpecDefault {
               sessionManager.createSession(routingId, Map("worker" -> s"v$i"))
             }.catchAll(_ => ZIO.succeed(Left("error")))
           }.map(results => results.count(_.isRight) > 0)
-        } yield assert(result)(isFalse) // Should fail until implemented
+        } yield assertTrue(!result) // Should fail until implemented
       }
-    )
-  )
+    }
+  }
 }

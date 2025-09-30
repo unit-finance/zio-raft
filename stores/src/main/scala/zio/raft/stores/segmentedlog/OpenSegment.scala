@@ -5,7 +5,7 @@ import java.nio.file.StandardOpenOption
 import zio.nio.channels.AsynchronousFileChannel
 import zio.nio.file.Path
 import zio.raft.stores.segmentedlog.internal.*
-import zio.raft.{Command, Index, LogEntry}
+import zio.raft.{Command, Index}
 import zio.{Scope, UIO, ZIO}
 import scodec.zio.*
 
@@ -13,6 +13,9 @@ import scodec.Codec
 import zio.raft.Term
 import scodec.bits.crc.crc32Builder
 import zio.raft.stores.segmentedlog.BaseTransducer.Result
+import scodec.bits.crc.CrcBuilder
+import scodec.bits.BitVector
+import zio.raft.LogEntry
 
 class OpenSegment[A <: Command: Codec](
     val path: Path,
@@ -60,7 +63,7 @@ class OpenSegment[A <: Command: Codec](
   // TODO: we should only write entries that will fit in the segment and return the rest to be written in the next segment
   def writeEntries(entries: List[LogEntry[A]]): ZIO[Any, Nothing, Int] =
     for {
-      bytes <- ZIO.attempt(entriesCodec.encode(entries).require.toByteVector).orDie
+      bytes <- ZIO.attempt(logEntriesCodec[A].encode(entries).require.toByteVector).orDie
       position <- positionRef.get
       written <- channel.write(bytes, position).orDie
       _ <- channel.force(true).orDie
@@ -84,7 +87,7 @@ class OpenSegment[A <: Command: Codec](
       // we need to calculate the checksum of the records that will remain after
       maybeChecksum <- makeStream(channel)
         .takeWhile(r => r.offset < offset)
-        .runFold(None)((maybeCrc, record) =>
+        .runFold[Option[CrcBuilder[BitVector]]](None)((maybeCrc, record) =>
           record match
             case Result.Record(offset, index, payload) => Some(maybeCrc.getOrElse(crc32Builder).updated(payload))
             case Result.Checksum(offset, matched)      => None

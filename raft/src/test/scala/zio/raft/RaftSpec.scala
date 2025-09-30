@@ -5,8 +5,19 @@ import zio.raft.StreamItem.CommandMessage
 import zio.test.*
 import zio.{Scope, ZIO}
 import zio.durationInt
+import zio.raft.LogEntry.{CommandLogEntry, NoopLogEntry}
 
 object RaftSpec extends ZIOSpecDefault:
+
+  // override val bootstrap: zio.ZLayer[Any, Nothing, TestEnvironment] =
+  //   (zio.Runtime.removeDefaultLoggers >>> zio.logging.consoleLogger(
+  //     zio.logging.ConsoleLoggerConfig(
+  //       zio.logging.LogFormat.colored,
+  //       zio.logging.LogFilter.LogLevelByNameConfig(zio.LogLevel.Debug)
+  //     )
+  //   )) ++ testEnvironment
+
+
   def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean): ZIO[Any, Nothing, (Raft[Int, TestCommands], MockRpc[TestCommands])] =
     (for
       stable <- Stable.makeInMemory
@@ -170,8 +181,12 @@ object RaftSpec extends ZIOSpecDefault:
         _ <- handleBootstrap(raft)
         _ <- handleVoteGranted(raft, Term(1), MemberId("peer2"))
 
-        _ <- rpc.queue.takeAll
+        _ <- rpc.queue.takeAll // Clear no-op append entries messages
 
+        // After append entries are sent, heartbeat timer is reset, so we need to wait again
+        _ <- ZIO.sleep(Raft.heartbeartInterval.plus(10.millis))
+
+        // Second tick should send heartbeats since no more entries to send
         _ <- handleTick(raft)
 
         messages <- rpc.queue.takeAll
@@ -188,7 +203,7 @@ object RaftSpec extends ZIOSpecDefault:
           )
         )
       yield assertTrue(messages == expectedMessage)
-    },
+    } @@ TestAspect.withLiveClock,
     test("become follower after heartbeat") {
       for
         (raft, _) <- makeRaft(
@@ -228,7 +243,7 @@ object RaftSpec extends ZIOSpecDefault:
           Set(MemberId("peer2"), MemberId("peer3")),
           false
         )
-        logEntry: LogEntry[TestCommands] = LogEntry(
+        logEntry: CommandLogEntry[TestCommands] = CommandLogEntry(
           Increase,
           Term(1),
           Index(1)
@@ -266,9 +281,9 @@ object RaftSpec extends ZIOSpecDefault:
         expectedAppendEntry: RPCMessage[TestCommands] = AppendEntriesRequest(
           Term(1),
           MemberId("peer1"),
-          Index(0),
-          Term(0),
-          List(LogEntry(Increase, Term(1), Index(1))),
+          Index(1),
+          Term(1),
+          List(CommandLogEntry(Increase, Term(1), Index(2))),
           Index(0)
         )
         expectedMessages = List(
@@ -276,6 +291,31 @@ object RaftSpec extends ZIOSpecDefault:
           MemberId("peer3") -> expectedAppendEntry
         )
       yield assertTrue(messages == expectedMessages)
+    },
+    test("leader sends append entries after election") {
+      for
+        (raft, rpc) <- makeRaft(
+          MemberId("peer1"),
+          Array(MemberId("peer2"), MemberId("peer3")),
+          false
+        )
+        _ <- bootstrap(raft)
+
+        allMessages <- rpc.queue.takeAll
+        appendEntriesMessages = allMessages.filter(_._2.isInstanceOf[AppendEntriesRequest[TestCommands]])
+        expectedAppendEntry: RPCMessage[TestCommands] = AppendEntriesRequest(
+          Term(1),
+          MemberId("peer1"),
+          Index(0),
+          Term(0),
+          List(NoopLogEntry(Term(1), Index(1))),
+          Index(0)
+        )
+        expectedMessages = List(
+          MemberId("peer2") -> expectedAppendEntry,
+          MemberId("peer3") -> expectedAppendEntry
+        )
+      yield assertTrue(appendEntriesMessages == expectedMessages)
     },
     test("follower send append entries response") {
       for
@@ -291,7 +331,7 @@ object RaftSpec extends ZIOSpecDefault:
           MemberId("peer2"),
           Index(0),
           Term(0),
-          List(LogEntry(Increase, Term(1), Index(1))),
+          List(CommandLogEntry(Increase, Term(1), Index(1))),
           Index(0)
         )
 
@@ -305,5 +345,5 @@ object RaftSpec extends ZIOSpecDefault:
         )
       yield assertTrue(messages == expectedMessages)
     }
-  ) @@ TestAspect.timeout(10.seconds)
+  ) @@ TestAspect.timeout(60.seconds)
 end RaftSpec

@@ -36,7 +36,7 @@ trait LogStore[A <: Command]:
 end LogStore
 
 object LogStore:
-  def makeInMemory[A <: Command] =
+  def makeInMemory[A <: Command]: ZIO[Any, Nothing, InMemoryLogStore[A]] =
     for logs <- Ref.make(List.empty[LogEntry[A]])
     yield new InMemoryLogStore(logs)
 
@@ -48,7 +48,8 @@ object LogStore:
       logs.update(_.filter(e => e.index >= index))
 
     override def discardEntireLog(previousIndex: Index, previousTerm: Term): UIO[Unit] =
-      logs.set(LogEntry(null.asInstanceOf, previousTerm, previousIndex) :: List.empty[LogEntry[A]])
+      // null.asInstanceOf[LogEntry[A]] as it should never be accessed, this way we guarantee that if accessed it will fail fast
+      logs.set(null.asInstanceOf[LogEntry[A]] :: List.empty[LogEntry[A]])
 
     override def lastIndex = logs.get.map(_.headOption.map(_.index).getOrElse(Index.zero))
     override def lastTerm = logs.get.map(_.headOption.map(_.term).getOrElse(Term.zero))

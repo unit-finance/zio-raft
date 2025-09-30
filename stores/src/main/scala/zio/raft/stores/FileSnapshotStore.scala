@@ -132,7 +132,8 @@ class FileSnapshotStore(
               database.stream
                 .mapZIO((key, value) =>
                   for
-                    (index, term) <- ZIO.fromTry(FileSnapshotStore.keyCodec.decodeValue(BitVector(key)).toTry).orDie
+                    tuple <- ZIO.fromTry(FileSnapshotStore.keyCodec.decodeValue(BitVector(key)).toTry).orDie
+                    (index, term) = tuple
                     status <- ZIO.fromTry(FileSnapshotStore.enumCodec.decodeValue(BitVector(value)).toTry).orDie
                   yield (term, index, status)
                 )
@@ -226,7 +227,8 @@ object FileSnapshotStore:
           database.stream
             .mapZIO((key, value) =>
               for
-                (index, term) <- ZIO.fromTry(keyCodec.decodeValue(BitVector(key)).toTry).orDie
+                tuple <- ZIO.fromTry(keyCodec.decodeValue(BitVector(key)).toTry).orDie
+                (index, term) = tuple
                 status <- ZIO.fromTry(enumCodec.decodeValue(BitVector(value)).toTry).orDie
               yield (term, index, status)
             )

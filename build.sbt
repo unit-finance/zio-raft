@@ -6,12 +6,13 @@ lazy val zio1Version = "1.0.18"
 
 lazy val jeromqVersion = "0.5.3"
 
-lazy val scala3Version = "3.7.1"
+lazy val scala3Version = "3.3.6"
 lazy val scala213Version = "2.13.14"
 lazy val mainScalaVersion = scala3Version
 
 lazy val supportedScalaVersions = List(scala3Version, scala213Version)
 
+// If you change the organization, you need to update publish.yml github workflow
 ThisBuild / organization := "io.github.unit-finance"
 // ThisBuild / organization := "co.unit"
 ThisBuild / organizationName := "Unit"
@@ -35,15 +36,14 @@ ThisBuild / scmInfo := Some(
 ThisBuild / homepage := Some(url("https://github.com/unit-finance/zio-raft"))
 
 ThisBuild / publishTo := {
-  val nexus = "https://s01.oss.sonatype.org/"
   if (isSnapshot.value)
-    Some("snapshots" at nexus + "content/repositories/snapshots")
-  else Some("releases" at nexus + "service/local/staging/deploy/maven2")
+    Some("snapshots" at "https://central.sonatype.com/repository/maven-snapshots/")
+  else Some("releases" at "https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2")
 }
 
 ThisBuild / credentials += Credentials(
-  "Sonatype Nexus Repository Manager",
-  "s01.oss.sonatype.org",
+  "OSSRH Staging API Service",
+  "ossrh-staging-api.central.sonatype.com",
   sys.env.getOrElse("SONATYPE_USERNAME", ""),
   sys.env.getOrElse("SONATYPE_PASSWORD", "")
 )
@@ -60,7 +60,7 @@ ThisBuild / developers := List(
 scalaVersion := mainScalaVersion
 
 resolvers +=
-  "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots"
+  "Sonatype OSS Snapshots" at "https://central.sonatype.com/repository/maven-snapshots/"
 
 lazy val commonScalacOptions = Def.setting{
   CrossVersion.partialVersion(scalaVersion.value) match {
@@ -70,8 +70,7 @@ lazy val commonScalacOptions = Def.setting{
       "-Wunused:imports"
       )
     case Some((3, n)) => List(
-      "-Wunused:imports",
-      "-preview" // enabling for-comprehension improvements for scala 3.7.1 (in >3.8 no need for this flag anymore)
+      "-Wunused:imports"
       )
     case _            => List()
   }
@@ -94,6 +93,7 @@ lazy val raft = project
     scalacOptions ++= commonScalacOptions.value,
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,
+      "dev.zio" %% "zio-logging" % zioLoggingVersion,
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "dev.zio" %% "zio-nio" % "2.0.0",

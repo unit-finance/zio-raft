@@ -107,3 +107,7 @@ object State:
     def withHeartbeatResponse(memberId: MemberId, timestamp: Instant, state: S, numberOfServers: Int): UIO[Leader[S]] =
       for pendingReads <- pendingReads.withHeartbeatResponse(memberId, timestamp, state, numberOfServers)
       yield this.copy(pendingReads = pendingReads)
+
+    def completeReads(index: Index, readState: S): UIO[Leader[S]] =
+      for pendingReads <- pendingReads.withCommandCompleted(index, readState)
+      yield this.copy(pendingReads = pendingReads)

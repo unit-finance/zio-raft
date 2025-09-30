@@ -1,13 +1,14 @@
 package zio.raft.stores.segmentedlog
 
 import zio.raft.stores.segmentedlog.internal.*
-import zio.raft.{Command, Index, LogEntry, LogStore, Term}
+import zio.raft.{Command, Index, LogStore, Term}
 import zio.stream.ZStream
 import zio.{UIO, ZIO}
 import zio.raft.stores.segmentedlog.SegmentMetadataDatabase.{SegmentMetadata, SegmentStatus}
 import scodec.Codec
 import zio.Scope
 import zio.lmdb.Environment
+import zio.raft.LogEntry
 
 class SegmentedLog[A <: Command: Codec](
     logDirectory: String,
@@ -37,7 +38,9 @@ class SegmentedLog[A <: Command: Codec](
             getLog(index).flatMap:
               case Some(entry) => ZIO.some(entry.term)
               case None =>
-                for (previousTerm, previousIndex) <- previousTermIndexOfEntireLog
+                for
+                  tuple <- previousTermIndexOfEntireLog
+                  (previousTerm, previousIndex) = tuple
                 yield if index == previousIndex then Some(previousTerm) else None
       yield term
 
@@ -258,7 +261,8 @@ object SegmentedLog:
       // Recover the open segment from crash
       _ <- currentFile.get.flatMap(_.recoverFromCrash)
 
-      (lastTerm, lastIndex) <- currentFile.get.flatMap(_.getLastTermIndex)
+      tuple <- currentFile.get.flatMap(_.getLastTermIndex)
+      (lastTerm, lastIndex) = tuple
       lastIndexRef <- LocalLongRef.make(lastIndex.value).map(_.dimap[Index](Index(_), _.value))
       lastTermRef <- LocalLongRef.make(lastTerm.value).map(_.dimap[Term](Term(_), _.value))
     } yield new SegmentedLog[A](logDirectory, maxLogFileSize, currentFile, lastIndexRef, lastTermRef, database)

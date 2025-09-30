@@ -6,11 +6,11 @@ import zio.raft.AppendEntriesResult.{Failure, Success}
 import zio.raft.Raft.electionTimeout
 import zio.raft.RequestVoteResult.Rejected
 import zio.raft.State.{Candidate, Follower, Leader}
-import zio.raft.StreamItem.{Bootstrap, CommandMessage, Message, Tick}
+import zio.raft.StreamItem.{Bootstrap, CommandMessage, Message, Tick, Read}
 import zio.stream.ZStream
 import zio.{Chunk, Promise, Queue, Ref, UIO, URIO, ZIO, durationInt, durationLong, Schedule}
-import zio.raft.StreamItem.Read
 import zio.raft.Raft.heartbeartInterval
+import zio.raft.LogEntry.{CommandLogEntry, NoopLogEntry}
 
 sealed trait StreamItem[A <: Command, S]
 object StreamItem:
@@ -18,6 +18,7 @@ object StreamItem:
   case class Message[A <: Command, S](message: RPCMessage[A]) extends StreamItem[A, S]
   case class Bootstrap[A <: Command, S]() extends StreamItem[A, S]
   case class Read[A <: Command, S](promise: Promise[NotALeaderError, S]) extends StreamItem[A, S]
+
   trait CommandMessage[A <: Command, S] extends StreamItem[A, S]:
     val command: A
     val promise: CommandPromise[command.Response]
@@ -28,7 +29,7 @@ class Raft[S, A <: Command](
     private[raft] val raftState: Ref[State[S]],
     commandsQueue: Queue[StreamItem[A, S]],
     stable: Stable,
-    logStore: LogStore[A],
+    private[raft] val logStore: LogStore[A],
     snapshotStore: SnapshotStore,
     rpc: RPC[A],
     stateMachine: StateMachine[S, A],
@@ -486,13 +487,19 @@ class Raft[S, A <: Command](
     def becomeLeader(c: Candidate[S]) =
       for
         currentTerm <- stable.currentTerm
-        _ <- ZIO.logDebug(
-          s"memberId=${this.memberId} become leader ${currentTerm}"
-        )
         lastLogIndex <- logStore.lastIndex
+        _ <- ZIO.logDebug(
+          s"memberId=${this.memberId} become leader currentTerm=$currentTerm lastLogIndex=$lastLogIndex"
+        )
+
+        noopIndex = lastLogIndex.plusOne
+        entry = NoopLogEntry(currentTerm, noopIndex)
+        _ <- logStore.storeLog(entry)
+
         _ <- raftState.set(
           Leader[S](
-            NextIndex(lastLogIndex.plusOne),
+            // noopIndex and not noopIndex.plusOne so we reduce the hops during append entries
+            NextIndex(noopIndex),
             MatchIndex(peers),
             HeartbeatDue.empty,
             ReplicationStatus(peers),
@@ -579,12 +586,25 @@ class Raft[S, A <: Command](
           .stream(state.lastApplied.plusOne, state.commitIndex)
           .runFoldZIO(state)((state, logEntry) =>
             for
-              appState <- appStateRef.get
-              (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState)
-              _ <- appStateRef.set(newState)
-              newRaftState <- state match
-                case l: Leader[S] => l.completeCommands(logEntry.index, response, newState)
-                case _            => ZIO.succeed(state)
+              // only apply to state machine if the log entry is not a NoopLogEntry
+              newRaftState <- logEntry match
+                case _: NoopLogEntry =>
+                  for
+                    appState <- appStateRef.get
+                    newRaftState <- state match
+                      case l: Leader[S] => l.completeReads(logEntry.index, appState)
+                      case _            => ZIO.succeed(state)
+                  yield newRaftState
+                case logEntry: CommandLogEntry[?] =>
+                  for
+                    appState <- appStateRef.get
+                    (newState, response) <- stateMachine.apply(logEntry.command).toZIOWithState(appState)
+                    _ <- appStateRef.set(newState)
+
+                    newRaftState <- state match
+                      case l: Leader[S] => l.completeCommands(logEntry.index, response, newState)
+                      case _            => ZIO.succeed(state)
+                  yield newRaftState
             yield newRaftState.increaseLastApplied
           )
     else ZIO.succeed(state)
@@ -844,7 +864,7 @@ class Raft[S, A <: Command](
         for
           lastIndex <- logStore.lastIndex
           currentTerm <- stable.currentTerm
-          entry = LogEntry[A](
+          entry = CommandLogEntry[A](
             command,
             currentTerm,
             lastIndex.plusOne

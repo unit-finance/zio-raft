@@ -7,29 +7,28 @@ import zio.ZIO
 import zio.raft.PendingReadEntry.PendingCommand
 import zio.raft.PendingReadEntry.PendingHeartbeat
 
-// TODO (Eran): fix all naming
 case class PendingReads[S](
     readsPendingCommands: InsertSortList[PendingReadEntry.PendingCommand[S]],
     readsPendingHeartbeats: InsertSortList[PendingReadEntry.PendingHeartbeat[S]]
 ):
-  def withReadPendingCommand(promise: Promise[NotALeaderError, S], commandIndex: Index): PendingReads[S] =
+  def withPendingCommand(promise: Promise[NotALeaderError, S], commandIndex: Index): PendingReads[S] =
     this.copy(readsPendingCommands =
       readsPendingCommands.withSortedInsert(PendingReadEntry.PendingCommand(promise, commandIndex))
     )
 
-  def withReadPendingHeartbeat(promise: Promise[NotALeaderError, S], timestamp: Instant): PendingReads[S] =
+  def withPendingHeartbeat(promise: Promise[NotALeaderError, S], timestamp: Instant): PendingReads[S] =
     this.copy(readsPendingHeartbeats =
       readsPendingHeartbeats.withSortedInsert(PendingReadEntry.PendingHeartbeat(promise, timestamp))
     )
 
-  def withCommandCompleted(commandIndex: Index, stateAfterApply: S): UIO[PendingReads[S]] =
+  def resolveReadsForCommand(commandIndex: Index, stateAfterApply: S): UIO[PendingReads[S]] =
     if readsPendingCommands.isEmpty || readsPendingCommands.head.enqueuedAtIndex > commandIndex then ZIO.succeed(this)
     else
       readsPendingCommands.span(_.enqueuedAtIndex <= commandIndex) match
         case (completed, remaining) =>
           ZIO.foreach(completed)(_.promise.succeed(stateAfterApply)).as(this.copy(readsPendingCommands = remaining))
 
-  def withHeartbeatResponse(
+  def resolveReadsForHeartbeat(
       memberId: MemberId,
       timestamp: Instant,
       state: S,

@@ -6,10 +6,24 @@ import zio.raft.AppendEntriesResult.Success
 
 import scodec.Codec
 import scodec.bits.ByteVector
-import scodec.codecs.{bool, bytes, discriminated, int32, int64, listOfN, optional, uint8, utf8_32, variableSizeBytes}
+import scodec.codecs.{
+  bool,
+  bytes,
+  discriminated,
+  int32,
+  int64,
+  listOfN,
+  optional,
+  uint8,
+  utf8_32,
+  variableSizeBytes,
+  constant
+}
 import zio.raft.LogEntry.{CommandLogEntry, NoopLogEntry}
 
 object RpcMessageCodec:
+  def Version(v: Int): Codec[Unit] = constant(uint8.encode(v).require)
+
   def codec[A <: Command](using commandCodec: Codec[A]): Codec[RPCMessage[A]] = discriminated[RPCMessage[A]]
     .by(uint8)
     .typecase(0, heartbeatCodec[A])
@@ -29,21 +43,36 @@ object RpcMessageCodec:
   private def chunkCodec =
     variableSizeBytes(int32, bytes).xmap(bv => Chunk.fromIterable(bv.toIterable), c => ByteVector(c.toIterable))
 
-  // TODO (Eran): improve this codec? add version?
   private def logEntryCodec[A <: Command](commandCodec: Codec[A]) = discriminated[LogEntry[A]]
     .by(uint8)
-    .typecase(0, commandLogEntryCodec(commandCodec))
-    .typecase(1, noopLogEntryCodec)
+    .typecase(0, versionedCommandLogEntryCodec(commandCodec))
+    .typecase(1, versionedNoopLogEntryCodec)
 
   private def logEntriesCodec[A <: Command](commandCodec: Codec[A]) = listOfN(int32, logEntryCodec(commandCodec))
 
-  private def commandLogEntryCodec[A <: Command](commandCodec: Codec[A]) =
+  private def versionedCommandLogEntryCodec[A <: Command](commandCodec: Codec[A]) =
+    Codec(
+      Version(1) ~> commandLogEntryCodecV1(commandCodec),
+      uint8.flatMap { case 1 =>
+        commandLogEntryCodecV1(commandCodec)
+      }
+    )
+
+  private def commandLogEntryCodecV1[A <: Command](commandCodec: Codec[A]) =
     (commandCodec :: termCodec :: indexCodec).as[CommandLogEntry[A]]
 
-  private def noopLogEntryCodec = (termCodec :: indexCodec).as[NoopLogEntry]
+  private def versionedNoopLogEntryCodec =
+    Codec(
+      Version(1) ~> noopLogEntryCodecV1,
+      uint8.flatMap { case 1 =>
+        noopLogEntryCodecV1
+      }
+    )
 
-  private def commandEntriesCodec[A <: Command](commandCodec: Codec[A]): Codec[List[CommandLogEntry[A]]] =
-    listOfN(int32, commandLogEntryCodec(commandCodec))
+  private def noopLogEntryCodecV1 = (termCodec :: indexCodec).as[NoopLogEntry]
+
+  // private def commandEntriesCodec[A <: Command](commandCodec: Codec[A]): Codec[List[CommandLogEntry[A]]] =
+  //   listOfN(int32, versionedCommandLogEntryCodec(commandCodec))
 
   private def heartbeatCodec[A <: Command] = (termCodec :: memberIdCodec :: indexCodec).as[HeartbeatRequest[A]]
 

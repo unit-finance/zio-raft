@@ -84,10 +84,10 @@ object State:
       this.copy(heartbeatDue = HeartbeatDue.empty)
 
     def withReadPendingCommand(promise: Promise[NotALeaderError, S], commandIndex: Index): Leader[S] =
-      this.copy(pendingReads = pendingReads.withReadPendingCommand(promise, commandIndex))
+      this.copy(pendingReads = pendingReads.withPendingCommand(promise, commandIndex))
 
     def withReadPendingHeartbeat(promise: Promise[NotALeaderError, S], timestamp: Instant): Leader[S] =
-      this.copy(pendingReads = pendingReads.withReadPendingHeartbeat(promise, timestamp))
+      this.copy(pendingReads = pendingReads.withPendingHeartbeat(promise, timestamp))
 
     def withPendingCommand[R](index: Index, promise: CommandPromise[R]): Leader[S] =
       this.copy(pendingCommands = pendingCommands.withAdded(index, promise))
@@ -101,13 +101,13 @@ object State:
     def completeCommands[R](index: Index, commandResponse: R, readState: S): UIO[Leader[S]] =
       for
         pendingCommands <- pendingCommands.withCompleted(index, commandResponse)
-        pendingReads <- pendingReads.withCommandCompleted(index, readState)
+        pendingReads <- pendingReads.resolveReadsForCommand(index, readState)
       yield this.copy(pendingCommands = pendingCommands, pendingReads = pendingReads)
 
     def withHeartbeatResponse(memberId: MemberId, timestamp: Instant, state: S, numberOfServers: Int): UIO[Leader[S]] =
-      for pendingReads <- pendingReads.withHeartbeatResponse(memberId, timestamp, state, numberOfServers)
+      for pendingReads <- pendingReads.resolveReadsForHeartbeat(memberId, timestamp, state, numberOfServers)
       yield this.copy(pendingReads = pendingReads)
 
     def completeReads(index: Index, readState: S): UIO[Leader[S]] =
-      for pendingReads <- pendingReads.withCommandCompleted(index, readState)
+      for pendingReads <- pendingReads.resolveReadsForCommand(index, readState)
       yield this.copy(pendingReads = pendingReads)

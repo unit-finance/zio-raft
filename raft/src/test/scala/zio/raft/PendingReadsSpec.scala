@@ -21,9 +21,9 @@ object PendingReadsSpec extends ZIOSpecDefault:
         promise3 <- makeTestPromise[String]()
         
         pendingReads = PendingReads.empty[String]
-          .withReadPendingCommand(promise1, Index(5))
-          .withReadPendingCommand(promise2, Index(2))
-          .withReadPendingCommand(promise3, Index(8))
+          .withPendingCommand(promise1, Index(5))
+          .withPendingCommand(promise2, Index(2))
+          .withPendingCommand(promise3, Index(8))
         
         commandsList = pendingReads.readsPendingCommands.list
       } yield assertTrue(
@@ -45,9 +45,9 @@ object PendingReadsSpec extends ZIOSpecDefault:
         later = now.plusSeconds(60)
         
         pendingReads = PendingReads.empty[String]
-          .withReadPendingHeartbeat(promise1, later)
-          .withReadPendingHeartbeat(promise2, earlier)
-          .withReadPendingHeartbeat(promise3, now)
+          .withPendingHeartbeat(promise1, later)
+          .withPendingHeartbeat(promise2, earlier)
+          .withPendingHeartbeat(promise3, now)
         
         heartbeatsList = pendingReads.readsPendingHeartbeats.list
       } yield assertTrue(
@@ -66,12 +66,12 @@ object PendingReadsSpec extends ZIOSpecDefault:
         promise4 <- makeTestPromise[String]()
         
         initialReads = PendingReads.empty[String]
-          .withReadPendingCommand(promise1, Index(1))
-          .withReadPendingCommand(promise2, Index(3))
-          .withReadPendingCommand(promise3, Index(5))
-          .withReadPendingCommand(promise4, Index(7))
+          .withPendingCommand(promise1, Index(1))
+          .withPendingCommand(promise2, Index(3))
+          .withPendingCommand(promise3, Index(5))
+          .withPendingCommand(promise4, Index(7))
         
-        updatedReads <- initialReads.withCommandCompleted(Index(4), "completed_state")
+        updatedReads <- initialReads.resolveReadsForCommand(Index(4), "completed_state")
         
         // Check which promises are completed
         isDone1 <- promise1.isDone
@@ -108,15 +108,15 @@ object PendingReadsSpec extends ZIOSpecDefault:
         member2 = MemberId("member2")
         
         initialReads = PendingReads.empty[String]
-          .withReadPendingHeartbeat(promise1, earlier)
-          .withReadPendingHeartbeat(promise2, now)
-          .withReadPendingHeartbeat(promise3, later)
+          .withPendingHeartbeat(promise1, earlier)
+          .withPendingHeartbeat(promise2, now)
+          .withPendingHeartbeat(promise3, later)
         
         // First heartbeat response (not enough for majority in 3-node cluster)
-        afterFirst <- initialReads.withHeartbeatResponse(member1, now, "heartbeat_state", 3)
+        afterFirst <- initialReads.resolveReadsForHeartbeat(member1, now, "heartbeat_state", 3)
         
         // Second heartbeat response (should complete heartbeats <= now)
-        afterSecond <- afterFirst.withHeartbeatResponse(member2, now, "heartbeat_state", 3)
+        afterSecond <- afterFirst.resolveReadsForHeartbeat(member2, now, "heartbeat_state", 3)
         
         // Check promises with timeout to avoid hanging
         result1 <- promise1.await.either.timeout(zio.Duration.fromMillis(100)).map(_.getOrElse(Left(NotALeaderError(None))))
@@ -147,10 +147,10 @@ object PendingReadsSpec extends ZIOSpecDefault:
         now = Instant.now()
         
         pendingReads = PendingReads.empty[String]
-          .withReadPendingCommand(commandPromise1, Index(1))
-          .withReadPendingCommand(commandPromise2, Index(2))
-          .withReadPendingHeartbeat(heartbeatPromise1, now)
-          .withReadPendingHeartbeat(heartbeatPromise2, now.plusSeconds(10))
+          .withPendingCommand(commandPromise1, Index(1))
+          .withPendingCommand(commandPromise2, Index(2))
+          .withPendingHeartbeat(heartbeatPromise1, now)
+          .withPendingHeartbeat(heartbeatPromise2, now.plusSeconds(10))
         
         _ <- pendingReads.stepDown(leaderId)
         
@@ -185,15 +185,15 @@ object PendingReadsSpec extends ZIOSpecDefault:
         member2 = MemberId("member2")
         
         initialReads = PendingReads.empty[String]
-          .withReadPendingHeartbeat(promise1, t1)
-          .withReadPendingHeartbeat(promise2, t2)
-          .withReadPendingHeartbeat(promise3, t3)
-          .withReadPendingHeartbeat(promise4, t4)
-          .withReadPendingHeartbeat(promise5, t5)
+          .withPendingHeartbeat(promise1, t1)
+          .withPendingHeartbeat(promise2, t2)
+          .withPendingHeartbeat(promise3, t3)
+          .withPendingHeartbeat(promise4, t4)
+          .withPendingHeartbeat(promise5, t5)
         
         // Add some heartbeat responses to build up majority for earlier timestamps
-        withFirstResponse <- initialReads.withHeartbeatResponse(member1, t3, "state", 3)
-        finalReads <- withFirstResponse.withHeartbeatResponse(member2, t3, "state", 3)
+        withFirstResponse <- initialReads.resolveReadsForHeartbeat(member1, t3, "state", 3)
+        finalReads <- withFirstResponse.resolveReadsForHeartbeat(member2, t3, "state", 3)
         
         // Check that some promises were completed (with timeout)
         result1 <- promise1.await.either.timeout(zio.Duration.fromMillis(100)).map(_.getOrElse(Left(NotALeaderError(None))))

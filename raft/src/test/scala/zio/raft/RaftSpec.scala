@@ -292,7 +292,7 @@ object RaftSpec extends ZIOSpecDefault:
         )
       yield assertTrue(messages == expectedMessages)
     },
-    test("leader sends append entries after election") {
+    test("leader sends noop append entries after election") {
       for
         (raft, rpc) <- makeRaft(
           MemberId("peer1"),

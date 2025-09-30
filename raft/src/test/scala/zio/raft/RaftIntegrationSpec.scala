@@ -203,6 +203,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         readResult2 <- r1.readState
       yield assertTrue(readResult1 == 3 && readResult2 == 4)
     },
+
     test("read returns the correct state when there are no pending writes.") {
       for
         (
@@ -212,15 +213,20 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch2,
           r3,
           killSwitch3
-        ) <- makeRaft()
+        ) <- makeRaft().provideSomeLayer(zio.Runtime.removeDefaultLoggers >>> zio.test.ZTestLogger.default)
         
         _ <- r1.sendCommand(Increase)
 
         // When this runs we should have no writes in the queue since the sendCommand call is blocking
         readResult <- r1.readState
         
-      yield assertTrue(readResult == 1)
+        // verify read waits for heartbeat and not a write/noop command 
+        output <- ZTestLogger.logOutput
+        pendingHeartbeatLogCount = output.count(_.message().contains("read pending heartbeat"))
+        pendingCommandLogCount = output.count(_.message().contains("read pending command"))
+      yield assertTrue(readResult == 1) && assertTrue(pendingHeartbeatLogCount == 1) && assertTrue(pendingCommandLogCount == 0)
     },
+
     test("read returns the correct state when there are no writes and one follower is down.") {
       for
         (

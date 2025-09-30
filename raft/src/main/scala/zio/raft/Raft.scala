@@ -944,9 +944,13 @@ class Raft[S, A <: Command](
       newRaftState <- s match
         case l: Leader[S] =>
           l.pendingCommands.lastIndex match
-            case Some(index) => ZIO.succeed(l.withReadPendingCommand(r.promise, index))
+            case Some(index) => 
+              ZIO.logDebug(s"memberId=${this.memberId} read pending command index=$index")
+                .as(l.withReadPendingCommand(r.promise, index))
             case None =>
-              for now <- zio.Clock.instant
+              for 
+                now <- zio.Clock.instant
+                _ <- ZIO.logDebug(s"memberId=${this.memberId} read pending heartbeat timestamp=$now")
               yield l.withHeartbeatDueFromAll.withReadPendingHeartbeat(r.promise, now)
         case f: Follower[S]  => ZIO.fail(NotALeaderError(f.leaderId))
         case c: Candidate[S] => ZIO.fail(NotALeaderError(None))

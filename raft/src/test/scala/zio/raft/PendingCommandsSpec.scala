@@ -58,8 +58,7 @@ object PendingCommandsSpec extends ZIOSpecDefault:
 
     test("stepDown - empty commands has no effect") {
       for {
-        empty = PendingCommands.empty
-        _ <- empty.stepDown(Some(MemberId("leader1")))
+        _ <- PendingCommands.empty.stepDown(Some(MemberId("leader1")))
       } yield assertTrue(true) // No exceptions thrown
     },
 

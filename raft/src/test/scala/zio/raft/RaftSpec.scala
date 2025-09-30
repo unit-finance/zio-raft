@@ -296,7 +296,7 @@ object RaftSpec extends ZIOSpecDefault:
       for
         (raft, rpc) <- makeRaft(
           MemberId("peer1"),
-          Array(MemberId("peer2"), MemberId("peer3")),
+          Set(MemberId("peer2"), MemberId("peer3")),
           false
         )
         _ <- bootstrap(raft)

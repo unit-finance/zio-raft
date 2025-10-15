@@ -189,19 +189,19 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch2,
           r3,
           killSwitch3
-        ) <- makeRaft()
+        ) <- makeRaft().provideSomeLayer(zio.Runtime.removeDefaultLoggers >>> zio.test.ZTestLogger.default)
 
-        // TODO (eran): This is not a good test, since sendCommmand is blocking we don't have pending writes, need to rethink this...
-        _ <- r1.sendCommand(Increase)
-        _ <- r1.sendCommand(Increase)  
-        _ <- r1.sendCommand(Increase)
+        // Making sure we call readState while there are queued write commands is difficult, 
+        // we use this approach to make sure there are some unhandled commands before we call readState, hopefully it won't be too flaky
+        _ <- r1.sendCommand(Increase).fork.repeatN(99)
         
         readResult1 <- r1.readState
         
-        _ <- r1.sendCommand(Increase)
-
-        readResult2 <- r1.readState
-      yield assertTrue(readResult1 == 3 && readResult2 == 4)
+        output <- ZTestLogger.logOutput
+        _ = output.foreach(s => println(s.message()))
+        pendingHeartbeatLogCount = output.count(_.message().contains("memberId=MemberId(peer1) read pending heartbeat"))
+        pendingCommandLogCount = output.count(_.message().contains("memberId=MemberId(peer1) read pending command"))
+      yield assertTrue(readResult1 > 0) && assertTrue(pendingHeartbeatLogCount == 0) && assertTrue(pendingCommandLogCount == 1)
     },
 
     test("read returns the correct state when there are no pending writes.") {
@@ -222,8 +222,8 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         
         // verify read waits for heartbeat and not a write/noop command 
         output <- ZTestLogger.logOutput
-        pendingHeartbeatLogCount = output.count(_.message().contains("read pending heartbeat"))
-        pendingCommandLogCount = output.count(_.message().contains("read pending command"))
+        pendingHeartbeatLogCount = output.count(_.message().contains("memberId=MemberId(peer1) read pending heartbeat"))
+        pendingCommandLogCount = output.count(_.message().contains("memberId=MemberId(peer1) read pending command"))
       yield assertTrue(readResult == 1) && assertTrue(pendingHeartbeatLogCount == 1) && assertTrue(pendingCommandLogCount == 0)
     },
 

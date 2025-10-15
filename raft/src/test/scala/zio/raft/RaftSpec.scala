@@ -140,7 +140,7 @@ object RaftSpec extends ZIOSpecDefault:
       for
         (raft, rpc) <- makeRaft(
           MemberId("peer1"),
-          Array(MemberId("peer2"), MemberId("peer3")),
+          Set(MemberId("peer2"), MemberId("peer3")),
           false
         )
         _ <- handleBootstrap(raft)
@@ -175,7 +175,7 @@ object RaftSpec extends ZIOSpecDefault:
       for
         (raft, rpc) <- makeRaft(
           MemberId("peer1"),
-          Array(MemberId("peer2"), MemberId("peer3")),
+          Set(MemberId("peer2"), MemberId("peer3")),
           false
         )
         _ <- handleBootstrap(raft)
@@ -208,7 +208,7 @@ object RaftSpec extends ZIOSpecDefault:
       for
         (raft, _) <- makeRaft(
           MemberId("peer1"),
-          Array(MemberId("peer2"), MemberId("peer3")),
+          Set(MemberId("peer2"), MemberId("peer3")),
           false
         )
         _ <- handleHeartbeat(raft, Term(1), MemberId("peer2"), Index(0))
@@ -220,7 +220,7 @@ object RaftSpec extends ZIOSpecDefault:
       for
         (raft, _) <- makeRaft(
           MemberId("peer1"),
-          Array(MemberId("peer2"), MemberId("peer3")),
+          Set(MemberId("peer2"), MemberId("peer3")),
           false
         )
         _ <- handelAppendEntries(
@@ -240,7 +240,7 @@ object RaftSpec extends ZIOSpecDefault:
       for
         (raft, _) <- makeRaft(
           MemberId("peer1"),
-          Array(MemberId("peer2"), MemberId("peer3")),
+          Set(MemberId("peer2"), MemberId("peer3")),
           false
         )
         logEntry: CommandLogEntry[TestCommands] = CommandLogEntry(
@@ -269,7 +269,7 @@ object RaftSpec extends ZIOSpecDefault:
       for
         (raft, rpc) <- makeRaft(
           MemberId("peer1"),
-          Array(MemberId("peer2"), MemberId("peer3")),
+          Set(MemberId("peer2"), MemberId("peer3")),
           false
         )
         _ <- bootstrap(raft)
@@ -292,11 +292,11 @@ object RaftSpec extends ZIOSpecDefault:
         )
       yield assertTrue(messages == expectedMessages)
     },
-    test("leader sends append entries after election") {
+    test("leader sends noop append entries after election") {
       for
         (raft, rpc) <- makeRaft(
           MemberId("peer1"),
-          Array(MemberId("peer2"), MemberId("peer3")),
+          Set(MemberId("peer2"), MemberId("peer3")),
           false
         )
         _ <- bootstrap(raft)
@@ -321,7 +321,7 @@ object RaftSpec extends ZIOSpecDefault:
       for
         (raft, rpc) <- makeRaft(
           MemberId("peer1"),
-          Array(MemberId("peer2"), MemberId("peer3")),
+          Set(MemberId("peer2"), MemberId("peer3")),
           false
         )
 

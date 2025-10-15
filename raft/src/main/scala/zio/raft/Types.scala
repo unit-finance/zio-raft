@@ -39,15 +39,15 @@ object Index:
     Index(m)
 
 case class MemberId(value: String)
-type Peers = Array[MemberId]
+type Peers = Set[MemberId]
 
 case class ClusterConfiguration(
     server: MemberId,
-    peers: Array[MemberId]
+    peers: Peers
 ):
-  def numberOfServers = 1 + peers.length
+  def numberOfServers = 1 + peers.size
 
-  // TODO (eran): is this correct? should it be numberOfServers / 2 + 1?
+  // TODO (eran): go over the code and fix peers and numberOfServers so it would mean the same everywhere
   def quorum = numberOfServers / 2
 
 trait Command:
@@ -97,10 +97,13 @@ object AppendEntriesResult:
   case class Failure[A <: Command](from: MemberId, term: Term, index: Index, hint: Option[(Term, Index)])
       extends AppendEntriesResult[A]
 
-case class HeartbeatRequest[A <: Command](term: Term, leaderId: MemberId, leaderCommitIndex: Index)
-    extends RPCMessage[A]
+case class HeartbeatRequest[A <: Command](
+    term: Term,
+    leaderId: MemberId,
+    leaderCommitIndex: Index /*, timestamp: Instant*/
+) extends RPCMessage[A]
 
-case class HeartbeatResponse[A <: Command](from: MemberId, term: Term) extends RPCMessage[A]
+case class HeartbeatResponse[A <: Command](from: MemberId, term: Term /*, timestamp: Instant*/ ) extends RPCMessage[A]
 
 case class InstallSnapshotRequest[A <: Command](
     term: Term,

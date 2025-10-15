@@ -41,7 +41,7 @@ object LogStore:
     yield new InMemoryLogStore(logs)
 
   class InMemoryLogStore[A <: Command](
-      logs: Ref[List[LogEntry[A]]]
+    logs: Ref[List[LogEntry[A]]]
   ) extends LogStore[A]:
 
     override def discardLogUpTo(index: Index): UIO[Unit] =

@@ -11,8 +11,8 @@ import org.zeromq.ZMQException
 import zmq.{Msg, SocketBase, ZError as ZmqError, ZMQ}
 
 class ZSocket private (
-    socket: SocketBase,
-    blocking: zio.blocking.Blocking.Service
+  socket: SocketBase,
+  blocking: zio.blocking.Blocking.Service
 ) {
   def pollIn: ZIO[Any, ZMQException, Boolean] =
     for {
@@ -42,9 +42,9 @@ class ZSocket private (
     } yield result
 
   private def receiveImmediatelyIntoChunkBuilder(
-      builder: ChunkBuilder[Msg],
-      max: Int,
-      size: Int
+    builder: ChunkBuilder[Msg],
+    max: Int,
+    size: Int
   ): Chunk[Msg] = {
     val msg = socket.recv(ZMQ.ZMQ_DONTWAIT)
 
@@ -82,7 +82,7 @@ class ZSocket private (
       .flatMap(canceled => ZStream.repeatEffectChunk(receiveChunk(canceled, chunkSize)))
 
   private def receiveMsgWait(
-      canceled: AtomicBoolean
+    canceled: AtomicBoolean
   ): ZIO[Any, ZMQException, Msg] =
     for {
       msg <- ZIO
@@ -256,8 +256,8 @@ class ZSocket private (
 
 object ZSocket {
   private def createSocket(
-      socketType: Int,
-      asType: Option[Int]
+    socketType: Int,
+    asType: Option[Int]
   ): ZManaged[Has[ZContext] & Has[Service], ZMQException, ZSocket] = {
     val create =
       for {

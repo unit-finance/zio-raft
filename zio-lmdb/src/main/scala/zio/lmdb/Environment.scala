@@ -37,9 +37,9 @@ object Environment:
   def transactReadOnly[R] = TransactPartiallyApplied[R]()
 
   case class Builder(
-      mapSize: Option[Long] = None,
-      maxDbs: Option[Int] = None,
-      flags: List[EnvironmentFlags] = List.empty
+    mapSize: Option[Long] = None,
+    maxDbs: Option[Int] = None,
+    flags: List[EnvironmentFlags] = List.empty
   ):
     def withMapSize(size: Long) = copy(mapSize = Some(size))
 

@@ -23,11 +23,11 @@ object State:
   case class Follower[S](commitIndex: Index, lastApplied: Index, electionTimeout: Instant, leaderId: Option[MemberId])
       extends State[S]
   case class Candidate[S](
-      rpcDue: RPCDue,
-      voteGranted: Int,
-      commitIndex: Index,
-      lastApplied: Index,
-      electionTimeout: Instant
+    rpcDue: RPCDue,
+    voteGranted: Int,
+    commitIndex: Index,
+    lastApplied: Index,
+    electionTimeout: Instant
   ) extends State[S]:
     def addVote(peer: MemberId): Candidate[S] =
       this.copy(voteGranted = voteGranted + 1)
@@ -39,15 +39,15 @@ object State:
       this.copy(rpcDue = rpcDue.set(from, when))
 
   case class Leader[S](
-      nextIndex: NextIndex,
-      matchIndex: MatchIndex,
-      // rpcDue: RPCDue,
-      heartbeatDue: HeartbeatDue,
-      replicationStatus: ReplicationStatus,
-      commitIndex: Index,
-      lastApplied: Index,
-      pendingReads: PendingReads[S],
-      pendingCommands: PendingCommands
+    nextIndex: NextIndex,
+    matchIndex: MatchIndex,
+    // rpcDue: RPCDue,
+    heartbeatDue: HeartbeatDue,
+    replicationStatus: ReplicationStatus,
+    commitIndex: Index,
+    lastApplied: Index,
+    pendingReads: PendingReads[S],
+    pendingCommands: PendingCommands
   ) extends State[S]:
 
     def withMatchIndex(from: MemberId, index: Index): Leader[S] =

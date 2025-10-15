@@ -11,9 +11,9 @@ import java.nio.file.StandardOpenOption
 import zio.raft.LogEntry
 
 class ReadOnlySegment[A <: Command: Codec](
-    val path: Path,
-    val firstIndex: Index,
-    val lastIndexExclusive: Option[Index]
+  val path: Path,
+  val firstIndex: Index,
+  val lastIndexExclusive: Option[Index]
 ) extends Segment:
   def stream(startInclusive: Index, toInclusive: Index) =
     val stream =

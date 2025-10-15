@@ -18,11 +18,11 @@ import scodec.bits.BitVector
 import zio.raft.LogEntry
 
 class OpenSegment[A <: Command: Codec](
-    val path: Path,
-    channel: AsynchronousFileChannel,
-    positionRef: LocalLongRef[Long],
-    val firstIndex: Index,
-    val previousTerm: Term
+  val path: Path,
+  channel: AsynchronousFileChannel,
+  positionRef: LocalLongRef[Long],
+  val firstIndex: Index,
+  val previousTerm: Term
 ) extends Segment:
   def size: UIO[Long] = positionRef.get
 
@@ -138,7 +138,7 @@ class OpenSegment[A <: Command: Codec](
             _ <- positionRef.set(BaseTransducer.headerSize)
           yield ()
         case Some(BaseTransducer.Result.Checksum(offset, true))
-            if currentFileSize == offset + BaseTransducer.isEntrySize + BaseTransducer.checksumSize =>
+          if currentFileSize == offset + BaseTransducer.isEntrySize + BaseTransducer.checksumSize =>
           ZIO.logInfo("SegementedLog: Checksum is valid - no recovery needed")
         case Some(BaseTransducer.Result.Checksum(offset, true)) =>
           ZIO.logWarning(
@@ -177,10 +177,10 @@ class OpenSegment[A <: Command: Codec](
 
 object OpenSegment:
   def createNewSegment[A <: Command: Codec](
-      logDirectory: String,
-      fileName: String,
-      firstIndex: Index,
-      previousTerm: Term
+    logDirectory: String,
+    fileName: String,
+    firstIndex: Index,
+    previousTerm: Term
   ): ZIO[Any, Nothing, ZIO[Scope, Nothing, OpenSegment[A]]] =
     val fullPath = Path(logDirectory, fileName)
 
@@ -191,8 +191,8 @@ object OpenSegment:
   // atomically create a new segment with an empty log entry with the previous index and term
 
   private def createFileWithHeader(
-      logDirectory: String,
-      fullPath: Path
+    logDirectory: String,
+    fullPath: Path
   ) =
     for
       _ <- ZIO
@@ -220,18 +220,18 @@ object OpenSegment:
     yield ()
 
   def openSegment[A <: Command: Codec](
-      logDirectory: String,
-      fileName: String,
-      firstIndex: Index,
-      previousTerm: Term
+    logDirectory: String,
+    fileName: String,
+    firstIndex: Index,
+    previousTerm: Term
   ): ZIO[Scope, Nothing, OpenSegment[A]] =
     val fullPath = Path(logDirectory, fileName)
     openSegment(fullPath, firstIndex, previousTerm)
 
   def openSegment[A <: Command: Codec](
-      fullPath: Path,
-      firstIndex: Index,
-      previousTerm: Term
+    fullPath: Path,
+    firstIndex: Index,
+    previousTerm: Term
   ): ZIO[Scope, Nothing, OpenSegment[A]] =
     for
       // TODO: should we verify the header?

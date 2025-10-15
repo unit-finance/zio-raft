@@ -24,16 +24,16 @@ object StreamItem:
     val promise: CommandPromise[command.Response]
 
 class Raft[S, A <: Command](
-    val memberId: MemberId,
-    peers: Peers,
-    private[raft] val raftState: Ref[State[S]],
-    commandsQueue: Queue[StreamItem[A, S]],
-    stable: Stable,
-    private[raft] val logStore: LogStore[A],
-    snapshotStore: SnapshotStore,
-    rpc: RPC[A],
-    stateMachine: StateMachine[S, A],
-    appStateRef: Ref[S]
+  val memberId: MemberId,
+  peers: Peers,
+  private[raft] val raftState: Ref[State[S]],
+  commandsQueue: Queue[StreamItem[A, S]],
+  stable: Stable,
+  private[raft] val logStore: LogStore[A],
+  snapshotStore: SnapshotStore,
+  rpc: RPC[A],
+  stateMachine: StateMachine[S, A],
+  appStateRef: Ref[S]
 ):
   val rpcTimeout = 50.millis
   val batchSize = 100
@@ -202,7 +202,7 @@ class Raft[S, A <: Command](
     yield ()
 
   private def handleAppendEntriesRequest(
-      m: AppendEntriesRequest[A]
+    m: AppendEntriesRequest[A]
   ): URIO[Any, AppendEntriesResult[A]] =
     for
       currentTerm <- stable.currentTerm
@@ -303,11 +303,11 @@ class Raft[S, A <: Command](
                   .withResume(from)
               )
             case AppendEntriesResult.Failure(
-                  from,
-                  _,
-                  _,
-                  Some(hintTerm, hintIndex)
-                ) =>
+                from,
+                _,
+                _,
+                Some(hintTerm, hintIndex)
+              ) =>
               for
                 index <-
                   if hintTerm.isZero then ZIO.succeed(hintIndex)
@@ -652,17 +652,17 @@ class Raft[S, A <: Command](
       leaderLastLogIndex <- logStore.lastIndex
       _ <- s match
         case l: Leader[S]
-            if leaderLastLogIndex >= l.nextIndex.get(
-              peer
-            ) && !l.replicationStatus.isPaused(peer) =>
+          if leaderLastLogIndex >= l.nextIndex.get(
+            peer
+          ) && !l.replicationStatus.isPaused(peer) =>
           sendAppendEntries(peer, l, leaderLastLogIndex)
         case _ => ZIO.unit
     yield ()
 
   private def sendAppendEntries(
-      peer: MemberId,
-      l: Leader[S],
-      leaderLastLogIndex: Index
+    peer: MemberId,
+    l: Leader[S],
+    leaderLastLogIndex: Index
   ) =
     val nextIndex = l.nextIndex.get(peer)
     val previousIndex = nextIndex.minusOne
@@ -784,10 +784,10 @@ class Raft[S, A <: Command](
       now <- zio.Clock.instant
       _ <- s match
         case c: Candidate[S]
-            if c.rpcDue.due(
-              now,
-              peer
-            ) =>
+          if c.rpcDue.due(
+            now,
+            peer
+          ) =>
           for
             currentTerm <- stable.currentTerm
             lastTerm <- logStore.lastTerm
@@ -861,8 +861,8 @@ class Raft[S, A <: Command](
         handleInstallSnapshotReply(r)
 
   private def handleRequestFromClient(
-      command: A,
-      promise: CommandPromise[command.Response]
+    command: A,
+    promise: CommandPromise[command.Response]
   ): ZIO[Any, Nothing, Unit] =
     raftState.get.flatMap:
       case l: Leader[S] =>
@@ -924,7 +924,7 @@ class Raft[S, A <: Command](
     yield if s.isInstanceOf[Leader[S]] then true else false
 
   def sendCommand(
-      commandArg: A
+    commandArg: A
   ): ZIO[Any, NotALeaderError, commandArg.Response] =
     // todo: leader only
     for
@@ -1010,13 +1010,13 @@ object Raft:
   val heartbeartInterval = (electionTimeout / 2).millis
 
   def make[S, A <: Command](
-      memberId: MemberId,
-      peers: Peers,
-      stable: Stable,
-      logStore: LogStore[A],
-      snapshotStore: SnapshotStore,
-      rpc: RPC[A],
-      stateMachine: StateMachine[S, A]
+    memberId: MemberId,
+    peers: Peers,
+    stable: Stable,
+    logStore: LogStore[A],
+    snapshotStore: SnapshotStore,
+    rpc: RPC[A],
+    stateMachine: StateMachine[S, A]
   ) =
     for
       now <- zio.Clock.instant
@@ -1061,13 +1061,13 @@ object Raft:
     yield raft
 
   def makeScoped[S, A <: Command](
-      memberId: MemberId,
-      peers: Peers,
-      stable: Stable,
-      logStore: LogStore[A],
-      snapshotStore: SnapshotStore,
-      rpc: RPC[A],
-      stateMachine: StateMachine[S, A]
+    memberId: MemberId,
+    peers: Peers,
+    stable: Stable,
+    logStore: LogStore[A],
+    snapshotStore: SnapshotStore,
+    rpc: RPC[A],
+    stateMachine: StateMachine[S, A]
   ) =
     for
       raft <- make(

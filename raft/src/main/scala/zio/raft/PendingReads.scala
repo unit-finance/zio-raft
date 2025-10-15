@@ -8,8 +8,8 @@ import zio.raft.PendingReadEntry.PendingCommand
 import zio.raft.PendingReadEntry.PendingHeartbeat
 
 case class PendingReads[S](
-    readsPendingCommands: InsertSortList[PendingReadEntry.PendingCommand[S]],
-    readsPendingHeartbeats: InsertSortList[PendingReadEntry.PendingHeartbeat[S]]
+  readsPendingCommands: InsertSortList[PendingReadEntry.PendingCommand[S]],
+  readsPendingHeartbeats: InsertSortList[PendingReadEntry.PendingHeartbeat[S]]
 ):
   def withPendingCommand(promise: Promise[NotALeaderError, S], commandIndex: Index): PendingReads[S] =
     this.copy(readsPendingCommands =
@@ -29,10 +29,10 @@ case class PendingReads[S](
           ZIO.foreach(completed)(_.promise.succeed(stateAfterApply)).as(this.copy(readsPendingCommands = remaining))
 
   def resolveReadsForHeartbeat(
-      memberId: MemberId,
-      timestamp: Instant,
-      state: S,
-      numberOfServers: Int
+    memberId: MemberId,
+    timestamp: Instant,
+    state: S,
+    numberOfServers: Int
   ): UIO[PendingReads[S]] =
     if readsPendingHeartbeats.isEmpty then ZIO.succeed(this)
     else
@@ -56,9 +56,9 @@ private enum PendingReadEntry[S](val promise: Promise[NotALeaderError, S]):
   case PendingCommand(override val promise: Promise[NotALeaderError, S], enqueuedAtIndex: Index)
       extends PendingReadEntry[S](promise)
   case PendingHeartbeat(
-      override val promise: Promise[NotALeaderError, S],
-      timestamp: Instant,
-      peersHeartbeats: Peers = Set.empty
+    override val promise: Promise[NotALeaderError, S],
+    timestamp: Instant,
+    peersHeartbeats: Peers = Set.empty
   ) extends PendingReadEntry[S](promise)
 
 object PendingReadEntry:

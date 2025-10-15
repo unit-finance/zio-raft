@@ -11,12 +11,12 @@ import zio.lmdb.Environment
 import zio.raft.LogEntry
 
 class SegmentedLog[A <: Command: Codec](
-    logDirectory: String,
-    maxLogFileSize: Long,
-    currentSegment: CurrentSegment[A],
-    lastIndexRef: LocalLongRef[Index],
-    lastTermRef: LocalLongRef[Term],
-    segmentMetadataDatabase: SegmentMetadataDatabase
+  logDirectory: String,
+  maxLogFileSize: Long,
+  currentSegment: CurrentSegment[A],
+  lastIndexRef: LocalLongRef[Index],
+  lastTermRef: LocalLongRef[Term],
+  segmentMetadataDatabase: SegmentMetadataDatabase
 ) extends LogStore[A]:
 
   override def lastIndex: UIO[Index] = lastIndexRef.get
@@ -219,10 +219,10 @@ end SegmentedLog
 object SegmentedLog:
 
   private def createNewSegment[A <: Command: Codec](
-      logDirectory: String,
-      database: SegmentMetadataDatabase,
-      firstIndex: Index,
-      previousTerm: Term
+    logDirectory: String,
+    database: SegmentMetadataDatabase,
+    firstIndex: Index,
+    previousTerm: Term
   ): ZIO[Any, Nothing, ZIO[Scope, Nothing, OpenSegment[A]]] =
     for
       id <- zio.Random.nextLong.map(_.abs)
@@ -236,8 +236,8 @@ object SegmentedLog:
   // because we are saving 6 months back, this can be more files than the OS can handle.
   // We should probably not save 6 months back, and archive tasks using other methods to allow restore
   def make[A <: Command: Codec](
-      logDirectory: String,
-      maxLogFileSize: Long = 1024 * 1024 * 100 /*100 MB*/
+    logDirectory: String,
+    maxLogFileSize: Long = 1024 * 1024 * 100 /*100 MB*/
   ): ZIO[Environment & Scope, Nothing, SegmentedLog[A]] =
     for {
       database <- SegmentMetadataDatabase.make

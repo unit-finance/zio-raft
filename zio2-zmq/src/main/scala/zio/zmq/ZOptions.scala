@@ -26,9 +26,9 @@ class ZOptions(socketBase: SocketBase) {
   }
 
   def setHeartbeat(
-      interval: zio.Duration,
-      timeout: zio.Duration,
-      ttl: zio.Duration
+    interval: zio.Duration,
+    timeout: zio.Duration,
+    ttl: zio.Duration
   ) =
     ZIO.attempt(
       require(

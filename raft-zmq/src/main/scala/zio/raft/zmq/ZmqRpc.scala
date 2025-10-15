@@ -23,8 +23,8 @@ import scodec.bits.BitVector
 class ZmqRpc[A <: Command: Codec](server: ZSocket, clients: Map[MemberId, ZSocket]) extends RPC[A]:
 
   override def sendAppendEntries(
-      peer: MemberId,
-      request: AppendEntriesRequest[A]
+    peer: MemberId,
+    request: AppendEntriesRequest[A]
   ): UIO[Boolean] =
     val client = clients(peer)
     val message = RpcMessageCodec.codec[A].encode(request).require.toByteArray
@@ -35,24 +35,24 @@ class ZmqRpc[A <: Command: Codec](server: ZSocket, clients: Map[MemberId, ZSocke
     yield sent
 
   override def sendRequestVoteResponse(
-      candidateId: MemberId,
-      response: RequestVoteResult[A]
+    candidateId: MemberId,
+    response: RequestVoteResult[A]
   ): UIO[Unit] =
     val client = clients(candidateId)
     val message = RpcMessageCodec.codec[A].encode(response).require.toByteArray
     client.sendImmediately(message).ignore
 
   override def sendRequestVote(
-      peer: MemberId,
-      m: RequestVoteRequest[A]
+    peer: MemberId,
+    m: RequestVoteRequest[A]
   ): UIO[Unit] =
     val client = clients(peer)
     val message = RpcMessageCodec.codec[A].encode(m).require.toByteArray
     client.sendImmediately(message).ignore
 
   override def sendAppendEntriesResponse(
-      leaderId: MemberId,
-      response: AppendEntriesResult[A]
+    leaderId: MemberId,
+    response: AppendEntriesResult[A]
   ): UIO[Unit] =
     val client = clients(leaderId)
     val message = RpcMessageCodec.codec[A].encode(response).require.toByteArray

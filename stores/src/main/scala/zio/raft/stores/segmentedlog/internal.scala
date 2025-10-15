@@ -56,7 +56,7 @@ object internal:
   val segmentSuffix = ".log"
 
   class CurrentSegment[A <: Command](
-      ref: ScopedRef[Option[OpenSegment[A]]]
+    ref: ScopedRef[Option[OpenSegment[A]]]
   ):
     def switch(newFile: ZIO[Scope, Nothing, OpenSegment[A]]) =
       ref.set(newFile.asSome).flatMap(_ => get)

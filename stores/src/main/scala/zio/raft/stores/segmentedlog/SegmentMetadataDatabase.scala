@@ -26,14 +26,15 @@ class SegmentMetadataDatabase(environment: Environment, database: Database):
     yield ()
 
   def close(firstIndex: Index, lastIndex: Index, closedAt: Instant) =
-    val program = for
-      key <- ZIO.attempt(indexCodec.encode(firstIndex).require.toByteArray).orDie
-      existingValueBytes <- database.get(key).someOrFail(new Exception("Segment metadata not found")).orDie
-      existingMetadata <- ZIO.attempt(segmentMetadataCodec.decodeValue(BitVector(existingValueBytes)).require).orDie
-      closedMetadata = existingMetadata.copy(status = SegmentStatus.Closed(lastIndex, closedAt))
-      bytes <- ZIO.attempt(segmentMetadataCodec.encode(closedMetadata).require.toByteArray).orDie
-      _ <- database.put(key, bytes).orDie
-    yield ()
+    val program =
+      for
+        key <- ZIO.attempt(indexCodec.encode(firstIndex).require.toByteArray).orDie
+        existingValueBytes <- database.get(key).someOrFail(new Exception("Segment metadata not found")).orDie
+        existingMetadata <- ZIO.attempt(segmentMetadataCodec.decodeValue(BitVector(existingValueBytes)).require).orDie
+        closedMetadata = existingMetadata.copy(status = SegmentStatus.Closed(lastIndex, closedAt))
+        bytes <- ZIO.attempt(segmentMetadataCodec.encode(closedMetadata).require.toByteArray).orDie
+        _ <- database.put(key, bytes).orDie
+      yield ()
 
     environment.transact(program)
 
@@ -67,11 +68,11 @@ end SegmentMetadataDatabase
 
 object SegmentMetadataDatabase:
   case class SegmentMetadata(
-      id: Long,
-      firstIndex: Index,
-      createdAt: Instant,
-      previousTerm: Term,
-      status: SegmentStatus
+    id: Long,
+    firstIndex: Index,
+    createdAt: Instant,
+    previousTerm: Term,
+    status: SegmentStatus
   ):
     def previousIndex: Index = firstIndex.minusOne
 

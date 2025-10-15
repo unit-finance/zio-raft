@@ -26,8 +26,8 @@ class BaseTransducer(ref: Ref[BaseTransducer.State], validateChecksum: Boolean):
     }
 
   @tailrec private def process(
-      results: ChunkBuilder[BaseTransducer.Result],
-      state: BaseTransducer.State
+    results: ChunkBuilder[BaseTransducer.Result],
+    state: BaseTransducer.State
   ): ZIO[Any, Throwable, ChunkBuilder[BaseTransducer.Result]] =
     state match
       case ReadFileHeader(index, bits) =>
@@ -163,33 +163,33 @@ object BaseTransducer:
   case class ReadFileHeader(index: Index, remainder: BitVector) extends State:
     val offset: Long = 0L
   case class ReadRecordType(
-      offset: Long,
-      index: Index,
-      remainder: BitVector,
-      chunkBuilder: ChunkBuilder[Result],
-      crcBuilder: CrcBuilder[BitVector]
+    offset: Long,
+    index: Index,
+    remainder: BitVector,
+    chunkBuilder: ChunkBuilder[Result],
+    crcBuilder: CrcBuilder[BitVector]
   ) extends State
   case class ReadSize(
-      offset: Long,
-      index: Index,
-      remainder: BitVector,
-      chunkBuilder: ChunkBuilder[Result],
-      crcBuilder: CrcBuilder[BitVector]
+    offset: Long,
+    index: Index,
+    remainder: BitVector,
+    chunkBuilder: ChunkBuilder[Result],
+    crcBuilder: CrcBuilder[BitVector]
   ) extends State
   case class ReadBody(
-      offset: Long,
-      index: Index,
-      remainder: BitVector,
-      size: Int,
-      chunkBuilder: ChunkBuilder[Result],
-      crcBuilder: CrcBuilder[BitVector]
+    offset: Long,
+    index: Index,
+    remainder: BitVector,
+    size: Int,
+    chunkBuilder: ChunkBuilder[Result],
+    crcBuilder: CrcBuilder[BitVector]
   ) extends State
   case class ReadChecksum(
-      offset: Long,
-      index: Index,
-      remainder: BitVector,
-      chunkBuilder: ChunkBuilder[Result],
-      crcBuilder: CrcBuilder[BitVector]
+    offset: Long,
+    index: Index,
+    remainder: BitVector,
+    chunkBuilder: ChunkBuilder[Result],
+    crcBuilder: CrcBuilder[BitVector]
   ) extends State
 
   def make[A](firstIndex: Index, validateChecksum: Boolean): ZPipeline[Any, Throwable, Byte, Result] =

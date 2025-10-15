@@ -29,10 +29,10 @@ class ReplicationStatus(val peerStatus: Map[MemberId, PeerReplicationStatus]):
     )
 
   def snapshotResponse(
-      peer: MemberId,
-      now: Instant,
-      responseIndex: Index,
-      done: Boolean
+    peer: MemberId,
+    now: Instant,
+    responseIndex: Index,
+    done: Boolean
   ) =
     peerStatus.get(peer) match
       case Some(PeerReplicationStatus.Snapshot(_, snapshotIndex)) if responseIndex == snapshotIndex =>

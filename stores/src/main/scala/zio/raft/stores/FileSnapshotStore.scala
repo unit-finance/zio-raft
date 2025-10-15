@@ -24,16 +24,16 @@ import zio.nio.Buffer
 import zio.stream.ZStream
 
 class FileSnapshotStore(
-    environment: Environment,
-    database: Database,
-    directory: Path,
-    latest: Ref[Option[(Term, Index, Long)]]
+  environment: Environment,
+  database: Database,
+  directory: Path,
+  latest: Ref[Option[(Term, Index, Long)]]
 ) extends SnapshotStore:
 
   private def saveValue(
-      term: Term,
-      index: Index,
-      status: FileSnapshotStore.SnapshotStatus
+    term: Term,
+    index: Index,
+    status: FileSnapshotStore.SnapshotStatus
   ): ZIO[TransactionScope, Nothing, Unit] =
     for
       key <- ZIO.fromTry(FileSnapshotStore.keyCodec.encode((index, term)).toTry).orDie

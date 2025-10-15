@@ -7,7 +7,7 @@ import zio.stream.ZPipeline
 import zio.{Chunk, Clock, Ref, ZIO}
 
 class RemoveDuplicate[A <: Command](
-    refPreviousMessage: Ref[Option[(Instant, RPCMessage[A])]]
+  refPreviousMessage: Ref[Option[(Instant, RPCMessage[A])]]
 ):
 
   val minHeartbeatInterval = Raft.heartbeartInterval.dividedBy(2)
@@ -25,7 +25,7 @@ class RemoveDuplicate[A <: Command](
           case Some(timestamp, previousMessage) =>
             m match
               case m: AppendEntriesRequest[A]
-                  if previousMessage == m && now.isBefore(timestamp.plus(minHeartbeatInterval)) =>
+                if previousMessage == m && now.isBefore(timestamp.plus(minHeartbeatInterval)) =>
                 ZIO.succeed(false)
               case _: AppendEntriesResult.Failure[A] if previousMessage == m =>
                 ZIO.succeed(false)

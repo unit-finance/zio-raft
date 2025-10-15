@@ -4,23 +4,23 @@ import zio.stream.{Stream, ZStream}
 import zio.{Chunk, Ref, UIO, ZIO}
 
 case class Snapshot(
-    previousIndex: Index,
-    previousTerm: Term,
-    stream: Stream[Nothing, Byte]
+  previousIndex: Index,
+  previousTerm: Term,
+  stream: Stream[Nothing, Byte]
 )
 
 trait SnapshotStore:
   def createNewPartialSnapshot(
-      previousTerm: Term,
-      previousIndex: Index
+    previousTerm: Term,
+    previousIndex: Index
   ): UIO[Unit]
 
   // TODO: return false if the offset doesn't match the current offset
   def writePartial(
-      previousTerm: Term,
-      previousIndex: Index,
-      offset: Long,
-      data: zio.Chunk[Byte]
+    previousTerm: Term,
+    previousIndex: Index,
+    offset: Long,
+    data: zio.Chunk[Byte]
   ): UIO[Boolean]
 
   // save snapshot file, last index and last term and discard any existing snapshot
@@ -45,20 +45,20 @@ object SnapshotStore:
     yield InMemorySnapshotStore(latest, partial)
 
   class InMemorySnapshotStore(
-      latest: Ref[Option[Snapshot]],
-      partial: Ref[Map[(Term, Index), Chunk[Byte]]]
+    latest: Ref[Option[Snapshot]],
+    partial: Ref[Map[(Term, Index), Chunk[Byte]]]
   ) extends SnapshotStore:
     override def createNewPartialSnapshot(
-        previousTerm: Term,
-        previousIndex: Index
+      previousTerm: Term,
+      previousIndex: Index
     ): UIO[Unit] =
       partial.set(Map((previousTerm, previousIndex) -> Chunk.empty))
 
     override def writePartial(
-        previousTerm: Term,
-        previousIndex: Index,
-        offset: Long,
-        data: zio.Chunk[Byte]
+      previousTerm: Term,
+      previousIndex: Index,
+      offset: Long,
+      data: zio.Chunk[Byte]
     ): UIO[Boolean] =
       for
         snapshot <- partial.get
@@ -71,8 +71,8 @@ object SnapshotStore:
       yield true
 
     override def completePartial(
-        previousTerm: Term,
-        previousIndex: Index
+      previousTerm: Term,
+      previousIndex: Index
     ) =
       for
         data <- partial.get
@@ -85,8 +85,8 @@ object SnapshotStore:
       yield snapshot
 
     override def deletePartial(
-        previousTerm: Term,
-        previousIndex: Index
+      previousTerm: Term,
+      previousIndex: Index
     ): UIO[Unit] =
       partial.update(_ - ((previousTerm, previousIndex)))
 

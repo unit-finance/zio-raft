@@ -1,5 +1,8 @@
 name: Scala CI
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     branches: [ main ]
@@ -22,8 +25,6 @@ concurrency:
 
 jobs:
   scala-ci:
-    permissions:
-      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

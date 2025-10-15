@@ -1,0 +1,65 @@
+name: Scala CI
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.scala'
+      - 'build.sbt'
+      - 'project/**'
+      - '.github/workflows/scala-ci.yml'
+      - 'raft/**'
+      - 'raft-zmq/**'
+      - 'stores/**'
+      - 'kvstore/**'
+      - 'zio-lmdb/**'
+      - 'zio1-zmq/**'
+      - 'zio2-zmq/**'
+
+concurrency:
+  group: scala-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  scala-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
+    - name: Setup SBT
+      uses: sbt/setup-sbt@v1
+
+    - name: Cache SBT dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.sbt
+          ~/.ivy2/cache
+          ~/.coursier
+          target
+          project/target
+        key: ${{ runner.os }}-sbt-${{ hashFiles('**/*.sbt', 'project/build.properties', 'project/plugins.sbt') }}
+        restore-keys: |
+          ${{ runner.os }}-sbt-
+
+    - name: Check code formatting
+      run: sbt scalafmtCheck
+
+    - name: Compile projects
+      run: sbt compile
+
+    - name: Compile tests
+      run: sbt Test/compile
+
+    - name: Run tests
+      run: sbt test
+

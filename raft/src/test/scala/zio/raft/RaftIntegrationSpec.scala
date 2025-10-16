@@ -19,7 +19,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
 
   // We use TestLogger instead of ZTestLogger because ZTestLogger can cause duplicated log lines which causes flakiness in our tests.
   class TestLogger extends ZLogger[String, Unit] {
-    var messages: ConcurrentLinkedQueue[String] = new ConcurrentLinkedQueue()
+    val messages: ConcurrentLinkedQueue[String] = new ConcurrentLinkedQueue()
     override def apply(trace: Trace, fiberId: FiberId, logLevel: LogLevel, message: () => String, cause: Cause[Any], context: FiberRefs, spans: List[LogSpan], annotations: Map[String, String]): Unit =
       messages.add(message())
     

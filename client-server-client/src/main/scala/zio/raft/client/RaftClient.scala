@@ -148,7 +148,7 @@ object RaftClient {
               nextRequestId <- RequestIdRef.make
               _ <- transport.connect(address).orDie
               _ <- transport.sendMessage(CreateSession(config.capabilities, nonce)).orDie
-              _ <- ZIO.logInfo("Connecting to cluster...")
+              _ <- ZIO.logInfo(s"Connecting to $address")
             } yield ConnectingNewSession(
               capabilities = config.capabilities,
               nonce = nonce,
@@ -221,12 +221,14 @@ object RaftClient {
                 case NotLeader =>
                   val nextIndex = (currentAddressIndex + 1) % addresses.length
                   val nextAddr = addresses(nextIndex)
+                  val currentAddr = addresses(currentAddressIndex)
                   for {
-                    _ <- ZIO.logInfo(s"Not leader, trying next: $nextAddr")
+                    _ <- ZIO.logInfo(s"Not leader at $currentAddr, trying next: $nextAddr")
                     _ <- transport.disconnect().orDie
                     _ <- transport.connect(nextAddr).orDie
                     newNonce <- Nonce.generate()
                     _ <- transport.sendMessage(CreateSession(capabilities, newNonce)).orDie
+                    _ <- ZIO.logInfo(s"Connecting New Session to $nextAddr")
                     now <- Clock.instant
                   } yield copy(nonce = newNonce, currentAddressIndex = nextIndex, createdAt = now)
 
@@ -256,12 +258,14 @@ object RaftClient {
                 if (elapsed > config.connectionTimeout) {
                   val nextIndex = (currentAddressIndex + 1) % addresses.length
                   val nextAddr = addresses(nextIndex)
+                  val currentAddr = addresses(currentAddressIndex)
                   for {
-                    _ <- ZIO.logWarning(s"Connection timeout, trying next address: $nextAddr")
+                    _ <- ZIO.logWarning(s"Connection timeout at $currentAddr, trying next address: $nextAddr")
                     _ <- transport.disconnect().orDie
                     _ <- transport.connect(nextAddr).orDie
                     newNonce <- Nonce.generate()
                     _ <- transport.sendMessage(CreateSession(capabilities, newNonce)).orDie
+                    _ <- ZIO.logInfo(s"Connecting New Session to $nextAddr")
                     now <- Clock.instant
                   } yield copy(nonce = newNonce, currentAddressIndex = nextIndex, createdAt = now)
                 } else {
@@ -326,7 +330,8 @@ object RaftClient {
           case StreamEvent.ServerMsg(SessionContinued(responseNonce)) =>
             if (nonce == responseNonce) {
               for {
-                _ <- ZIO.logInfo(s"Session continued: $sessionId")
+                currentAddr = addresses(currentAddressIndex)
+                _ <- ZIO.logInfo(s"Session continued: $sessionId at $currentAddr")
                 now <- Clock.instant
                 // Send all pending requests
                 updatedPending <- pendingRequests.resendAll(transport)
@@ -350,12 +355,14 @@ object RaftClient {
                 case NotLeader =>
                   val nextIndex = (currentAddressIndex + 1) % addresses.length
                   val nextAddr = addresses(nextIndex)
+                  val currentAddr = addresses(currentAddressIndex)
                   for {
-                    _ <- ZIO.logInfo(s"Not leader, trying next: $nextAddr")
+                    _ <- ZIO.logInfo(s"Not leader at $currentAddr, trying next: $nextAddr")
                     _ <- transport.disconnect().orDie
                     _ <- transport.connect(nextAddr).orDie
                     newNonce <- Nonce.generate()
                     _ <- transport.sendMessage(ContinueSession(sessionId, newNonce)).orDie
+                    _ <- ZIO.logInfo(s"Connecting Existing Session $sessionId to $nextAddr")
                     now <- Clock.instant
                   } yield copy(nonce = newNonce, currentAddressIndex = nextIndex, createdAt = now)
 
@@ -385,12 +392,14 @@ object RaftClient {
                 if (elapsed > config.connectionTimeout) {
                   val nextIndex = (currentAddressIndex + 1) % addresses.length
                   val nextAddr = addresses(nextIndex)
+                  val currentAddr = addresses(currentAddressIndex)
                   for {
-                    _ <- ZIO.logWarning(s"Connection timeout, trying next address: $nextAddr")
+                    _ <- ZIO.logWarning(s"Connection timeout at $currentAddr, trying next address: $nextAddr")
                     _ <- transport.disconnect().orDie
                     _ <- transport.connect(nextAddr).orDie
                     newNonce <- Nonce.generate()
                     _ <- transport.sendMessage(ContinueSession(sessionId, newNonce)).orDie
+                    _ <- ZIO.logInfo(s"Connecting Existing Session $sessionId to $nextAddr")
                     now <- Clock.instant
                   } yield copy(nonce = newNonce, currentAddressIndex = nextIndex, createdAt = now)
                 } else {
@@ -505,13 +514,15 @@ object RaftClient {
 
           case StreamEvent.ServerMsg(RequestError(NotLeaderRequest, leaderId)) =>
             for {
-              _ <- ZIO.logInfo(s"Not leader, reconnecting")
+              currentAddr = addresses(currentAddressIndex)
+              _ <- ZIO.logInfo(s"Not leader at $currentAddr, reconnecting")
               nonce <- Nonce.generate()
               nextIndex = (currentAddressIndex + 1) % addresses.length
               nextAddr = addresses(nextIndex)
               _ <- transport.disconnect().orDie
               _ <- transport.connect(nextAddr).orDie
               _ <- transport.sendMessage(ContinueSession(sessionId, nonce)).orDie
+              _ <- ZIO.logInfo(s"Connecting Existing Session $sessionId to $nextAddr")
               now <- Clock.instant
             } yield ConnectingExistingSession(
               sessionId = sessionId,

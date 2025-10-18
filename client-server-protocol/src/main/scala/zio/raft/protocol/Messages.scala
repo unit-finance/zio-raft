@@ -216,6 +216,25 @@ case object NotLeader extends RejectionReason
 case object SessionNotFound extends RejectionReason
 
 /**
+ * Server-specific rejection reasons.
+ */
+
+/**
+ * Session creation conflicts with existing session.
+ */
+case object SessionConflict extends RejectionReason
+
+/**
+ * Client is not authorized for this operation.
+ */
+case object NotAuthorized extends RejectionReason
+
+/**
+ * Client capabilities are invalid or unsupported.
+ */
+case object InvalidCapabilities extends RejectionReason
+
+/**
  * Reasons for server-initiated session closure.
  */
 sealed trait SessionCloseReason
@@ -249,6 +268,54 @@ case object NotLeaderRequest extends RequestErrorReason
  * Request payload is malformed or invalid.
  */
 case object InvalidRequest extends RequestErrorReason
+
+/**
+ * Client connection-related error reasons.
+ */
+
+/**
+ * Client is not currently connected to the server.
+ */
+case object NotConnected extends RequestErrorReason
+
+/**
+ * Client connection was closed by the server.
+ */
+case object ConnectionLost extends RequestErrorReason
+
+/**
+ * Client session was closed by the server.
+ */
+case object SessionTerminated extends RequestErrorReason
+
+/**
+ * Server-specific error reasons.
+ */
+
+/**
+ * Protocol version is not supported by the server.
+ */
+case object UnsupportedVersion extends RequestErrorReason
+
+/**
+ * Request payload exceeds server limits.
+ */
+case object PayloadTooLarge extends RequestErrorReason
+
+/**
+ * Server is temporarily unavailable.
+ */
+case object ServiceUnavailable extends RequestErrorReason
+
+/**
+ * Server failed to process the request due to internal error.
+ */
+case object ProcessingFailed extends RequestErrorReason
+
+/**
+ * Request timed out on the server side.
+ */
+case object RequestTimeout extends RequestErrorReason
 
 /**
  * Reasons for client-initiated session closure.

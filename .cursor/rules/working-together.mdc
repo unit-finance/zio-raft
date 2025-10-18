@@ -1,7 +1,7 @@
 ---
 description: For every discussion this pattern should be used
 globs: 
-alwaysApply: true
+alwaysApply: false
 ---
 ---
 title: "Working Together: AI-User Collaboration Pattern"

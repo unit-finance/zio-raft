@@ -20,13 +20,6 @@ package object client {
   val DEFAULT_SESSION_TIMEOUT: Duration = 90.seconds
   val DEFAULT_REQUEST_TIMEOUT: Duration = 10.seconds
 
-  // Pending request tracking for timeout logic
-  case class PendingRequest(
-    request: protocol.ClientRequest,
-    promise: Promise[protocol.RequestErrorReason, scodec.bits.ByteVector],
-    createdAt: java.time.Instant,
-    lastSentAt: java.time.Instant
-  )
 
   // Note: ClientConfig is defined in ClientConfig.scala
   // Note: ClientState is now defined in RaftClient.scala as a functional ADT

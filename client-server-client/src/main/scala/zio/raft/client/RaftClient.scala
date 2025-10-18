@@ -450,7 +450,37 @@ object RaftClient {
         currentAddressIndex: Int
     ) extends ClientState {
       override def stateName: String = s"Connected($sessionId)"
-
+      
+      /**
+       * Helper method to reconnect to a specific address with an existing session.
+       */
+      private def reconnectTo(
+        targetAddressIndex: Int,
+        transport: ZmqClientTransport,
+        logMessage: String
+      ): UIO[ConnectingExistingSession] = {
+        for {
+          _ <- ZIO.logInfo(logMessage)
+          nonce <- Nonce.generate()
+          targetAddr = addresses(targetAddressIndex)
+          _ <- transport.disconnect().orDie
+          _ <- transport.connect(targetAddr).orDie
+          _ <- transport.sendMessage(ContinueSession(sessionId, nonce)).orDie
+          _ <- ZIO.logInfo(s"Connecting Existing Session $sessionId to $targetAddr")
+          now <- Clock.instant
+        } yield ConnectingExistingSession(
+          sessionId = sessionId,
+          capabilities = capabilities,
+          nonce = nonce,
+          addresses = addresses,
+          currentAddressIndex = targetAddressIndex,
+          createdAt = now,
+          serverRequestTracker = serverRequestTracker,
+          nextRequestId = nextRequestId,
+          pendingRequests = pendingRequests
+        )
+      }
+      
       override def handle(
           event: StreamEvent,
           transport: ZmqClientTransport,
@@ -513,55 +543,58 @@ object RaftClient {
             }
 
           case StreamEvent.ServerMsg(RequestError(NotLeaderRequest, leaderId)) =>
-            for {
-              currentAddr = addresses(currentAddressIndex)
-              _ <- ZIO.logInfo(s"Not leader at $currentAddr, reconnecting")
-              nonce <- Nonce.generate()
-              nextIndex = (currentAddressIndex + 1) % addresses.length
-              nextAddr = addresses(nextIndex)
-              _ <- transport.disconnect().orDie
-              _ <- transport.connect(nextAddr).orDie
-              _ <- transport.sendMessage(ContinueSession(sessionId, nonce)).orDie
-              _ <- ZIO.logInfo(s"Connecting Existing Session $sessionId to $nextAddr")
-              now <- Clock.instant
-            } yield ConnectingExistingSession(
-              sessionId = sessionId,
-              capabilities = capabilities,
-              nonce = nonce,
-              addresses = addresses,
-              currentAddressIndex = nextIndex,
-              createdAt = now,
-              serverRequestTracker = serverRequestTracker,
-              nextRequestId = nextRequestId,
-              pendingRequests = pendingRequests
-            )
+            val nextIndex = (currentAddressIndex + 1) % addresses.length
+            val currentAddr = addresses(currentAddressIndex)
+            val nextAddr = addresses(nextIndex)
+            reconnectTo(nextIndex, transport, s"Not leader at $currentAddr, reconnecting to $nextAddr")
 
           case StreamEvent.ServerMsg(RequestError(SessionTerminated, _)) =>
             ZIO.dieMessage(s"Session terminated by server for session $sessionId")
+          
+          case StreamEvent.ServerMsg(RequestError(InvalidRequest, _)) =>
+            ZIO.logWarning("Received InvalidRequest error").as(this)
+          
+          case StreamEvent.ServerMsg(RequestError(NotConnected, _)) =>
+            ZIO.logWarning("Received NotConnected error").as(this)
+          
+          case StreamEvent.ServerMsg(RequestError(ConnectionLost, _)) =>
+            ZIO.logWarning("Received ConnectionLost error").as(this)
+          
+          case StreamEvent.ServerMsg(RequestError(UnsupportedVersion, _)) =>
+            ZIO.dieMessage(s"Unsupported protocol version for session $sessionId")
+          
+          case StreamEvent.ServerMsg(RequestError(PayloadTooLarge, _)) =>
+            ZIO.logWarning("Received PayloadTooLarge error").as(this)
+          
+          case StreamEvent.ServerMsg(RequestError(ServiceUnavailable, _)) =>
+            ZIO.logWarning("Received ServiceUnavailable error").as(this)
+          
+          case StreamEvent.ServerMsg(RequestError(ProcessingFailed, _)) =>
+            ZIO.logWarning("Received ProcessingFailed error").as(this)
+          
+          case StreamEvent.ServerMsg(RequestError(RequestTimeout, _)) =>
+            ZIO.logWarning("Received RequestTimeout error").as(this)
 
-          case StreamEvent.ServerMsg(RequestError(reason, _)) =>
-            ZIO.logWarning(s"Request error: $reason").as(this)
-
-          case StreamEvent.ServerMsg(SessionClosed(reason, _)) =>
-            for {
-              _ <- ZIO.logInfo(s"Session closed: $reason, reconnecting")
-              nonce <- Nonce.generate()
-              currentAddr = addresses(currentAddressIndex)
-              _ <- transport.disconnect().orDie
-              _ <- transport.connect(currentAddr).orDie
-              _ <- transport.sendMessage(ContinueSession(sessionId, nonce)).orDie
-              now <- Clock.instant
-            } yield ConnectingExistingSession(
-              sessionId = sessionId,
-              capabilities = capabilities,
-              nonce = nonce,
-              addresses = addresses,
-              currentAddressIndex = currentAddressIndex,
-              createdAt = now,
-              serverRequestTracker = serverRequestTracker,
-              nextRequestId = nextRequestId,
-              pendingRequests = pendingRequests
-            )
+          case StreamEvent.ServerMsg(SessionClosed(Shutdown, _)) =>
+            ZIO.logInfo("Server shutdown, session closed").as(Disconnected)
+          
+          case StreamEvent.ServerMsg(SessionClosed(NotLeaderAnymore, _)) =>
+            val nextIndex = (currentAddressIndex + 1) % addresses.length
+            val currentAddr = addresses(currentAddressIndex)
+            val nextAddr = addresses(nextIndex)
+            reconnectTo(nextIndex, transport, s"Session closed: not leader anymore at $currentAddr, trying next: $nextAddr")
+          
+          case StreamEvent.ServerMsg(SessionClosed(SessionError, _)) =>
+            val currentAddr = addresses(currentAddressIndex)
+            reconnectTo(currentAddressIndex, transport, s"Session closed: session error, reconnecting to same address: $currentAddr")
+          
+          case StreamEvent.ServerMsg(SessionClosed(ConnectionClosed, _)) =>
+            val currentAddr = addresses(currentAddressIndex)
+            reconnectTo(currentAddressIndex, transport, s"Session closed: connection closed, reconnecting to same address: $currentAddr")
+          
+          case StreamEvent.ServerMsg(SessionClosed(SessionTimeout, _)) =>
+            val currentAddr = addresses(currentAddressIndex)
+            reconnectTo(currentAddressIndex, transport, s"Session closed: timeout, reconnecting to same address: $currentAddr")
 
           case StreamEvent.KeepAliveTick =>
             for {
@@ -572,7 +605,7 @@ object RaftClient {
           case StreamEvent.TimeoutCheck =>
             for {
               now <- Clock.instant
-              newPending <- pendingRequests.resendExpired(transport, now, ClientConfig.REQUEST_TIMEOUT)
+              newPending <- pendingRequests.resendExpired(transport, now, config.requestTimeout)
             } yield copy(pendingRequests = newPending)
 
           case StreamEvent.ServerMsg(SessionCreated(_, _)) =>
@@ -670,8 +703,6 @@ object RaftClient {
 
   private class ZmqClientTransportLive(socket: ZSocket, lastAddressRef: Ref[Option[String]]
   ) extends ZmqClientTransport {
-    private val timeoutConnectionClosed = ???
-
     override def connect(address: String): ZIO[Any, Throwable, Unit] =
       for {
         _ <- lastAddressRef.set(Some(address))

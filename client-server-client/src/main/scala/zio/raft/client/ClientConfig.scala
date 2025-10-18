@@ -9,7 +9,8 @@ case class ClientConfig(
   clusterAddresses: List[String],
   capabilities: Map[String, String],
   connectionTimeout: Duration = ClientConfig.DEFAULT_CONNECTION_TIMEOUT,
-  keepAliveInterval: Duration = ClientConfig.DEFAULT_KEEP_ALIVE_INTERVAL
+  keepAliveInterval: Duration = ClientConfig.DEFAULT_KEEP_ALIVE_INTERVAL,
+  requestTimeout: Duration = ClientConfig.DEFAULT_REQUEST_TIMEOUT
 ) {
   
   def validate(): Either[String, Unit] = {
@@ -27,7 +28,7 @@ object ClientConfig {
   
   val DEFAULT_CONNECTION_TIMEOUT: Duration = 5.seconds
   val DEFAULT_KEEP_ALIVE_INTERVAL: Duration = 30.seconds
-  val REQUEST_TIMEOUT: Duration = 10.seconds
+  val DEFAULT_REQUEST_TIMEOUT: Duration = 10.seconds
   
   def make(addresses: List[String], capabilities: Map[String, String]): ClientConfig = 
     ClientConfig(

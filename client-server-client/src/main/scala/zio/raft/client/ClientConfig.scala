@@ -1,12 +1,13 @@
 package zio.raft.client
 
 import zio._
+import zio.raft.protocol.MemberId
 
 /**
  * Client configuration for ZIO Raft client-server communication.
  */
 case class ClientConfig(
-  clusterAddresses: List[String],
+  clusterMembers: Map[MemberId, String],
   capabilities: Map[String, String],
   connectionTimeout: Duration = ClientConfig.DEFAULT_CONNECTION_TIMEOUT,
   keepAliveInterval: Duration = ClientConfig.DEFAULT_KEEP_ALIVE_INTERVAL,
@@ -14,8 +15,8 @@ case class ClientConfig(
 ) {
   
   def validate(): Either[String, Unit] = {
-    if (clusterAddresses.isEmpty) {
-      Left("clusterAddresses cannot be empty")
+    if (clusterMembers.isEmpty) {
+      Left("clusterMembers cannot be empty")
     } else if (capabilities.isEmpty) {
       Left("capabilities cannot be empty")
     } else {
@@ -30,9 +31,9 @@ object ClientConfig {
   val DEFAULT_KEEP_ALIVE_INTERVAL: Duration = 30.seconds
   val DEFAULT_REQUEST_TIMEOUT: Duration = 10.seconds
   
-  def make(addresses: List[String], capabilities: Map[String, String]): ClientConfig = 
+  def make(members: Map[MemberId, String], capabilities: Map[String, String]): ClientConfig = 
     ClientConfig(
-      clusterAddresses = addresses,
+      clusterMembers = members,
       capabilities = capabilities
     )
   

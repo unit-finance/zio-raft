@@ -8,7 +8,6 @@ import java.time.Instant
 import zio.raft.client.RaftClient.ZmqClientTransport
 import zio.zmq.{ZContext, ZSocket}
 import zio.raft.protocol.Codecs.{clientMessageCodec, serverMessageCodec}
-import zio.raft.protocol.{SessionClosed, ConnectionClosed}
 
 /** Main RaftClient implementation using pure functional state machine.
   *
@@ -252,9 +251,9 @@ object RaftClient {
           case StreamEvent.TimeoutCheck =>
             for {
               now <- Clock.instant
-              elapsed = java.time.Duration.between(createdAt, now)
+              elapsed = Duration.fromInterval(createdAt, now)
               nextState <-
-                if (elapsed.compareTo(java.time.Duration.ofSeconds(config.connectionTimeout.toSeconds)) > 0) {
+                if (elapsed > config.connectionTimeout) {
                   val nextIndex = (currentAddressIndex + 1) % addresses.length
                   val nextAddr = addresses(nextIndex)
                   for {
@@ -293,8 +292,11 @@ object RaftClient {
               _ <- transport.disconnect().orDie
             } yield Disconnected
 
+          case StreamEvent.Action(ClientAction.Connect) => 
+            ZIO.logWarning("Received Connect while connecting, ignoring").as(this)
+
           case StreamEvent.KeepAliveTick =>
-            ZIO.succeed(this)
+            ZIO.succeed(this)                    
         }
       }
     }
@@ -378,9 +380,9 @@ object RaftClient {
           case StreamEvent.TimeoutCheck =>
             for {
               now <- Clock.instant
-              elapsed = java.time.Duration.between(createdAt, now)
+              elapsed = Duration.fromInterval(createdAt, now)
               nextState <-
-                if (elapsed.compareTo(java.time.Duration.ofSeconds(config.connectionTimeout.toSeconds)) > 0) {
+                if (elapsed > config.connectionTimeout) {
                   val nextIndex = (currentAddressIndex + 1) % addresses.length
                   val nextAddr = addresses(nextIndex)
                   for {
@@ -419,6 +421,9 @@ object RaftClient {
               _ <- transport.disconnect().orDie
             } yield Disconnected
 
+          case StreamEvent.Action(ClientAction.Connect) =>
+            ZIO.logWarning("Received Connect while connecting, ignoring").as(this)
+
           case StreamEvent.KeepAliveTick =>
             ZIO.succeed(this)
         }
@@ -450,6 +455,9 @@ object RaftClient {
               _ <- transport.disconnect().orDie
               _ <- ZIO.logInfo("Disconnected")
             } yield Disconnected
+
+          case StreamEvent.Action(ClientAction.Connect) =>
+            ZIO.logWarning("Received Connect while connected, ignoring").as(this)
 
           case StreamEvent.Action(ClientAction.SubmitCommand(payload, promise)) =>
             for {
@@ -607,8 +615,8 @@ object RaftClient {
     def resendExpired(transport: ZmqClientTransport, currentTime: Instant, timeout: Duration): UIO[PendingRequests] = {
       val timeoutSeconds = timeout.toSeconds
       ZIO.foldLeft(requests.toList)(this) { case (pending, (requestId, data)) =>
-        val elapsed = java.time.Duration.between(data.lastSentAt, currentTime)
-        if (elapsed.compareTo(java.time.Duration.ofSeconds(timeoutSeconds)) > 0) {
+        val elapsed = Duration.fromInterval(data.lastSentAt, currentTime)
+        if (elapsed > timeout) {
           val request = ClientRequest(requestId, data.payload, currentTime)
           for {
             _ <- transport.sendMessage(request).orDie

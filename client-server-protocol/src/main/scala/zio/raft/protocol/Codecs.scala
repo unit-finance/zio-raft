@@ -131,10 +131,8 @@ object Codecs {
   implicit val rejectionReasonCodec: Codec[RejectionReason] = {
     discriminated[RejectionReason].by(uint8)
       .subcaseP(1) { case NotLeader => NotLeader } (provide(NotLeader))
-      .subcaseP(2) { case SessionNotFound => SessionNotFound } (provide(SessionNotFound))
-      .subcaseP(3) { case SessionConflict => SessionConflict } (provide(SessionConflict))
-      .subcaseP(4) { case NotAuthorized => NotAuthorized } (provide(NotAuthorized))
-      .subcaseP(5) { case InvalidCapabilities => InvalidCapabilities } (provide(InvalidCapabilities))
+      .subcaseP(2) { case SessionNotFound => SessionNotFound } (provide(SessionNotFound))      
+      .subcaseP(3) { case InvalidCapabilities => InvalidCapabilities } (provide(InvalidCapabilities))
   }
 
   /**

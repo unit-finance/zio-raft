@@ -47,6 +47,19 @@ package object client {
     }
   }
   
+  /**
+   * Wrapper for RequestId Ref to avoid confusion with updateAndGet.
+   * Starts from 0 and increments with .next.
+   */
+  case class RequestIdRef(ref: Ref[protocol.RequestId]) {
+    def next: UIO[protocol.RequestId] = ref.updateAndGet(_.next)
+  }
+  
+  object RequestIdRef {
+    def make: UIO[RequestIdRef] =
+      Ref.make(protocol.RequestId.fromLong(0L)).map(RequestIdRef(_))
+  }
+  
   // Client actions for stream-based processing
   sealed trait ClientAction
   

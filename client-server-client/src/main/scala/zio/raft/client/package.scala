@@ -53,4 +53,18 @@ package object client {
       copy(lastAcknowledgedRequestId = requestId)
     }
   }
+  
+  // Client actions for stream-based processing
+  sealed trait ClientAction
+  
+  object ClientAction {
+    case object Connect extends ClientAction
+    case object Disconnect extends ClientAction
+    case class SubmitCommand(
+      payload: scodec.bits.ByteVector,
+      promise: Promise[Throwable, scodec.bits.ByteVector]
+    ) extends ClientAction
+    case class AcknowledgeServerRequest(requestId: protocol.RequestId) extends ClientAction
+    case class ProcessServerMessage(message: protocol.ServerMessage) extends ClientAction
+  }
 }

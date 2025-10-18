@@ -235,7 +235,7 @@ object ClientState {
             requestId <- nextRequestId.updateAndGet(_.next)
             now <- Clock.instant
             request = ClientRequest(requestId, payload, now)
-            newPending = pendingRequests.add(requestId, promise, now)
+            newPending = pendingRequests.add(requestId, payload, promise, now)
           } yield copy(pendingRequests = newPending)
         
         case StreamEvent.TimeoutCheck =>
@@ -347,7 +347,7 @@ object ClientState {
             requestId <- nextRequestId.updateAndGet(_.next)
             now <- Clock.instant
             request = ClientRequest(requestId, payload, now)
-            newPending = pendingRequests.add(requestId, promise, now)
+            newPending = pendingRequests.add(requestId, payload, promise, now)
           } yield copy(pendingRequests = newPending)
         
         case StreamEvent.TimeoutCheck =>
@@ -416,7 +416,7 @@ object ClientState {
             now <- Clock.instant
             request = ClientRequest(requestId, payload, now)
             _ <- transport.sendMessage(request).orDie
-            newPending = pendingRequests.add(requestId, promise, now)
+            newPending = pendingRequests.add(requestId, payload, promise, now)
           } yield copy(pendingRequests = newPending)
         
         case StreamEvent.ServerMsg(ClientResponse(requestId, result)) =>
@@ -529,8 +529,8 @@ object ClientState {
 case class PendingRequests(
   requests: Map[RequestId, PendingRequestData]
 ) {
-  def add(requestId: RequestId, promise: Promise[Throwable, ByteVector], sentAt: Instant): PendingRequests =
-    copy(requests = requests.updated(requestId, PendingRequestData(promise, sentAt, sentAt)))
+  def add(requestId: RequestId, payload: ByteVector, promise: Promise[Throwable, ByteVector], sentAt: Instant): PendingRequests =
+    copy(requests = requests.updated(requestId, PendingRequestData(payload, promise, sentAt, sentAt)))
   
   def complete(requestId: RequestId, result: ByteVector): Option[PendingRequests] =
     requests.get(requestId).map { data =>
@@ -545,8 +545,9 @@ case class PendingRequests(
     ZIO.foreachDiscard(requests.toList) { case (requestId, data) =>
       for {
         now <- Clock.instant
-        request = ClientRequest(requestId, ByteVector.empty, now) // Payload not stored, will be reconstructed
+        request = ClientRequest(requestId, data.payload, now)
         _ <- transport.sendMessage(request).orDie
+        _ <- ZIO.logDebug(s"Resending pending request: $requestId")
       } yield ()
     }
   
@@ -559,7 +560,7 @@ case class PendingRequests(
       val elapsed = java.time.Duration.between(data.lastSentAt, currentTime)
       if (elapsed.compareTo(java.time.Duration.ofSeconds(timeoutSeconds)) > 0) {
         for {
-          request = ClientRequest(requestId, ByteVector.empty, currentTime) // Payload not stored
+          request = ClientRequest(requestId, data.payload, currentTime)
           _ <- transport.sendMessage(request).orDie
           _ <- ZIO.logDebug(s"Resending timed out request: $requestId")
           updatedData = data.copy(lastSentAt = currentTime)
@@ -572,6 +573,7 @@ case class PendingRequests(
 }
 
 case class PendingRequestData(
+  payload: ByteVector,
   promise: Promise[Throwable, ByteVector],
   createdAt: Instant,
   lastSentAt: Instant

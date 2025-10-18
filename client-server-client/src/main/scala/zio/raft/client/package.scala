@@ -44,13 +44,7 @@ package object client {
     lastSentAt: java.time.Instant
   )
 
-  // Client configuration
-  case class ClientConfig(
-    requestTimeout: Duration = DEFAULT_REQUEST_TIMEOUT,
-    keepAliveInterval: Duration = DEFAULT_KEEP_ALIVE_INTERVAL,
-    connectionTimeout: Duration = DEFAULT_CONNECTION_TIMEOUT,
-    sessionTimeout: Duration = DEFAULT_SESSION_TIMEOUT
-  )
+  // Note: ClientConfig is defined in ClientConfig.scala
 
   // Client connection state with request management
   case class ClientState(

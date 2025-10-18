@@ -152,8 +152,7 @@ object Codecs {
    */
   implicit val closeReasonCodec: Codec[CloseReason] = {
     discriminated[CloseReason].by(uint8)
-      .subcaseP(1) { case ClientShutdown => ClientShutdown } (provide(ClientShutdown))
-      .subcaseP(2) { case SwitchingServer => SwitchingServer } (provide(SwitchingServer))
+      .subcaseP(1) { case CloseReason.ClientShutdown => CloseReason.ClientShutdown } (provide(CloseReason.ClientShutdown))
   }
 
   // ============================================================================

@@ -14,113 +14,12 @@ import java.time.Instant
  * - Request state management during connection changes
  * - Request completion and error handling
  */
-trait RetryManager {
-  
-  /**
-   * Add a pending request for tracking.
-   */
-  def addPendingRequest(
-    request: ClientRequest,
-    promise: Promise[RequestErrorReason, ByteVector]
-  ): UIO[Unit]
-  
-  /**
-   * Check if a request is currently pending.
-   */
-  def hasPendingRequest(requestId: RequestId): UIO[Boolean]
-  
-  /**
-   * Complete a pending request with success response.
-   */
-  def completePendingRequest(requestId: RequestId, response: ByteVector): UIO[Unit]
-  
-  /**
-   * Complete a pending request with error.
-   */
-  def completePendingRequestWithError(requestId: RequestId, error: RequestErrorReason): UIO[Unit]
-  
-  /**
-   * Update last sent timestamp for a request.
-   */
-  def updateLastSent(requestId: RequestId, sentAt: Instant): UIO[Unit]
-  
-  /**
-   * Get last sent timestamp for a request.
-   */
-  def getLastSent(requestId: RequestId): UIO[Option[Instant]]
-  
-  /**
-   * Get requests that have timed out.
-   */
-  def getTimedOutRequests(currentTime: Instant, timeout: Duration): UIO[List[RequestId]]
-  
-  /**
-   * Resend a timed out request (update timestamp).
-   */
-  def resendRequest(requestId: RequestId, resentAt: Instant): UIO[Boolean]
-  
-  /**
-   * Handle connection state change.
-   * 
-   * @param oldState Previous connection state
-   * @param newState New connection state
-   * @param timestamp Optional timestamp for state change
-   * @return List of requests to resend (when transitioning to Connected)
-   */
-  def handleStateChange(
-    oldState: ClientConnectionState,
-    newState: ClientConnectionState,
-    timestamp: Instant = Instant.now()
-  ): UIO[List[ClientRequest]]
-  
-  /**
-   * Handle a new request based on connection state.
-   */
-  def handleRequest(
-    request: ClientRequest,
-    promise: Promise[RequestErrorReason, ByteVector],
-    connectionState: ClientConnectionState
-  ): UIO[RequestAction]
-  
-  /**
-   * Get all pending requests.
-   */
-  def getAllPendingRequests(): UIO[Map[RequestId, PendingRequest]]
-  
-  /**
-   * Clear all pending requests (with optional error).
-   */
-  def clearAllPendingRequests(error: Option[RequestErrorReason] = None): UIO[Unit]
-}
-
-object RetryManager {
-  
-  /**
-   * Create a RetryManager with the given configuration.
-   */
-  def make(config: ClientConfig): UIO[RetryManager] = 
-    for {
-      pendingRequests <- Ref.make(Map.empty[RequestId, PendingRequest])
-    } yield new RetryManagerImpl(pendingRequests, config)
-  
-  /**
-   * Create a RetryManager for testing.
-   */
-  def create(): RetryManager = {
-    // Test implementation
-    new RetryManagerTestImpl()
-  }
-}
-
-/**
- * Internal implementation of RetryManager.
- */
-private class RetryManagerImpl(
+class RetryManager private (
   pendingRequests: Ref[Map[RequestId, PendingRequest]],
   config: ClientConfig
-) extends RetryManager {
+) {
   
-  override def addPendingRequest(
+  def addPendingRequest(
     request: ClientRequest,
     promise: Promise[RequestErrorReason, ByteVector]
   ): UIO[Unit] = 
@@ -130,10 +29,10 @@ private class RetryManagerImpl(
       _ <- pendingRequests.update(_.updated(request.requestId, pendingRequest))
     } yield ()
   
-  override def hasPendingRequest(requestId: RequestId): UIO[Boolean] = 
+  def hasPendingRequest(requestId: RequestId): UIO[Boolean] = 
     pendingRequests.get.map(_.contains(requestId))
   
-  override def completePendingRequest(requestId: RequestId, response: ByteVector): UIO[Unit] = 
+  def completePendingRequest(requestId: RequestId, response: ByteVector): UIO[Unit] = 
     for {
       requestsMap <- pendingRequests.get
       _ <- requestsMap.get(requestId) match {
@@ -147,7 +46,7 @@ private class RetryManagerImpl(
       }
     } yield ()
   
-  override def completePendingRequestWithError(requestId: RequestId, error: RequestErrorReason): UIO[Unit] = 
+  def completePendingRequestWithError(requestId: RequestId, error: RequestErrorReason): UIO[Unit] = 
     for {
       requestsMap <- pendingRequests.get
       _ <- requestsMap.get(requestId) match {
@@ -161,7 +60,7 @@ private class RetryManagerImpl(
       }
     } yield ()
   
-  override def updateLastSent(requestId: RequestId, sentAt: Instant): UIO[Unit] = 
+  def updateLastSent(requestId: RequestId, sentAt: Instant): UIO[Unit] = 
     pendingRequests.update { requestsMap =>
       requestsMap.get(requestId) match {
         case Some(pendingRequest) =>
@@ -172,10 +71,10 @@ private class RetryManagerImpl(
       }
     }
   
-  override def getLastSent(requestId: RequestId): UIO[Option[Instant]] = 
+  def getLastSent(requestId: RequestId): UIO[Option[Instant]] = 
     pendingRequests.get.map(_.get(requestId).map(_.lastSentAt))
   
-  override def getTimedOutRequests(currentTime: Instant, timeout: Duration): UIO[List[RequestId]] = 
+  def getTimedOutRequests(currentTime: Instant, timeout: Duration): UIO[List[RequestId]] = 
     for {
       requestsMap <- pendingRequests.get
       timedOut = requestsMap.filter { case (_, pendingRequest) =>
@@ -184,7 +83,7 @@ private class RetryManagerImpl(
       }.keys.toList
     } yield timedOut
   
-  override def resendRequest(requestId: RequestId, resentAt: Instant): UIO[Boolean] = 
+  def resendRequest(requestId: RequestId, resentAt: Instant): UIO[Boolean] = 
     pendingRequests.modify { requestsMap =>
       requestsMap.get(requestId) match {
         case Some(pendingRequest) =>
@@ -195,7 +94,7 @@ private class RetryManagerImpl(
       }
     }
   
-  override def handleStateChange(
+  def handleStateChange(
     oldState: ClientConnectionState,
     newState: ClientConnectionState,
     timestamp: Instant
@@ -232,7 +131,7 @@ private class RetryManagerImpl(
     }
   }
   
-  override def handleRequest(
+  def handleRequest(
     request: ClientRequest,
     promise: Promise[RequestErrorReason, ByteVector],
     connectionState: ClientConnectionState
@@ -258,10 +157,10 @@ private class RetryManagerImpl(
     }
   }
   
-  override def getAllPendingRequests(): UIO[Map[RequestId, PendingRequest]] = 
+  def getAllPendingRequests(): UIO[Map[RequestId, PendingRequest]] = 
     pendingRequests.get
   
-  override def clearAllPendingRequests(error: Option[RequestErrorReason]): UIO[Unit] = 
+  def clearAllPendingRequests(error: Option[RequestErrorReason]): UIO[Unit] = 
     for {
       requestsMap <- pendingRequests.get
       _ <- error match {
@@ -276,57 +175,15 @@ private class RetryManagerImpl(
     } yield ()
 }
 
-/**
- * Test implementation for RetryManager.
- */
-private class RetryManagerTestImpl extends RetryManager {
+object RetryManager {
   
-  override def addPendingRequest(
-    request: ClientRequest,
-    promise: Promise[RequestErrorReason, ByteVector]
-  ): UIO[Unit] = 
-    ZIO.unit
-  
-  override def hasPendingRequest(requestId: RequestId): UIO[Boolean] = 
-    ZIO.succeed(false)
-  
-  override def completePendingRequest(requestId: RequestId, response: ByteVector): UIO[Unit] = 
-    ZIO.unit
-  
-  override def completePendingRequestWithError(requestId: RequestId, error: RequestErrorReason): UIO[Unit] = 
-    ZIO.unit
-  
-  override def updateLastSent(requestId: RequestId, sentAt: Instant): UIO[Unit] = 
-    ZIO.unit
-  
-  override def getLastSent(requestId: RequestId): UIO[Option[Instant]] = 
-    ZIO.succeed(None)
-  
-  override def getTimedOutRequests(currentTime: Instant, timeout: Duration): UIO[List[RequestId]] = 
-    ZIO.succeed(List.empty)
-  
-  override def resendRequest(requestId: RequestId, resentAt: Instant): UIO[Boolean] = 
-    ZIO.succeed(false)
-  
-  override def handleStateChange(
-    oldState: ClientConnectionState,
-    newState: ClientConnectionState,
-    timestamp: Instant
-  ): UIO[List[ClientRequest]] = 
-    ZIO.succeed(List.empty)
-  
-  override def handleRequest(
-    request: ClientRequest,
-    promise: Promise[RequestErrorReason, ByteVector],
-    connectionState: ClientConnectionState
-  ): UIO[RequestAction] = 
-    ZIO.succeed(RejectRequest)
-  
-  override def getAllPendingRequests(): UIO[Map[RequestId, PendingRequest]] = 
-    ZIO.succeed(Map.empty)
-  
-  override def clearAllPendingRequests(error: Option[RequestErrorReason]): UIO[Unit] = 
-    ZIO.unit
+  /**
+   * Create a RetryManager with the given configuration.
+   */
+  def make(config: ClientConfig): UIO[RetryManager] = 
+    for {
+      pendingRequests <- Ref.make(Map.empty[RequestId, PendingRequest])
+    } yield new RetryManager(pendingRequests, config)
 }
 
 // RequestAction type is defined in ConnectionManager.scala

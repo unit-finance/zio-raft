@@ -13,92 +13,14 @@ import zio.raft.protocol._
  * - Client error notification
  * - System health monitoring
  */
-trait ErrorHandler {
-  
-  /**
-   * Handle session management errors.
-   */
-  def handleSessionError(
-    routingId: zio.zmq.RoutingId,
-    error: SessionError,
-    context: SessionContext
-  ): UIO[Unit]
-  
-  /**
-   * Handle client message processing errors.
-   */
-  def handleMessageError(
-    routingId: zio.zmq.RoutingId,
-    error: MessageError,
-    context: MessageContext
-  ): UIO[Unit]
-  
-  /**
-   * Handle transport errors.
-   */
-  def handleTransportError(
-    error: TransportError,
-    context: TransportContext
-  ): UIO[Unit]
-  
-  /**
-   * Handle Raft integration errors.
-   */
-  def handleRaftError(
-    error: RaftError,
-    context: RaftContext
-  ): UIO[Unit]
-  
-  /**
-   * Handle timeout scenarios.
-   */
-  def handleTimeout(
-    timeoutType: TimeoutType,
-    context: TimeoutContext
-  ): UIO[Unit]
-  
-  /**
-   * Get error statistics.
-   */
-  def getErrorStats(): UIO[ErrorStats]
-  
-  /**
-   * Check system health based on error patterns.
-   */
-  def getSystemHealth(): UIO[SystemHealth]
-}
-
-object ErrorHandler {
-  
-  /**
-   * Create an ErrorHandler with the given dependencies.
-   */
-  def make(
-    clientHandler: ClientHandler,
-    sessionManager: SessionManager,
-    config: ServerConfig
-  ): UIO[ErrorHandler] = 
-    for {
-      errorStats <- Ref.make(ErrorStats.empty)
-    } yield new ErrorHandlerImpl(
-      clientHandler,
-      sessionManager,
-      errorStats,
-      config
-    )
-}
-
-/**
- * Internal implementation of ErrorHandler.
- */
-private class ErrorHandlerImpl(
+class ErrorHandler private (
   clientHandler: ClientHandler,
   sessionManager: SessionManager,
   errorStats: Ref[ErrorStats],
   config: ServerConfig
-) extends ErrorHandler {
+) {
   
-  override def handleSessionError(
+  def handleSessionError(
     routingId: zio.zmq.RoutingId,
     error: SessionError,
     context: SessionContext
@@ -143,7 +65,7 @@ private class ErrorHandlerImpl(
       }
     } yield ()
   
-  override def handleMessageError(
+  def handleMessageError(
     routingId: zio.zmq.RoutingId,
     error: MessageError,
     context: MessageContext
@@ -191,7 +113,7 @@ private class ErrorHandlerImpl(
       }
     } yield ()
   
-  override def handleTransportError(
+  def handleTransportError(
     error: TransportError,
     context: TransportContext
   ): UIO[Unit] = 
@@ -226,7 +148,7 @@ private class ErrorHandlerImpl(
       }
     } yield ()
   
-  override def handleRaftError(
+  def handleRaftError(
     error: RaftError,
     context: RaftContext
   ): UIO[Unit] = 
@@ -279,7 +201,7 @@ private class ErrorHandlerImpl(
       }
     } yield ()
   
-  override def handleTimeout(
+  def handleTimeout(
     timeoutType: TimeoutType,
     context: TimeoutContext
   ): UIO[Unit] = 
@@ -322,10 +244,10 @@ private class ErrorHandlerImpl(
       }
     } yield ()
   
-  override def getErrorStats(): UIO[ErrorStats] = 
+  def getErrorStats(): UIO[ErrorStats] = 
     errorStats.get
   
-  override def getSystemHealth(): UIO[SystemHealth] = 
+  def getSystemHealth(): UIO[SystemHealth] = 
     for {
       stats <- errorStats.get
       now <- Clock.instant
@@ -356,6 +278,26 @@ private class ErrorHandlerImpl(
       now <- Clock.instant
       _ <- errorStats.update(_.recordError(category, error, now))
     } yield ()
+}
+
+object ErrorHandler {
+  
+  /**
+   * Create an ErrorHandler with the given dependencies.
+   */
+  def make(
+    clientHandler: ClientHandler,
+    sessionManager: SessionManager,
+    config: ServerConfig
+  ): UIO[ErrorHandler] = 
+    for {
+      errorStats <- Ref.make(ErrorStats.empty)
+    } yield new ErrorHandler(
+      clientHandler,
+      sessionManager,
+      errorStats,
+      config
+    )
 }
 
 /**

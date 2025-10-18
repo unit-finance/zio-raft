@@ -15,119 +15,28 @@ import zio.raft.protocol._
  * Produces connection state-aware actions and maintains
  * a separate stream for server-initiated requests.
  */
-trait ActionStream {
-  
-  /**
-   * Network message stream from ZeroMQ.
-   */
-  def networkMessageStream: ZStream[Any, Throwable, ClientAction]
-  
-  /**
-   * User client request stream.
-   */
-  def userRequestStream: ZStream[Any, Throwable, ClientAction]
-  
-  /**
-   * Timer event stream (timeouts, keep-alives).
-   */
-  def timerStream: ZStream[Any, Nothing, ClientAction]
-  
-  /**
-   * Unified action stream merging all event sources.
-   */
-  def unifiedStream: ZStream[Any, Throwable, ClientAction]
-  
-  /**
-   * Server-initiated request stream for user consumption.
-   */
-  def serverInitiatedRequestStream: ZStream[Any, Throwable, ServerRequest]
-  
-  /**
-   * Process a single client action.
-   */
-  def processAction(action: ClientAction): UIO[ActionResult]
-  
-  /**
-   * Get network event stream.
-   */
-  def getNetworkEventStream(): ZStream[Any, Throwable, ClientAction]
-  
-  /**
-   * Get user request stream.
-   */
-  def getUserRequestStream(): ZStream[Any, Throwable, ClientAction]
-  
-  /**
-   * Get timer event stream.  
-   */
-  def getTimerEventStream(): ZStream[Any, Nothing, ClientAction]
-  
-  /**
-   * Get unified action stream.
-   */
-  def getUnifiedActionStream(): ZStream[Any, Throwable, ClientAction]
-  
-  /**
-   * Simulate stream error for testing.
-   */
-  def simulateStreamError(): UIO[Unit]
-}
-
-object ActionStream {
-  
-  /**
-   * Create an ActionStream with the given dependencies.
-   */
-  def make(
-    connectionManager: ConnectionManager,
-    zmqMessageStream: ZStream[Any, Throwable, ServerMessage],
-    config: ClientConfig
-  ): UIO[ActionStream] = 
-    for {
-      userRequestQueue <- Queue.unbounded[UserClientRequestAction]
-      serverRequestQueue <- Queue.unbounded[ServerRequest]
-    } yield new ActionStreamImpl(
-      connectionManager,
-      zmqMessageStream,
-      userRequestQueue,
-      serverRequestQueue,
-      config
-    )
-  
-  /**
-   * Create an ActionStream for testing.
-   */
-  def create(): ActionStream = {
-    // Test implementation
-    new ActionStreamTestImpl()
-  }
-}
-
-/**
- * Internal implementation of ActionStream.
- */
-private class ActionStreamImpl(
+class ActionStream private (
   connectionManager: ConnectionManager,
   zmqMessageStream: ZStream[Any, Throwable, ServerMessage],
   userRequestQueue: Queue[UserClientRequestAction],
   serverRequestQueue: Queue[ServerRequest],
   config: ClientConfig
-) extends ActionStream {
+) {
   
-  override def networkMessageStream: ZStream[Any, Throwable, ClientAction] = 
+  def networkMessageStream: ZStream[Any, Throwable, ClientAction] = 
     zmqMessageStream.map(NetworkMessageAction(_))
   
-  override def userRequestStream: ZStream[Any, Throwable, ClientAction] = 
+  def userRequestStream: ZStream[Any, Throwable, ClientAction] = 
     ZStream.fromQueue(userRequestQueue)
   
-  override def timerStream: ZStream[Any, Nothing, ClientAction] = {
+  def timerStream: ZStream[Any, Nothing, ClientAction] = {
     val timeoutStream = ZStream.tick(config.connectionTimeout).as(TimeoutCheckAction)
     val keepAliveStream = ZStream.tick(config.keepAliveInterval).as(SendKeepAliveAction)
     
     timeoutStream.merge(keepAliveStream)
   }
   
-  override def unifiedStream: ZStream[Any, Throwable, ClientAction] = {
+  def unifiedStream: ZStream[Any, Throwable, ClientAction] = {
     val network = networkMessageStream
     val user = userRequestStream
     val timer = timerStream
@@ -135,10 +44,10 @@ private class ActionStreamImpl(
     network.merge(user).merge(timer)
   }
   
-  override def serverInitiatedRequestStream: ZStream[Any, Throwable, ServerRequest] = 
+  def serverInitiatedRequestStream: ZStream[Any, Throwable, ServerRequest] = 
     ZStream.fromQueue(serverRequestQueue)
   
-  override def processAction(action: ClientAction): UIO[ActionResult] = {
+  def processAction(action: ClientAction): UIO[ActionResult] = {
     action match {
       case NetworkMessageAction(message) =>
         processNetworkMessage(message)
@@ -263,19 +172,19 @@ private class ActionStreamImpl(
       }
     } yield result
   
-  override def getNetworkEventStream(): ZStream[Any, Throwable, ClientAction] = 
+  def getNetworkEventStream(): ZStream[Any, Throwable, ClientAction] = 
     networkMessageStream
   
-  override def getUserRequestStream(): ZStream[Any, Throwable, ClientAction] = 
+  def getUserRequestStream(): ZStream[Any, Throwable, ClientAction] = 
     userRequestStream
   
-  override def getTimerEventStream(): ZStream[Any, Nothing, ClientAction] = 
+  def getTimerEventStream(): ZStream[Any, Nothing, ClientAction] = 
     timerStream
   
-  override def getUnifiedActionStream(): ZStream[Any, Throwable, ClientAction] = 
+  def getUnifiedActionStream(): ZStream[Any, Throwable, ClientAction] = 
     unifiedStream
   
-  override def simulateStreamError(): UIO[Unit] = 
+  def simulateStreamError(): UIO[Unit] = 
     ZIO.logError("Simulated stream error")
   
   /**
@@ -288,43 +197,26 @@ private class ActionStreamImpl(
     userRequestQueue.offer(UserClientRequestAction(request, promise)).unit
 }
 
-/**
- * Test implementation for ActionStream.
- */
-private class ActionStreamTestImpl extends ActionStream {
+object ActionStream {
   
-  override def networkMessageStream: ZStream[Any, Throwable, ClientAction] = 
-    ZStream.empty
-  
-  override def userRequestStream: ZStream[Any, Throwable, ClientAction] = 
-    ZStream.empty
-  
-  override def timerStream: ZStream[Any, Nothing, ClientAction] = 
-    ZStream.empty
-  
-  override def unifiedStream: ZStream[Any, Throwable, ClientAction] = 
-    ZStream.empty
-  
-  override def serverInitiatedRequestStream: ZStream[Any, Throwable, ServerRequest] = 
-    ZStream.empty
-  
-  override def processAction(action: ClientAction): UIO[ActionResult] = 
-    ZIO.succeed(ActionResult.Success)
-  
-  override def getNetworkEventStream(): ZStream[Any, Throwable, ClientAction] = 
-    ZStream.empty
-  
-  override def getUserRequestStream(): ZStream[Any, Throwable, ClientAction] = 
-    ZStream.empty
-  
-  override def getTimerEventStream(): ZStream[Any, Nothing, ClientAction] = 
-    ZStream.empty
-  
-  override def getUnifiedActionStream(): ZStream[Any, Throwable, ClientAction] = 
-    ZStream.empty
-  
-  override def simulateStreamError(): UIO[Unit] = 
-    ZIO.unit
+  /**
+   * Create an ActionStream with the given dependencies.
+   */
+  def make(
+    connectionManager: ConnectionManager,
+    zmqMessageStream: ZStream[Any, Throwable, ServerMessage],
+    config: ClientConfig
+  ): UIO[ActionStream] = 
+    for {
+      userRequestQueue <- Queue.unbounded[UserClientRequestAction]
+      serverRequestQueue <- Queue.unbounded[ServerRequest]
+    } yield new ActionStream(
+      connectionManager,
+      zmqMessageStream,
+      userRequestQueue,
+      serverRequestQueue,
+      config
+    )
 }
 
 /**

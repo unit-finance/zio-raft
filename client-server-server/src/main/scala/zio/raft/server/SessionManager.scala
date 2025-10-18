@@ -15,114 +15,17 @@ import java.time.Instant
  * - Routing ID to session ID mapping
  * - Leader-aware operation validation
  */
-trait SessionManager {
-  
-  /**
-   * Check if this server is currently the Raft leader.
-   */
-  def isLeader: UIO[Boolean]
-  
-  /**
-   * Create a new session (leader-only operation).
-   * 
-   * @param routingId ZeroMQ routing ID for the client connection
-   * @param capabilities Client-declared capabilities 
-   * @param nonce Client-provided nonce for correlation
-   * @return Session ID if successful, or rejection reason
-   */
-  def createSession(
-    routingId: zio.zmq.RoutingId,
-    capabilities: Map[String, String],
-    nonce: Nonce
-  ): UIO[Either[RejectionReason, SessionId]]
-  
-  /**
-   * Continue an existing session after reconnection.
-   * 
-   * @param routingId New ZeroMQ routing ID for the reconnection
-   * @param sessionId Existing session ID to continue
-   * @param nonce Client-provided nonce for correlation
-   * @return Success or rejection reason
-   */
-  def continueSession(
-    routingId: zio.zmq.RoutingId,
-    sessionId: SessionId,
-    nonce: Nonce
-  ): UIO[Either[RejectionReason, Unit]]
-  
-  /**
-   * Handle client disconnection (ZeroMQ disconnect message).
-   * 
-   * @param routingId Routing ID that disconnected
-   * @return Session ID that was disconnected, if any
-   */
-  def handleDisconnection(routingId: zio.zmq.RoutingId): UIO[Option[SessionId]]
-  
-  /**
-   * Update keep-alive timestamp for a session.
-   * 
-   * @param routingId Routing ID of the client
-   * @return Success if session exists and updated
-   */
-  def updateKeepAlive(routingId: zio.zmq.RoutingId): UIO[Boolean]
-  
-  /**
-   * Get session ID from routing ID (for message processing).
-   * 
-   * @param routingId ZeroMQ routing ID
-   * @return Session ID if routing ID is mapped to an active session
-   */
-  def getSessionId(routingId: zio.zmq.RoutingId): UIO[Option[SessionId]]
-  
-  /**
-   * Remove expired sessions and return their IDs for Raft cleanup.
-   * Called periodically by cleanup task.
-   * 
-   * @return List of expired session IDs
-   */
-  def removeExpiredSessions(): UIO[List[SessionId]]
-  
-  /**
-   * Get current session statistics.
-   */
-  def getSessionStats(): UIO[SessionStats]
-  
-  /**
-   * Initialize session state from Raft-replicated data on leadership change.
-   * Called when this server becomes leader.
-   * 
-   * @param existingSessions Session metadata from Raft state machine
-   */
-  def initializeFromRaftState(existingSessions: Map[SessionId, SessionMetadata]): UIO[Unit]
-}
-
-object SessionManager {
-  
-  /**
-   * Create a SessionManager with the given configuration.
-   */
-  def make(config: ServerConfig): UIO[SessionManager] = 
-    for {
-      sessions <- Ref.make(Map.empty[SessionId, ConnectionState])
-      routingToSession <- Ref.make(Map.empty[zio.zmq.RoutingId, SessionId])
-      isLeaderRef <- Ref.make(false)
-    } yield new SessionManagerImpl(sessions, routingToSession, isLeaderRef, config)
-}
-
-/**
- * Internal implementation of SessionManager.
- */
-private class SessionManagerImpl(
+class SessionManager private (
   sessions: Ref[Map[SessionId, ConnectionState]],
   routingToSession: Ref[Map[zio.zmq.RoutingId, SessionId]],
   isLeaderRef: Ref[Boolean],
   config: ServerConfig
-) extends SessionManager {
+) {
   
-  override def isLeader: UIO[Boolean] = 
+  def isLeader: UIO[Boolean] = 
     isLeaderRef.get
   
-  override def createSession(
+  def createSession(
     routingId: zio.zmq.RoutingId,
     capabilities: Map[String, String],
     nonce: Nonce
@@ -157,7 +60,7 @@ private class SessionManagerImpl(
       _ <- routingToSession.update(_.updated(routingId, sessionId))
     } yield Right(sessionId)
   
-  override def continueSession(
+  def continueSession(
     routingId: zio.zmq.RoutingId,
     sessionId: SessionId,
     nonce: Nonce
@@ -197,7 +100,7 @@ private class SessionManagerImpl(
       _ <- routingToSession.update(_.updated(routingId, sessionId))
     } yield Right(())
   
-  override def handleDisconnection(routingId: zio.zmq.RoutingId): UIO[Option[SessionId]] = 
+  def handleDisconnection(routingId: zio.zmq.RoutingId): UIO[Option[SessionId]] = 
     for {
       routing <- routingToSession.get
       sessionIdOpt = routing.get(routingId)
@@ -225,7 +128,7 @@ private class SessionManagerImpl(
       }
     } yield sessionIdOpt
   
-  override def updateKeepAlive(routingId: zio.zmq.RoutingId): UIO[Boolean] = 
+  def updateKeepAlive(routingId: zio.zmq.RoutingId): UIO[Boolean] = 
     for {
       routing <- routingToSession.get
       result <- routing.get(routingId) match {
@@ -248,10 +151,10 @@ private class SessionManagerImpl(
       }
     } yield result
   
-  override def getSessionId(routingId: zio.zmq.RoutingId): UIO[Option[SessionId]] = 
+  def getSessionId(routingId: zio.zmq.RoutingId): UIO[Option[SessionId]] = 
     routingToSession.get.map(_.get(routingId))
   
-  override def removeExpiredSessions(): UIO[List[SessionId]] = 
+  def removeExpiredSessions(): UIO[List[SessionId]] = 
     for {
       now <- Clock.instant
       expired <- sessions.modify { sessionsMap =>
@@ -268,7 +171,7 @@ private class SessionManagerImpl(
       }
     } yield expired
   
-  override def getSessionStats(): UIO[SessionStats] = 
+  def getSessionStats(): UIO[SessionStats] = 
     for {
       sessionsMap <- sessions.get
       routing <- routingToSession.get
@@ -281,7 +184,7 @@ private class SessionManagerImpl(
       routingMappings = routing.size
     )
   
-  override def initializeFromRaftState(existingSessions: Map[SessionId, SessionMetadata]): UIO[Unit] = 
+  def initializeFromRaftState(existingSessions: Map[SessionId, SessionMetadata]): UIO[Unit] = 
     for {
       now <- Clock.instant
       // Convert Raft session metadata to local connection states (all start as Disconnected)
@@ -297,6 +200,19 @@ private class SessionManagerImpl(
       _ <- routingToSession.set(Map.empty) // No routing mappings initially
       _ <- isLeaderRef.set(true) // Mark as leader
     } yield ()
+}
+
+object SessionManager {
+  
+  /**
+   * Create a SessionManager with the given configuration.
+   */
+  def make(config: ServerConfig): UIO[SessionManager] = 
+    for {
+      sessions <- Ref.make(Map.empty[SessionId, ConnectionState])
+      routingToSession <- Ref.make(Map.empty[zio.zmq.RoutingId, SessionId])
+      isLeaderRef <- Ref.make(false)
+    } yield new SessionManager(sessions, routingToSession, isLeaderRef, config)
 }
 
 /**

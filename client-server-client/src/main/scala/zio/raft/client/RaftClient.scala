@@ -234,7 +234,6 @@ object ClientState {
           for {
             requestId <- nextRequestId.updateAndGet(_.next)
             now <- Clock.instant
-            request = ClientRequest(requestId, payload, now)
             newPending = pendingRequests.add(requestId, payload, promise, now)
           } yield copy(pendingRequests = newPending)
         

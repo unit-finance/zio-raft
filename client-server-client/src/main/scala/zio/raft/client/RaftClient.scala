@@ -52,9 +52,11 @@ object RaftClient {
       
       // Generate nonce and create initial state BEFORE starting loop
       nonce <- Nonce.generate()
-      initialState <- createInitialState(validatedConfig, nonce)
+      now <- Clock.instant
+      initialState <- createInitialState(validatedConfig, nonce, now)
       
-      // Send CreateSession
+      // Connect to first address and send CreateSession
+      _ <- zmqTransport.connect(validatedConfig.clusterAddresses.head)
       _ <- zmqTransport.sendMessage(CreateSession(validatedConfig.capabilities, nonce))
       
       // Start main loop with initial state
@@ -66,15 +68,16 @@ object RaftClient {
     ZIO.succeed(new ZmqClientTransportStub())
   
   /**
-   * Create initial state with proper nonce.
+   * Create initial state with proper nonce and timestamp.
    */
-  private def createInitialState(config: ClientConfig, nonce: Nonce): UIO[ClientState] =
+  private def createInitialState(config: ClientConfig, nonce: Nonce, now: Instant): UIO[ClientState] =
     ZIO.succeed(
       ClientState.ConnectingNewSession(
         capabilities = config.capabilities,
         nonce = nonce,
         addresses = config.clusterAddresses,
-        currentAddressIndex = 0
+        currentAddressIndex = 0,
+        createdAt = now
       )
     )
   
@@ -98,14 +101,19 @@ object RaftClient {
     val keepAliveStream = ZStream.tick(config.keepAliveInterval)
       .map(_ => StreamEvent.KeepAliveTick)
     
+    // Timeout check every 100ms
+    val timeoutStream = ZStream.tick(100.millis)
+      .map(_ => StreamEvent.TimeoutCheck)
+    
     val unifiedStream = actionStream
       .merge(messageStream)
       .merge(keepAliveStream)
+      .merge(timeoutStream)
     
     // Pure functional state machine: state handles events
     unifiedStream
       .runFold(initialState) { (state, event) =>
-        // State handles everything - just pass dependencies, no client reference
+        // State handles everything - just pass dependencies
         state.handle(event, transport, config, serverRequestQueue)
       }
       .unit
@@ -141,12 +149,16 @@ object ClientState {
           // Reconnect: generate nonce and transition to ConnectingNewSession
           for {
             nonce <- Nonce.generate()
+            now <- Clock.instant
+            address = config.clusterAddresses.head
+            _ <- transport.connect(address).orDie
             _ <- transport.sendMessage(CreateSession(config.capabilities, nonce)).orDie
           } yield ConnectingNewSession(
             capabilities = config.capabilities,
             nonce = nonce,
             addresses = config.clusterAddresses,
-            currentAddressIndex = 0
+            currentAddressIndex = 0,
+            createdAt = now
           )
         
         case StreamEvent.ServerMsg(message) =>
@@ -168,7 +180,8 @@ object ClientState {
     capabilities: Map[String, String],
     nonce: Nonce,
     addresses: List[String],
-    currentAddressIndex: Int
+    currentAddressIndex: Int,
+    createdAt: Instant
   ) extends ClientState {
     override def stateName: String = "ConnectingNewSession"
     
@@ -191,8 +204,9 @@ object ClientState {
               createdAt = now,
               serverRequestTracker = ServerRequestTracker(),
               nextRequestId = nextRequestId,
-              pendingRequests = Map.empty,
-              addresses = addresses
+              pendingRequests = PendingRequests.empty,
+              addresses = addresses,
+              currentAddressIndex = currentAddressIndex
             )
           } else {
             ZIO.logWarning("Nonce mismatch, ignoring SessionCreated").as(this)
@@ -202,20 +216,17 @@ object ClientState {
           if (nonce == responseNonce) {
             reason match {
               case NotLeader =>
-                nextAddress match {
-                  case Some((address, newState)) =>
-                    for {
-                      _ <- ZIO.logInfo(s"Not leader, trying next: $address")
-                      newNonce <- Nonce.generate()
-                      _ <- transport.sendMessage(CreateSession(capabilities, newNonce)).orDie
-                    } yield newState.copy(nonce = newNonce)
-                  case None =>
-                    for {
-                      _ <- ZIO.logInfo("No more addresses, retrying from start")
-                      newNonce <- Nonce.generate()
-                      _ <- transport.sendMessage(CreateSession(capabilities, newNonce)).orDie
-                    } yield copy(currentAddressIndex = 0, nonce = newNonce)
-                }
+                // Always cycle to next address using modulo
+                val nextIndex = (currentAddressIndex + 1) % addresses.length
+                val nextAddr = addresses(nextIndex)
+                for {
+                  _ <- ZIO.logInfo(s"Not leader, trying next: $nextAddr")
+                  _ <- transport.disconnect().orDie
+                  _ <- transport.connect(nextAddr).orDie
+                  newNonce <- Nonce.generate()
+                  _ <- transport.sendMessage(CreateSession(capabilities, newNonce)).orDie
+                  now <- Clock.instant
+                } yield copy(nonce = newNonce, currentAddressIndex = nextIndex, createdAt = now)
               
               case SessionNotFound =>
                 ZIO.dieMessage("Session not found - cannot continue")
@@ -226,6 +237,28 @@ object ClientState {
           } else {
             ZIO.logWarning("Nonce mismatch, ignoring SessionRejected").as(this)
           }
+        
+        case StreamEvent.TimeoutCheck =>
+          // Check if connection attempt has timed out
+          for {
+            now <- Clock.instant
+            elapsed = java.time.Duration.between(createdAt, now)
+            nextState <- if (elapsed.compareTo(java.time.Duration.ofSeconds(config.connectionTimeout.toSeconds)) > 0) {
+              // Timeout - try next address
+              val nextIndex = (currentAddressIndex + 1) % addresses.length
+              val nextAddr = addresses(nextIndex)
+              for {
+                _ <- ZIO.logWarning(s"Connection timeout, trying next address: $nextAddr")
+                _ <- transport.disconnect().orDie
+                _ <- transport.connect(nextAddr).orDie
+                newNonce <- Nonce.generate()
+                _ <- transport.sendMessage(CreateSession(capabilities, newNonce)).orDie
+                now <- Clock.instant
+              } yield copy(nonce = newNonce, currentAddressIndex = nextIndex, createdAt = now)
+            } else {
+              ZIO.succeed(this)
+            }
+          } yield nextState
         
         case StreamEvent.ServerMsg(other) =>
           ZIO.logWarning(s"Unexpected message in ConnectingNewSession: ${other.getClass.getSimpleName}").as(this)
@@ -240,15 +273,6 @@ object ClientState {
           ZIO.succeed(this)
       }
     }
-    
-    def nextAddress: Option[(String, ConnectingNewSession)] = {
-      val nextIndex = currentAddressIndex + 1
-      if (nextIndex < addresses.length) {
-        Some((addresses(nextIndex), copy(currentAddressIndex = nextIndex)))
-      } else {
-        None
-      }
-    }
   }
   
   /**
@@ -260,8 +284,10 @@ object ClientState {
     nonce: Nonce,
     addresses: List[String],
     currentAddressIndex: Int,
+    createdAt: Instant,
+    serverRequestTracker: ServerRequestTracker,
     nextRequestId: Ref[RequestId],
-    pendingRequests: Map[RequestId, Promise[Throwable, ByteVector]]
+    pendingRequests: PendingRequests
   ) extends ClientState {
     override def stateName: String = s"ConnectingExistingSession($sessionId)"
     
@@ -281,10 +307,11 @@ object ClientState {
               sessionId = sessionId,
               capabilities = capabilities,
               createdAt = now,
-              serverRequestTracker = ServerRequestTracker(),
+              serverRequestTracker = serverRequestTracker, // Resume previous tracker
               nextRequestId = nextRequestId,
               pendingRequests = pendingRequests,
-              addresses = addresses
+              addresses = addresses,
+              currentAddressIndex = currentAddressIndex
             )
           } else {
             ZIO.logWarning("Nonce mismatch, ignoring SessionContinued").as(this)
@@ -294,20 +321,17 @@ object ClientState {
           if (nonce == responseNonce) {
             reason match {
               case NotLeader =>
-                nextAddress match {
-                  case Some((address, newState)) =>
-                    for {
-                      _ <- ZIO.logInfo(s"Not leader, trying next: $address")
-                      newNonce <- Nonce.generate()
-                      _ <- transport.sendMessage(ContinueSession(sessionId, newNonce)).orDie
-                    } yield newState.copy(nonce = newNonce)
-                  case None =>
-                    for {
-                      _ <- ZIO.logInfo("No more addresses, retrying from start")
-                      newNonce <- Nonce.generate()
-                      _ <- transport.sendMessage(ContinueSession(sessionId, newNonce)).orDie
-                    } yield copy(currentAddressIndex = 0, nonce = newNonce)
-                }
+                // Always cycle to next address using modulo
+                val nextIndex = (currentAddressIndex + 1) % addresses.length
+                val nextAddr = addresses(nextIndex)
+                for {
+                  _ <- ZIO.logInfo(s"Not leader, trying next: $nextAddr")
+                  _ <- transport.disconnect().orDie
+                  _ <- transport.connect(nextAddr).orDie
+                  newNonce <- Nonce.generate()
+                  _ <- transport.sendMessage(ContinueSession(sessionId, newNonce)).orDie
+                  now <- Clock.instant
+                } yield copy(nonce = newNonce, currentAddressIndex = nextIndex, createdAt = now)
               
               case SessionNotFound =>
                 ZIO.dieMessage("Session not found - cannot continue")
@@ -318,6 +342,28 @@ object ClientState {
           } else {
             ZIO.logWarning("Nonce mismatch, ignoring SessionRejected").as(this)
           }
+        
+        case StreamEvent.TimeoutCheck =>
+          // Check if connection attempt has timed out
+          for {
+            now <- Clock.instant
+            elapsed = java.time.Duration.between(createdAt, now)
+            nextState <- if (elapsed.compareTo(java.time.Duration.ofSeconds(config.connectionTimeout.toSeconds)) > 0) {
+              // Timeout - try next address
+              val nextIndex = (currentAddressIndex + 1) % addresses.length
+              val nextAddr = addresses(nextIndex)
+              for {
+                _ <- ZIO.logWarning(s"Connection timeout, trying next address: $nextAddr")
+                _ <- transport.disconnect().orDie
+                _ <- transport.connect(nextAddr).orDie
+                newNonce <- Nonce.generate()
+                _ <- transport.sendMessage(ContinueSession(sessionId, newNonce)).orDie
+                now <- Clock.instant
+              } yield copy(nonce = newNonce, currentAddressIndex = nextIndex, createdAt = now)
+            } else {
+              ZIO.succeed(this)
+            }
+          } yield nextState
         
         case StreamEvent.ServerMsg(other) =>
           ZIO.logWarning(s"Unexpected message in ConnectingExistingSession: ${other.getClass.getSimpleName}").as(this)
@@ -332,15 +378,6 @@ object ClientState {
           ZIO.succeed(this)
       }
     }
-    
-    def nextAddress: Option[(String, ConnectingExistingSession)] = {
-      val nextIndex = currentAddressIndex + 1
-      if (nextIndex < addresses.length) {
-        Some((addresses(nextIndex), copy(currentAddressIndex = nextIndex)))
-      } else {
-        None
-      }
-    }
   }
   
   case class Connected(
@@ -349,8 +386,9 @@ object ClientState {
     createdAt: Instant,
     serverRequestTracker: ServerRequestTracker,
     nextRequestId: Ref[RequestId],
-    pendingRequests: Map[RequestId, Promise[Throwable, ByteVector]],
-    addresses: List[String]
+    pendingRequests: PendingRequests,
+    addresses: List[String],
+    currentAddressIndex: Int
   ) extends ClientState {
     override def stateName: String = s"Connected($sessionId)"
     
@@ -373,14 +411,13 @@ object ClientState {
             now <- Clock.instant
             request = ClientRequest(requestId, payload, now)
             _ <- transport.sendMessage(request).orDie
-          } yield copy(pendingRequests = pendingRequests.updated(requestId, promise))
+            newPending = pendingRequests.add(requestId, promise)
+          } yield copy(pendingRequests = newPending)
         
         case StreamEvent.ServerMsg(ClientResponse(requestId, result)) =>
-          pendingRequests.get(requestId) match {
-            case Some(promise) =>
-              promise.succeed(result).ignore.as(
-                copy(pendingRequests = pendingRequests.removed(requestId))
-              )
+          pendingRequests.complete(requestId, result) match {
+            case Some(newPending) =>
+              ZIO.succeed(copy(pendingRequests = newPending))
             case None =>
               ZIO.logWarning(s"Response for unknown request: $requestId").as(this)
           }
@@ -389,40 +426,85 @@ object ClientState {
           ZIO.succeed(this)
         
         case StreamEvent.ServerMsg(serverRequest: ServerRequest) =>
-          for {
-            // Enqueue for user to handle
-            _ <- serverRequestQueue.offer(serverRequest).orDie
-            // Immediately acknowledge
-            _ <- transport.sendMessage(ServerRequestAck(serverRequest.requestId)).orDie
-            _ <- ZIO.logDebug(s"Enqueued and acknowledged server request: ${serverRequest.requestId}")
-          } yield this
+          // Check with tracker
+          if (serverRequestTracker.shouldProcess(serverRequest.requestId)) {
+            for {
+              // Add to queue for user to handle
+              _ <- serverRequestQueue.offer(serverRequest).orDie
+              // Update tracker
+              newTracker = serverRequestTracker.acknowledge(serverRequest.requestId)
+              // Send acknowledgment
+              _ <- transport.sendMessage(ServerRequestAck(serverRequest.requestId)).orDie
+              _ <- ZIO.logDebug(s"Enqueued and acknowledged server request: ${serverRequest.requestId}")
+            } yield copy(serverRequestTracker = newTracker)
+          } else if (serverRequestTracker.lastAcknowledgedRequestId >= serverRequest.requestId) {
+            // Already processed - just ack again
+            for {
+              _ <- transport.sendMessage(ServerRequestAck(serverRequest.requestId)).orDie
+              _ <- ZIO.logDebug(s"Re-acknowledged already processed request: ${serverRequest.requestId}")
+            } yield this
+          } else {
+            // Out of order - drop it
+            ZIO.logWarning(s"Dropping out-of-order server request: ${serverRequest.requestId}, expected: ${serverRequestTracker.lastAcknowledgedRequestId.next}").as(this)
+          }
         
         case StreamEvent.ServerMsg(RequestError(reason, leaderId)) =>
           reason match {
             case NotLeaderRequest =>
+              // Transition to ConnectingExistingSession to find new leader
               for {
                 _ <- ZIO.logInfo(s"Not leader, reconnecting")
                 nonce <- Nonce.generate()
+                val nextIndex = (currentAddressIndex + 1) % addresses.length
+                val nextAddr = addresses(nextIndex)
+                _ <- transport.disconnect().orDie
+                _ <- transport.connect(nextAddr).orDie
                 _ <- transport.sendMessage(ContinueSession(sessionId, nonce)).orDie
+                now <- Clock.instant
               } yield ConnectingExistingSession(
                 sessionId = sessionId,
                 capabilities = capabilities,
                 nonce = nonce,
                 addresses = addresses,
-                currentAddressIndex = 0,
+                currentAddressIndex = nextIndex,
+                createdAt = now,
+                serverRequestTracker = serverRequestTracker,
                 nextRequestId = nextRequestId,
                 pendingRequests = pendingRequests
               )
             
             case SessionTerminated =>
-              ZIO.logWarning("Session terminated").as(Disconnected)
+              // Transition to Connecting to create new session
+              for {
+                _ <- ZIO.logWarning("Session terminated, creating new session")
+                nonce <- Nonce.generate()
+                _ <- transport.sendMessage(CreateSession(capabilities, nonce)).orDie
+                now <- Clock.instant
+              } yield ConnectingNewSession(
+                capabilities = capabilities,
+                nonce = nonce,
+                addresses = addresses,
+                currentAddressIndex = currentAddressIndex,
+                createdAt = now
+              )
             
             case _ =>
               ZIO.logWarning(s"Request error: $reason").as(this)
           }
         
         case StreamEvent.ServerMsg(SessionClosed(reason, _)) =>
-          ZIO.logInfo(s"Session closed: $reason").as(Disconnected)
+          for {
+            _ <- ZIO.logInfo(s"Session closed: $reason")
+            nonce <- Nonce.generate()
+            _ <- transport.sendMessage(CreateSession(capabilities, nonce)).orDie
+            now <- Clock.instant
+          } yield ConnectingNewSession(
+            capabilities = capabilities,
+            nonce = nonce,
+            addresses = addresses,
+            currentAddressIndex = currentAddressIndex,
+            createdAt = now
+          )
         
         case StreamEvent.KeepAliveTick =>
           for {
@@ -437,20 +519,49 @@ object ClientState {
   }
 }
 
+/**
+ * Manages pending requests (renamed from RetryManager).
+ */
+case class PendingRequests(
+  requests: Map[RequestId, Promise[Throwable, ByteVector]]
+) {
+  def add(requestId: RequestId, promise: Promise[Throwable, ByteVector]): PendingRequests =
+    copy(requests = requests.updated(requestId, promise))
+  
+  def complete(requestId: RequestId, result: ByteVector): Option[PendingRequests] =
+    requests.get(requestId).map { promise =>
+      promise.succeed(result).ignore
+      copy(requests = requests.removed(requestId))
+    }
+}
+
+object PendingRequests {
+  def empty: PendingRequests = PendingRequests(Map.empty)
+}
+
 private sealed trait StreamEvent
 
 private object StreamEvent {
   case class Action(action: ClientAction) extends StreamEvent
   case class ServerMsg(message: ServerMessage) extends StreamEvent
   case object KeepAliveTick extends StreamEvent
+  case object TimeoutCheck extends StreamEvent
 }
 
 trait ZmqClientTransport {
+  def connect(address: String): Task[Unit]
+  def disconnect(): Task[Unit]
   def sendMessage(message: ClientMessage): Task[Unit]
   def incomingMessages: ZStream[Any, Throwable, ServerMessage]
 }
 
 private class ZmqClientTransportStub extends ZmqClientTransport {
+  override def connect(address: String): Task[Unit] =
+    ZIO.logDebug(s"Stub: connecting to $address")
+  
+  override def disconnect(): Task[Unit] =
+    ZIO.logDebug("Stub: disconnecting")
+  
   override def sendMessage(message: ClientMessage): Task[Unit] = 
     ZIO.logDebug(s"Stub: sending message: ${message.getClass.getSimpleName}")
   

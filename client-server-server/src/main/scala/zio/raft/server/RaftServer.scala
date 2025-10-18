@@ -17,9 +17,9 @@ object RaftServer {
   object ServerAction {
     case class SendResponse(sessionId: SessionId, response: ClientResponse) extends ServerAction
     case class SendServerRequest(sessionId: SessionId, request: ServerRequest) extends ServerAction
+    case class SessionCreationConfirmed(sessionId: SessionId) extends ServerAction
     case class StepUp(sessions: Map[SessionId, SessionMetadata]) extends ServerAction
     case class StepDown(leaderId: Option[MemberId]) extends ServerAction
-    case object Shutdown extends ServerAction
   }
   
   /**
@@ -92,28 +92,9 @@ object RaftServer {
     
     /**
      * Confirm that a session has been committed by Raft.
-     * This is called directly by Raft and sends the response immediately.
      */
     def confirmSessionCreation(sessionId: SessionId): UIO[Unit] =
-      for {
-        now <- Clock.instant
-        state <- stateRef.get
-        _ <- state match {
-          case leader: ServerState.Leader =>
-            leader.sessions.confirmSession(sessionId, now, config) match {
-              case Some((routingId, nonce, newSessions)) =>
-                for {
-                  _ <- transport.sendMessage(routingId, SessionCreated(sessionId, nonce)).orDie
-                  _ <- ZIO.logInfo(s"Session $sessionId confirmed and created")
-                  _ <- stateRef.set(leader.copy(sessions = newSessions))
-                } yield ()
-              case None =>
-                ZIO.logWarning(s"Session $sessionId confirmation failed - not found in pending")
-            }
-          case _ =>
-            ZIO.logWarning(s"Cannot confirm session $sessionId - not leader")
-        }
-      } yield ()
+      actionQueue.offer(ServerAction.SessionCreationConfirmed(sessionId)).unit
     
     /**
      * Notify server that this node has become the leader.
@@ -248,8 +229,8 @@ object RaftServer {
           case StreamEvent.Action(ServerAction.SendServerRequest(_, _)) =>
             ZIO.logWarning("Cannot send server request - not leader").as(this)
           
-          case StreamEvent.Action(ServerAction.Shutdown) =>
-            ZIO.logInfo("Follower shutdown - no sessions to close").as(this)
+          case StreamEvent.Action(ServerAction.SessionCreationConfirmed(_)) =>
+            ZIO.logWarning("Received SessionCreationConfirmed while not leader - ignoring").as(this)
           
           case StreamEvent.CleanupTick =>
             ZIO.succeed(this)
@@ -326,11 +307,19 @@ object RaftServer {
                 ZIO.logWarning(s"Cannot send server request - session $sessionId not found").as(this)
             }
           
-          case StreamEvent.Action(ServerAction.Shutdown) =>
+          case StreamEvent.Action(ServerAction.SessionCreationConfirmed(sessionId)) =>
             for {
-              _ <- ZIO.logInfo("Server shutdown - closing all sessions")
-              _ <- sessions.shutdown(transport)
-            } yield this
+              now <- Clock.instant
+              result <- sessions.confirmSession(sessionId, now, config) match {
+                case Some((routingId, nonce, newSessions)) =>
+                  for {
+                    _ <- transport.sendMessage(routingId, SessionCreated(sessionId, nonce)).orDie
+                    _ <- ZIO.logInfo(s"Session $sessionId confirmed and created")
+                  } yield copy(sessions = newSessions)
+                case None =>
+                  ZIO.logWarning(s"Session $sessionId confirmation failed - not found in pending").as(this)
+              }
+            } yield result
           
           case StreamEvent.CleanupTick =>
             for {

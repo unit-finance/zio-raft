@@ -211,9 +211,9 @@ object RaftClient {
       ): UIO[ConnectingNewSession] = {
         val (memberId, address) = targetMemberId.flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
           .getOrElse(nextMember)
+        val currentAddr = clusterMembers.get(currentMemberId)
         
         for {
-          currentAddr = clusterMembers.get(currentMemberId)
           _ <- ZIO.logInfo(s"$logPrefix at ${currentAddr.getOrElse("unknown")}, trying $memberId at $address")
           _ <- transport.disconnect().orDie
           _ <- transport.connect(address).orDie
@@ -349,9 +349,9 @@ object RaftClient {
       ): UIO[ConnectingExistingSession] = {
         val (memberId, address) = targetMemberId.flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
           .getOrElse(nextMember)
+        val currentAddr = clusterMembers.get(currentMemberId)
         
         for {
-          currentAddr = clusterMembers.get(currentMemberId)
           _ <- ZIO.logInfo(s"$logPrefix at ${currentAddr.getOrElse("unknown")}, trying $memberId at $address")
           _ <- transport.disconnect().orDie
           _ <- transport.connect(address).orDie
@@ -371,8 +371,8 @@ object RaftClient {
         event match {
           case StreamEvent.ServerMsg(SessionContinued(responseNonce)) =>
             if (nonce == responseNonce) {
+              val currentAddr = clusterMembers.get(currentMemberId)
               for {
-                currentAddr = clusterMembers.get(currentMemberId)
                 _ <- ZIO.logInfo(s"Session continued: $sessionId at $currentMemberId (${currentAddr.getOrElse("unknown")})")
                 now <- Clock.instant
                 // Send all pending requests

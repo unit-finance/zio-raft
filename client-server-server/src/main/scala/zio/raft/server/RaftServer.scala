@@ -57,6 +57,13 @@ object RaftServer {
     createdAt: Instant
   )
   
+  case class PendingSession(
+    routingId: RoutingId,
+    nonce: Nonce,
+    capabilities: Map[String, String],
+    createdAt: Instant
+  )
+  
   
   /**
    * Simplified RaftServer using pure functional state machine.
@@ -186,7 +193,7 @@ object RaftServer {
   /**
    * Functional state machine: each state handles events and returns new states.
    */
-  private sealed trait ServerState {
+  sealed trait ServerState {
     def stateName: String
     def handle(
       event: StreamEvent,
@@ -280,7 +287,7 @@ object RaftServer {
       ): UIO[ServerState] = {
         event match {
           case StreamEvent.IncomingClientMessage(routingId, message) =>
-            handleClientMessage(routingId, message, transport, raftActionsOut)
+            handleClientMessage(routingId, message, transport, raftActionsOut, config)
           
           case StreamEvent.Action(ServerAction.StepUp(_)) =>
             ZIO.succeed(this)
@@ -344,7 +351,8 @@ object RaftServer {
         routingId: RoutingId,
         message: ClientMessage,
         transport: ZmqServerTransport,
-        raftActionsOut: Queue[RaftAction]
+        raftActionsOut: Queue[RaftAction],
+        config: ServerConfig
       ): UIO[ServerState] = {
         message match {
           case CreateSession(capabilities, nonce) =>
@@ -485,7 +493,8 @@ object RaftServer {
       val newMetadata = metadata -- expired
       val newConnections = connections -- expired
       val newRouting = routingToSession.filter { case (_, sid) => !expired.contains(sid) }
-      (expired, Sessions(newMetadata, newConnections, newRouting))
+      val newPendingSessions = pendingSessions -- expired
+      (expired, Sessions(newMetadata, newConnections, newRouting, newPendingSessions))
     }
     
     def getRoutingId(sessionId: SessionId): Option[RoutingId] =
@@ -533,9 +542,9 @@ object RaftServer {
   /**
    * Unified stream events.
    */
-  private sealed trait StreamEvent
+  sealed trait StreamEvent
   
-  private object StreamEvent {
+  object StreamEvent {
     case class Action(action: ServerAction) extends StreamEvent
     case class IncomingClientMessage(routingId: RoutingId, message: ClientMessage) extends StreamEvent
     case object CleanupTick extends StreamEvent

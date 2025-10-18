@@ -7,6 +7,7 @@ import scodec.bits.ByteVector
 import scodec.Attempt
 import java.time.Instant
 import zio.raft.protocol.Codecs.{clientMessageCodec, serverMessageCodec}
+import zio.raft.protocol.RejectionReason.*
 
 /**
  * Contract tests for protocol message serialization using scodec.

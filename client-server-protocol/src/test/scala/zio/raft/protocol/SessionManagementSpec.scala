@@ -3,6 +3,7 @@ package zio.raft.protocol
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
+import zio.raft.protocol.RejectionReason.*
 
 /**
  * Contract tests for session management protocol.

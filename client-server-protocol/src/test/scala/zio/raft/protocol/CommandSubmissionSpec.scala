@@ -5,6 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import scodec.bits.ByteVector
 import java.time.Instant
+import zio.raft.protocol.RequestErrorReason.*
 
 /**
  * Contract tests for command submission protocol.

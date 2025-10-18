@@ -102,6 +102,17 @@ case class ServerRequest(
   createdAt: Instant
 ) extends ServerMessage
 
+/**
+ * Client request processing error.
+ * Server responds to same ZeroMQ routing ID, no session ID needed.
+ *
+ * @param reason Error classification and details
+ * @param leaderId Optional leader ID for redirection
+ */
+case class RequestError(
+  reason: RequestErrorReason,
+  leaderId: Option[MemberId]
+) extends ServerMessage
 
 // ============================================================================
 // REASON ENUMS
@@ -161,3 +172,39 @@ object SessionCloseReason {
   case object SessionTimeout extends SessionCloseReason
 }
 
+/**
+ * Reasons for client request processing errors.
+ */
+sealed trait RequestErrorReason
+
+object RequestErrorReason {
+  /**
+   * Server is not the current Raft leader (extends NotLeader for requests).
+   */
+  case object NotLeaderRequest extends RequestErrorReason
+
+  /**
+   * Request payload is malformed or invalid.
+   */
+  case object InvalidRequest extends RequestErrorReason
+
+  /**
+   * Client is not currently connected to the server.
+   */
+  case object NotConnected extends RequestErrorReason
+
+  /**
+   * Client session was closed by the server.
+   */
+  case object SessionTerminated extends RequestErrorReason
+
+  /**
+   * Protocol version is not supported by the server.
+   */
+  case object UnsupportedVersion extends RequestErrorReason
+
+  /**
+   * Server failed to process the request due to internal error.
+   */
+  case object ProcessingFailed extends RequestErrorReason
+}

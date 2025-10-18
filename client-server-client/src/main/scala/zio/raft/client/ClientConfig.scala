@@ -9,7 +9,6 @@ case class ClientConfig(
   clusterAddresses: List[String],
   capabilities: Map[String, String],
   connectionTimeout: Duration = ClientConfig.DEFAULT_CONNECTION_TIMEOUT,
-  sessionTimeout: Duration = ClientConfig.DEFAULT_SESSION_TIMEOUT,
   keepAliveInterval: Duration = ClientConfig.DEFAULT_KEEP_ALIVE_INTERVAL
 ) {
   
@@ -18,8 +17,6 @@ case class ClientConfig(
       Left("clusterAddresses cannot be empty")
     } else if (capabilities.isEmpty) {
       Left("capabilities cannot be empty")
-    } else if (keepAliveInterval >= sessionTimeout) {
-      Left("keepAliveInterval must be less than sessionTimeout")
     } else {
       Right(())
     }
@@ -29,7 +26,6 @@ case class ClientConfig(
 object ClientConfig {
   
   val DEFAULT_CONNECTION_TIMEOUT: Duration = 5.seconds
-  val DEFAULT_SESSION_TIMEOUT: Duration = 90.seconds
   val DEFAULT_KEEP_ALIVE_INTERVAL: Duration = 30.seconds
   val REQUEST_TIMEOUT: Duration = 10.seconds
   

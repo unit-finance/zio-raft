@@ -28,6 +28,7 @@ object RaftServer {
   object RaftAction {
     case class CreateSession(sessionId: SessionId, capabilities: Map[String, String]) extends RaftAction
     case class ClientRequest(sessionId: SessionId, requestId: RequestId, payload: ByteVector) extends RaftAction
+    case class ServerRequestAck(sessionId: SessionId, requestId: RequestId) extends RaftAction
     case class ExpireSession(sessionId: SessionId) extends RaftAction
   }
   
@@ -54,14 +55,6 @@ object RaftServer {
     createdAt: Instant
   )
   
-  /**
-   * Reference for generating unique request IDs.
-   */
-  type RequestIdRef = Ref[RequestId]
-  
-  object RequestIdRef {
-    def make: UIO[RequestIdRef] = Ref.make(RequestId.zero)
-  }
   
   /**
    * Simplified RaftServer using pure functional state machine.
@@ -95,10 +88,16 @@ object RaftServer {
       actionQueue.offer(ServerAction.SendServerRequest(sessionId, request)).unit
     
     /**
-     * Notify server of leadership change.
+     * Notify server that this node has become the leader.
      */
-    def handleLeadershipChange(isLeader: Boolean, sessions: Map[SessionId, SessionMetadata]): UIO[Unit] =
-      actionQueue.offer(ServerAction.LeadershipChange(isLeader, sessions)).unit
+    def stepUp(sessions: Map[SessionId, SessionMetadata]): UIO[Unit] =
+      actionQueue.offer(ServerAction.StepUp(sessions)).unit
+    
+    /**
+     * Notify server that this node has stepped down from leadership.
+     */
+    def stepDown(leaderId: Option[MemberId]): UIO[Unit] =
+      actionQueue.offer(ServerAction.StepDown(leaderId)).unit
   }
   
   def make(bindAddress: String): ZIO[Scope, Throwable, RaftServer] = {
@@ -186,18 +185,13 @@ object RaftServer {
           case StreamEvent.IncomingClientMessage(routingId, message) =>
             handleClientMessage(routingId, message, transport)
           
-          case StreamEvent.Action(ServerAction.LeadershipChange(isLeader, sessions)) =>
-            if (isLeader) {
-              for {
-                _ <- ZIO.logInfo(s"Became leader with ${sessions.size} existing sessions")
-                nextRequestId <- RequestIdRef.make
-              } yield Leader(
-                sessions = Sessions.fromMetadata(sessions, config),
-                nextRequestId = nextRequestId
-              )
-            } else {
-              ZIO.succeed(this)
-            }
+          case StreamEvent.Action(ServerAction.StepUp(sessions)) =>
+            for {
+              _ <- ZIO.logInfo(s"Became leader with ${sessions.size} existing sessions")
+            } yield Leader(sessions = Sessions.fromMetadata(sessions, config))
+          
+          case StreamEvent.Action(ServerAction.StepDown(_)) =>
+            ZIO.succeed(this)
           
           case StreamEvent.Action(ServerAction.SendResponse(_, _)) =>
             ZIO.logWarning("Cannot send response - not leader").as(this)
@@ -226,7 +220,7 @@ object RaftServer {
             transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionError, None)).orDie.as(this)
           
           case _: ClientRequest =>
-            transport.sendMessage(routingId, RequestError(RequestErrorReason.NotLeaderRequest, None)).orDie.as(this)
+            transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionError, None)).orDie.as(this)
           
           case ServerRequestAck(_) =>
             ZIO.succeed(this)
@@ -241,8 +235,7 @@ object RaftServer {
      * Leader state - manages sessions and forwards requests to Raft.
      */
     case class Leader(
-      sessions: Sessions,
-      nextRequestId: RequestIdRef
+      sessions: Sessions
     ) extends ServerState {
       override def stateName: String = "Leader"
       
@@ -256,15 +249,14 @@ object RaftServer {
           case StreamEvent.IncomingClientMessage(routingId, message) =>
             handleClientMessage(routingId, message, transport, raftActionsOut)
           
-          case StreamEvent.Action(ServerAction.LeadershipChange(isLeader, _)) =>
-            if (!isLeader) {
-              for {
-                _ <- ZIO.logInfo("Lost leadership, closing all sessions")
-                _ <- sessions.closeAll(transport)
-              } yield Follower
-            } else {
-              ZIO.succeed(this)
-            }
+          case StreamEvent.Action(ServerAction.StepUp(_)) =>
+            ZIO.succeed(this)
+          
+          case StreamEvent.Action(ServerAction.StepDown(leaderId)) =>
+            for {
+              _ <- ZIO.logInfo("Lost leadership, closing all sessions")
+              _ <- sessions.closeAll(transport, leaderId)
+            } yield Follower()
           
           case StreamEvent.Action(ServerAction.SendResponse(sessionId, response)) =>
             sessions.getRoutingId(sessionId) match {
@@ -348,12 +340,18 @@ object RaftServer {
                   _ <- raftActionsOut.offer(RaftAction.ClientRequest(sessionId, clientRequest.requestId, clientRequest.payload))
                 } yield this
               case None =>
-                transport.sendMessage(routingId, RequestError(RequestErrorReason.SessionTerminated, None)).orDie.as(this)
+                transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionError, None)).orDie.as(this)
             }
           
           case ServerRequestAck(requestId) =>
-            // Could track acknowledgments if needed
-            ZIO.succeed(this)
+            sessions.findSessionByRouting(routingId) match {
+              case Some(sessionId) =>
+                for {
+                  _ <- raftActionsOut.offer(RaftAction.ServerRequestAck(sessionId, requestId))
+                } yield this
+              case None =>
+                ZIO.succeed(this)
+            }
           
           case CloseSession(reason) =>
             sessions.findSessionByRouting(routingId) match {
@@ -391,9 +389,11 @@ object RaftServer {
       connections.get(sessionId) match {
         case Some(conn) =>
           val expiresAt = now.plusSeconds(90) // TODO: use config
+          // Remove old routing mapping if it exists
+          val cleanedRouting = conn.routingId.map(old => routingToSession.removed(old)).getOrElse(routingToSession)
           copy(
             connections = connections.updated(sessionId, conn.copy(routingId = Some(routingId), expiresAt = expiresAt)),
-            routingToSession = routingToSession.updated(routingId, sessionId)
+            routingToSession = cleanedRouting.updated(routingId, sessionId)
           )
         case None => this
       }
@@ -431,10 +431,12 @@ object RaftServer {
     def findSessionByRouting(routingId: RoutingId): Option[SessionId] =
       routingToSession.get(routingId)
     
-    def closeAll(transport: ZmqServerTransport): UIO[Unit] =
+    def closeAll(transport: ZmqServerTransport, leaderId: Option[MemberId]): UIO[Unit] = {
+      val reason = if (leaderId.isDefined) SessionCloseReason.NotLeaderAnymore else SessionCloseReason.Shutdown
       ZIO.foreachDiscard(connections.values.flatMap(_.routingId)) { routingId =>
-        transport.sendMessage(routingId, SessionClosed(SessionCloseReason.Shutdown, None)).orDie
+        transport.sendMessage(routingId, SessionClosed(reason, leaderId)).orDie
       }
+    }
   }
   
   object Sessions {

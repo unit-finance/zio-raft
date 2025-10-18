@@ -148,23 +148,6 @@ object Codecs {
   }
 
   /**
-   * Codec for RequestErrorReason.
-   */
-  implicit val requestErrorReasonCodec: Codec[RequestErrorReason] = {
-    discriminated[RequestErrorReason].by(uint8)
-      .subcaseP(1) { case NotLeaderRequest => NotLeaderRequest } (provide(NotLeaderRequest))
-      .subcaseP(2) { case InvalidRequest => InvalidRequest } (provide(InvalidRequest))
-      .subcaseP(3) { case NotConnected => NotConnected } (provide(NotConnected))
-      .subcaseP(4) { case ConnectionLost => ConnectionLost } (provide(ConnectionLost))
-      .subcaseP(5) { case SessionTerminated => SessionTerminated } (provide(SessionTerminated))
-      .subcaseP(6) { case UnsupportedVersion => UnsupportedVersion } (provide(UnsupportedVersion))
-      .subcaseP(7) { case PayloadTooLarge => PayloadTooLarge } (provide(PayloadTooLarge))
-      .subcaseP(8) { case ServiceUnavailable => ServiceUnavailable } (provide(ServiceUnavailable))
-      .subcaseP(9) { case ProcessingFailed => ProcessingFailed } (provide(ProcessingFailed))
-      .subcaseP(10) { case RequestTimeout => RequestTimeout } (provide(RequestTimeout))
-  }
-
-  /**
    * Codec for CloseReason.
    */
   implicit val closeReasonCodec: Codec[CloseReason] = {
@@ -286,13 +269,6 @@ object Codecs {
   }
 
   /**
-   * Codec for RequestError message.
-   */
-  implicit val requestErrorCodec: Codec[RequestError] = {
-    (requestErrorReasonCodec :: optional(bool, memberIdCodec)).as[RequestError]
-  }
-
-  /**
    * Discriminated codec for all ServerMessage types.
    */
   implicit val serverMessageCodec: Codec[ServerMessage] = {
@@ -304,7 +280,6 @@ object Codecs {
       .typecase(5, keepAliveResponseCodec)
       .typecase(6, clientResponseCodec)
       .typecase(7, serverRequestCodec)
-      .typecase(8, requestErrorCodec)
   }
 
   // ============================================================================

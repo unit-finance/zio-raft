@@ -209,35 +209,4 @@ package object protocol {
   }
 
   type ClientCapabilities = ClientCapabilities.Type
-  
-  // ============================================================================
-  // VALIDATION HELPERS
-  // ============================================================================
-
-  /**
-   * Common validation functions for protocol types.
-   */
-  object Validation {
-    
-    /**
-     * Validate that a string is a valid identifier.
-     */
-    def isValidIdentifier(value: String): Boolean = {
-      value.nonEmpty && value.matches("[a-zA-Z0-9-_]+")
-    }
-    
-    /**
-     * Validate that a byte array is non-empty.
-     */
-    def isValidByteArray(bytes: Array[Byte]): Boolean = {
-      bytes != null && bytes.nonEmpty
-    }      
-    
-    /**
-     * Validate that capabilities contain required keys.
-     */
-    def hasRequiredCapabilities(capabilities: Map[String, String], required: Set[String]): Boolean = {
-      required.subsetOf(capabilities.keySet)
-    }
-  }
 }

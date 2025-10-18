@@ -35,9 +35,6 @@ class RaftClient private (
   def disconnect(): UIO[Unit] =
     actionQueue.offer(ClientAction.Disconnect).unit
   
-  /** Close the client cleanly by disconnecting from the server. */
-  def close(): UIO[Unit] =
-    disconnect()
 
   /** Stream of server-initiated requests for user to handle.
     */
@@ -66,7 +63,7 @@ object RaftClient {
       
       // Register finalizer to cleanly close session on scope exit
       _ <- ZIO.addFinalizer(
-        client.close()
+        zmqTransport.sendMessage(CloseSession(CloseReason.ClientShutdown)).orDie
       )
 
     } yield client

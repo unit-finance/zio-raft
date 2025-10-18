@@ -220,16 +220,6 @@ case object SessionNotFound extends RejectionReason
  */
 
 /**
- * Session creation conflicts with existing session.
- */
-case object SessionConflict extends RejectionReason
-
-/**
- * Client is not authorized for this operation.
- */
-case object NotAuthorized extends RejectionReason
-
-/**
  * Client capabilities are invalid or unsupported.
  */
 case object InvalidCapabilities extends RejectionReason

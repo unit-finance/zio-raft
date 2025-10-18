@@ -679,22 +679,5 @@ object RaftClient {
       socket.stream.mapZIO { msg =>
         ZIO.attempt(serverMessageCodec.decode(BitVector(msg.data())).require.value)
       }
-  }
-
-  private class ZmqClientTransportStub extends ZmqClientTransport {
-    override def connect(address: String): Task[Unit] =
-      ZIO.logDebug(s"Stub: connecting to $address")
-
-    override def disconnect(): Task[Unit] =
-      ZIO.logDebug("Stub: disconnecting")
-
-    override def sendMessage(message: ClientMessage): Task[Unit] =
-      ZIO.logDebug(s"Stub: sending message: ${message.getClass.getSimpleName}")
-
-    override def incomingMessages: ZStream[Any, Throwable, ServerMessage] =
-      ZStream.empty
-  }
-
-  class TimeoutException(message: String) extends RuntimeException(message)
-
+  }  
 }

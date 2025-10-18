@@ -19,6 +19,9 @@ class RaftClient private (
   serverRequestQueue: Queue[ServerRequest]
 ) {
   
+  def connect(): UIO[Unit] =
+    actionQueue.offer(ClientAction.Connect).unit
+  
   def submitCommand(payload: ByteVector): Task[ByteVector] = 
     for {
       promise <- Promise.make[Throwable, ByteVector]
@@ -50,39 +53,16 @@ object RaftClient {
       
       client = new RaftClient(zmqTransport, validatedConfig, actionQueue, serverRequestQueue)
       
-      // Generate nonce and create initial state BEFORE starting loop
-      nonce <- Nonce.generate()
-      now <- Clock.instant
-      nextRequestId <- Ref.make(RequestId.fromLong(1L)) // Start from 1, not 0
-      initialState <- createInitialState(validatedConfig, nonce, now, nextRequestId)
+      // Start in Disconnected state
+      initialState = ClientState.Disconnected
       
-      // Connect to first address and send CreateSession
-      _ <- zmqTransport.connect(validatedConfig.clusterAddresses.head)
-      _ <- zmqTransport.sendMessage(CreateSession(validatedConfig.capabilities, nonce))
-      
-      // Start main loop with initial state
+      // Start main loop
       _ <- startMainLoop(zmqTransport, validatedConfig, actionQueue, serverRequestQueue, initialState).fork
       
     } yield client
   
   private def createZmqTransport(config: ClientConfig): UIO[ZmqClientTransport] = 
     ZIO.succeed(new ZmqClientTransportStub())
-  
-  /**
-   * Create initial state with proper nonce and timestamp.
-   */
-  private def createInitialState(config: ClientConfig, nonce: Nonce, now: Instant, nextRequestId: Ref[RequestId]): UIO[ClientState] =
-    ZIO.succeed(
-      ClientState.ConnectingNewSession(
-        capabilities = config.capabilities,
-        nonce = nonce,
-        addresses = config.clusterAddresses,
-        currentAddressIndex = 0,
-        createdAt = now,
-        nextRequestId = nextRequestId,
-        pendingRequests = PendingRequests.empty
-      )
-    )
   
   /**
    * Main loop accepts initial state as parameter.
@@ -156,6 +136,7 @@ object ClientState {
             nextRequestId <- Ref.make(RequestId.fromLong(1L))
             _ <- transport.connect(address).orDie
             _ <- transport.sendMessage(CreateSession(config.capabilities, nonce)).orDie
+            _ <- ZIO.logInfo("Connecting to cluster...")
           } yield ConnectingNewSession(
             capabilities = config.capabilities,
             nonce = nonce,

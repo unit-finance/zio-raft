@@ -16,85 +16,24 @@ import zio.raft.protocol._
  * - ClientMessageAction  
  * - ExpireSessionAction
  */
-trait ActionStream {
-  
-  /**
-   * Cleanup stream that emits CleanupAction every second.
-   */
-  def cleanupStream: ZStream[Any, Nothing, LocalAction]
-  
-  /**
-   * Message stream that wraps ZeroMQ messages in MessageAction.
-   */
-  def messageStream: ZStream[Any, Throwable, LocalAction] 
-  
-  /**
-   * Unified stream merging cleanup and message streams.
-   */
-  def unifiedStream: ZStream[Any, Throwable, LocalAction]
-  
-  /**
-   * Result stream that processes local actions and produces server actions.
-   */
-  def resultStream: ZStream[Any, Throwable, ServerAction]
-  
-  /**
-   * Process a single local action and produce server actions.
-   */
-  def processAction(action: LocalAction): ZStream[Any, Throwable, ServerAction]
-  
-  /**
-   * Handle error in stream processing.
-   */
-  def handleError(error: String): UIO[Unit]
-  
-  /**
-   * Check if stream is resilient to errors.
-   */
-  def isResilient: Boolean
-}
-
-object ActionStream {
-  
-  /**
-   * Create an ActionStream with the given dependencies.
-   */
-  def make(
-    sessionManager: SessionManager,
-    zmqMessageStream: ZStream[Any, Throwable, ZmqMessage]
-  ): UIO[ActionStream] = 
-    ZIO.succeed(new ActionStreamImpl(sessionManager, zmqMessageStream))
-  
-  /**
-   * Create an ActionStream for testing.
-   */
-  def create(): ActionStream = {
-    // Test implementation that provides non-null references
-    new ActionStreamTestImpl()
-  }
-}
-
-/**
- * Internal implementation of ActionStream.
- */
-private class ActionStreamImpl(
+class ActionStream private (
   sessionManager: SessionManager,
   zmqMessageStream: ZStream[Any, Throwable, ZmqMessage]
-) extends ActionStream {
+) {
   
-  override def cleanupStream: ZStream[Any, Nothing, LocalAction] = 
+  def cleanupStream: ZStream[Any, Nothing, LocalAction] = 
     ZStream.tick(1.second).as(CleanupAction)
   
-  override def messageStream: ZStream[Any, Throwable, LocalAction] = 
+  def messageStream: ZStream[Any, Throwable, LocalAction] = 
     zmqMessageStream.map(msg => MessageAction(msg.routingId, msg.content))
   
-  override def unifiedStream: ZStream[Any, Throwable, LocalAction] = 
+  def unifiedStream: ZStream[Any, Throwable, LocalAction] = 
     cleanupStream.merge(messageStream)
   
-  override def resultStream: ZStream[Any, Throwable, ServerAction] = 
+  def resultStream: ZStream[Any, Throwable, ServerAction] = 
     unifiedStream.flatMap(processAction)
   
-  override def processAction(action: LocalAction): ZStream[Any, Throwable, ServerAction] = 
+  def processAction(action: LocalAction): ZStream[Any, Throwable, ServerAction] = 
     action match {
       case CleanupAction => 
         ZStream.fromZIO(sessionManager.removeExpiredSessions())
@@ -157,36 +96,22 @@ private class ActionStreamImpl(
     }
   }
   
-  override def handleError(error: String): UIO[Unit] = 
+  def handleError(error: String): UIO[Unit] = 
     ZIO.logWarning(s"ActionStream error: $error")
   
-  override def isResilient: Boolean = true
+  def isResilient: Boolean = true
 }
 
-/**
- * Test implementation for ActionStream.
- */
-private class ActionStreamTestImpl extends ActionStream {
+object ActionStream {
   
-  override def cleanupStream: ZStream[Any, Nothing, LocalAction] = 
-    ZStream.empty
-  
-  override def messageStream: ZStream[Any, Throwable, LocalAction] = 
-    ZStream.empty
-  
-  override def unifiedStream: ZStream[Any, Throwable, LocalAction] = 
-    ZStream.empty
-  
-  override def resultStream: ZStream[Any, Throwable, ServerAction] = 
-    ZStream.empty
-  
-  override def processAction(action: LocalAction): ZStream[Any, Throwable, ServerAction] = 
-    ZStream.empty
-  
-  override def handleError(error: String): UIO[Unit] = 
-    ZIO.unit
-  
-  override def isResilient: Boolean = false
+  /**
+   * Create an ActionStream with the given dependencies.
+   */
+  def make(
+    sessionManager: SessionManager,
+    zmqMessageStream: ZStream[Any, Throwable, ZmqMessage]
+  ): UIO[ActionStream] = 
+    ZIO.succeed(new ActionStream(sessionManager, zmqMessageStream))
 }
 
 /**

@@ -14,102 +14,7 @@ import zio.raft.protocol._
  * - Leadership change notifications
  * - State machine command execution
  */
-trait RaftIntegration {
-  
-  /**
-   * Forward a server action to the Raft state machine.
-   */
-  def forwardAction(action: ServerAction): Task[Unit]
-  
-  /**
-   * Get stream of actions to forward to Raft.
-   */
-  def actionStream: ZStream[Any, Throwable, ServerAction]
-  
-  /**
-   * Handle Raft response for a client request.
-   */
-  def handleRaftResponse(
-    sessionId: SessionId,
-    requestId: RequestId, 
-    response: Either[String, scodec.bits.ByteVector]
-  ): UIO[Unit]
-  
-  /**
-   * Handle leadership change notification.
-   */
-  def handleLeadershipChange(
-    isLeader: Boolean,
-    currentTerm: Long,
-    existingSessions: Map[SessionId, SessionMetadata]
-  ): UIO[Unit]
-  
-  /**
-   * Get current Raft state information.
-   */
-  def getRaftState(): UIO[RaftStateInfo]
-  
-  /**
-   * Check if this server is currently the Raft leader.
-   */
-  def isLeader(): UIO[Boolean]
-  
-  /**
-   * Get current term number.
-   */
-  def getCurrentTerm(): UIO[Long]
-  
-  /**
-   * Get cluster membership information.
-   */
-  def getClusterMembers(): UIO[List[MemberId]]
-  
-  /**
-   * Submit a command to the Raft state machine.
-   */
-  def submitCommand(command: RaftCommand): Task[RaftCommandResult]
-  
-  /**
-   * Submit a read query to the Raft state machine.
-   */
-  def submitQuery(query: RaftQuery): Task[RaftQueryResult]
-  
-  /**
-   * Initialize session state from Raft on startup.
-   */
-  def initializeSessionState(): Task[Map[SessionId, SessionMetadata]]
-}
-
-object RaftIntegration {
-  
-  /**
-   * Create a RaftIntegration with the given dependencies.
-   */
-  def make(
-    sessionManager: SessionManager,
-    clientHandler: ClientHandler,
-    actionStream: ActionStream,
-    config: ServerConfig
-  ): UIO[RaftIntegration] = 
-    for {
-      isLeaderRef <- Ref.make(false)
-      currentTermRef <- Ref.make(0L)
-      clusterMembersRef <- Ref.make(List.empty[MemberId])
-    } yield new RaftIntegrationImpl(
-      sessionManager,
-      clientHandler, 
-      actionStream,
-      isLeaderRef,
-      currentTermRef,
-      clusterMembersRef,
-      config
-    )
-}
-
-/**
- * Internal implementation of RaftIntegration.
- */
-private class RaftIntegrationImpl(
+class RaftIntegration private (
   sessionManager: SessionManager,
   clientHandler: ClientHandler,
   actionStream: ActionStream,
@@ -117,9 +22,9 @@ private class RaftIntegrationImpl(
   currentTermRef: Ref[Long],
   clusterMembersRef: Ref[List[MemberId]],
   config: ServerConfig
-) extends RaftIntegration {
+) {
   
-  override def forwardAction(action: ServerAction): Task[Unit] = {
+  def forwardAction(action: ServerAction): Task[Unit] = {
     action match {
       case CreateSessionAction(routingId, capabilities, nonce) =>
         for {
@@ -192,10 +97,10 @@ private class RaftIntegrationImpl(
     }
   }
   
-  override def actionStream: ZStream[Any, Throwable, ServerAction] = 
+  def actionStream: ZStream[Any, Throwable, ServerAction] = 
     this.actionStream.resultStream
   
-  override def handleRaftResponse(
+  def handleRaftResponse(
     sessionId: SessionId,
     requestId: RequestId,
     response: Either[String, scodec.bits.ByteVector]
@@ -213,7 +118,7 @@ private class RaftIntegrationImpl(
         } yield ()
     }
   
-  override def handleLeadershipChange(
+  def handleLeadershipChange(
     isLeader: Boolean,
     currentTerm: Long,
     existingSessions: Map[SessionId, SessionMetadata]
@@ -235,7 +140,7 @@ private class RaftIntegrationImpl(
       }
     } yield ()
   
-  override def getRaftState(): UIO[RaftStateInfo] = 
+  def getRaftState(): UIO[RaftStateInfo] = 
     for {
       isLeader <- isLeaderRef.get
       term <- currentTermRef.get
@@ -248,22 +153,22 @@ private class RaftIntegrationImpl(
       lastApplied = 0L // Would get from actual Raft implementation
     )
   
-  override def isLeader(): UIO[Boolean] = 
+  def isLeader(): UIO[Boolean] = 
     isLeaderRef.get
   
-  override def getCurrentTerm(): UIO[Long] = 
+  def getCurrentTerm(): UIO[Long] = 
     currentTermRef.get
   
-  override def getClusterMembers(): UIO[List[MemberId]] = 
+  def getClusterMembers(): UIO[List[MemberId]] = 
     clusterMembersRef.get
   
-  override def submitCommand(command: RaftCommand): Task[RaftCommandResult] = 
+  def submitCommand(command: RaftCommand): Task[RaftCommandResult] = 
     submitRaftCommand(command)
   
-  override def submitQuery(query: RaftQuery): Task[RaftQueryResult] = 
+  def submitQuery(query: RaftQuery): Task[RaftQueryResult] = 
     submitRaftQuery(query)
   
-  override def initializeSessionState(): Task[Map[SessionId, SessionMetadata]] = 
+  def initializeSessionState(): Task[Map[SessionId, SessionMetadata]] = 
     for {
       // Query Raft state machine for existing sessions
       query <- ZIO.succeed(RaftGetSessionsQuery())
@@ -318,6 +223,38 @@ private class RaftIntegrationImpl(
     // This would get the current leader from Raft implementation
     ZIO.succeed(None) // Placeholder
   }
+  
+  def getActiveSessions(): UIO[Map[SessionId, SessionMetadata]] = {
+    // This would query the Raft state machine for active sessions
+    // For now, return empty map as placeholder
+    ZIO.succeed(Map.empty)
+  }
+}
+
+object RaftIntegration {
+  
+  /**
+   * Create a RaftIntegration with the given dependencies.
+   */
+  def make(
+    sessionManager: SessionManager,
+    clientHandler: ClientHandler,
+    actionStream: ActionStream,
+    config: ServerConfig
+  ): UIO[RaftIntegration] = 
+    for {
+      isLeaderRef <- Ref.make(false)
+      currentTermRef <- Ref.make(0L)
+      clusterMembersRef <- Ref.make(List.empty[MemberId])
+    } yield new RaftIntegration(
+      sessionManager,
+      clientHandler, 
+      actionStream,
+      isLeaderRef,
+      currentTermRef,
+      clusterMembersRef,
+      config
+    )
 }
 
 /**

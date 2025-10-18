@@ -14,132 +14,31 @@ import scodec.bits.ByteVector
  * - Leader redirection handling
  * - Keep-alive mechanism
  */
-trait ConnectionManager {
-  
-  /**
-   * Get current connection state.
-   */
-  def currentState: UIO[ClientConnectionState]
-  
-  /**
-   * Start connection process (transition to Connecting).
-   */
-  def startConnection(): UIO[Unit]
-  
-  /**
-   * Handle successful session establishment (transition to Connected).
-   */
-  def sessionEstablished(sessionId: SessionId): UIO[Unit]
-  
-  /**
-   * Handle session rejection with potential leader redirection.
-   */
-  def handleSessionRejected(rejection: SessionRejected): UIO[Boolean]
-  
-  /**
-   * Handle connection failure (transition to Connecting or Disconnected).
-   */
-  def handleConnectionFailure(error: Throwable): UIO[Unit]
-  
-  /**
-   * Gracefully disconnect (transition to Disconnected).
-   */
-  def disconnect(): UIO[Unit]
-  
-  /**
-   * Submit a client request based on current connection state.
-   * 
-   * @param request Client request to submit
-   * @param promise Promise to complete when response is received
-   * @return Action to take (queue, queue+send, or reject)
-   */
-  def submitRequest(
-    request: ClientRequest,
-    promise: Promise[RequestErrorReason, ByteVector]
-  ): UIO[RequestAction]
-  
-  /**
-   * Get all pending requests that should be resent.
-   * Called when transitioning from Connecting to Connected.
-   */
-  def getPendingRequests(): UIO[List[PendingRequest]]
-  
-  /**
-   * Handle successful client response.
-   */
-  def handleClientResponse(response: ClientResponse): UIO[Unit]
-  
-  /**
-   * Handle request error.
-   */
-  def handleRequestError(error: RequestError): UIO[Unit]
-  
-  /**
-   * Get current session ID if connected.
-   */
-  def getSessionId(): UIO[Option[SessionId]]
-  
-  /**
-   * Check if session is active.
-   */
-  def isSessionActive(sessionId: SessionId): UIO[Boolean]
-  
-  /**
-   * Close current session.
-   */
-  def closeSession(sessionId: SessionId): UIO[Boolean]
-}
-
-object ConnectionManager {
-  
-  /**
-   * Create a ConnectionManager with the given configuration.
-   */
-  def make(config: ClientConfig): UIO[ConnectionManager] = 
-    for {
-      state <- Ref.make[ClientConnectionState](Disconnected)
-      sessionId <- Ref.make[Option[SessionId]](None)
-      pendingRequests <- Ref.make(Map.empty[RequestId, PendingRequest])
-      requestIdCounter <- Ref.make(0L)
-    } yield new ConnectionManagerImpl(state, sessionId, pendingRequests, requestIdCounter, config)
-  
-  /**
-   * Create a ConnectionManager for testing.
-   */
-  def create(): ConnectionManager = {
-    // Test implementation
-    new ConnectionManagerTestImpl()
-  }
-}
-
-/**
- * Internal implementation of ConnectionManager.
- */
-private class ConnectionManagerImpl(
+class ConnectionManager private (
   state: Ref[ClientConnectionState],
   sessionId: Ref[Option[SessionId]],
   pendingRequests: Ref[Map[RequestId, PendingRequest]],
   requestIdCounter: Ref[Long],
   config: ClientConfig
-) extends ConnectionManager {
+) {
   
-  override def currentState: UIO[ClientConnectionState] = 
+  def currentState: UIO[ClientConnectionState] = 
     state.get
   
-  override def startConnection(): UIO[Unit] = 
+  def startConnection(): UIO[Unit] = 
     for {
       _ <- state.set(Connecting)
       _ <- ZIO.logInfo("Connection manager: transitioning to Connecting state")
     } yield ()
   
-  override def sessionEstablished(sessionId: SessionId): UIO[Unit] = 
+  def sessionEstablished(sessionId: SessionId): UIO[Unit] = 
     for {
       _ <- state.set(Connected)
       _ <- this.sessionId.set(Some(sessionId))
       _ <- ZIO.logInfo(s"Connection manager: session established $sessionId, transitioning to Connected")
     } yield ()
   
-  override def handleSessionRejected(rejection: SessionRejected): UIO[Boolean] = 
+  def handleSessionRejected(rejection: SessionRejected): UIO[Boolean] = 
     for {
       _ <- ZIO.logWarning(s"Session rejected: ${rejection.reason}")
       handled <- rejection.reason match {
@@ -165,7 +64,7 @@ private class ConnectionManagerImpl(
       }
     } yield handled
   
-  override def handleConnectionFailure(error: Throwable): UIO[Unit] = 
+  def handleConnectionFailure(error: Throwable): UIO[Unit] = 
     for {
       currentState <- state.get
       _ <- currentState match {
@@ -184,7 +83,7 @@ private class ConnectionManagerImpl(
       }
     } yield ()
   
-  override def disconnect(): UIO[Unit] = 
+  def disconnect(): UIO[Unit] = 
     for {
       _ <- state.set(Disconnected)
       _ <- sessionId.set(None)
@@ -193,7 +92,7 @@ private class ConnectionManagerImpl(
       _ <- ZIO.logInfo("Connection manager: gracefully disconnected")
     } yield ()
   
-  override def submitRequest(
+  def submitRequest(
     request: ClientRequest,
     promise: Promise[RequestErrorReason, ByteVector]
   ): UIO[RequestAction] = 
@@ -220,10 +119,10 @@ private class ConnectionManagerImpl(
       }
     } yield action
   
-  override def getPendingRequests(): UIO[List[PendingRequest]] = 
+  def getPendingRequests(): UIO[List[PendingRequest]] = 
     pendingRequests.get.map(_.values.toList)
   
-  override def handleClientResponse(response: ClientResponse): UIO[Unit] = 
+  def handleClientResponse(response: ClientResponse): UIO[Unit] = 
     for {
       requestsMap <- pendingRequests.get
       _ <- requestsMap.get(response.requestId) match {
@@ -237,7 +136,7 @@ private class ConnectionManagerImpl(
       }
     } yield ()
   
-  override def handleRequestError(error: RequestError): UIO[Unit] = 
+  def handleRequestError(error: RequestError): UIO[Unit] = 
     for {
       // RequestError is a general error that affects the entire session
       // Fail all pending requests with this error reason
@@ -251,16 +150,16 @@ private class ConnectionManagerImpl(
       }
     } yield ()
   
-  override def getSessionId(): UIO[Option[SessionId]] = 
+  def getSessionId(): UIO[Option[SessionId]] = 
     sessionId.get
   
-  override def isSessionActive(sessionId: SessionId): UIO[Boolean] = 
+  def isSessionActive(sessionId: SessionId): UIO[Boolean] = 
     for {
       currentSessionId <- this.sessionId.get
       currentState <- state.get
     } yield currentSessionId.contains(sessionId) && currentState == Connected
   
-  override def closeSession(sessionId: SessionId): UIO[Boolean] = 
+  def closeSession(sessionId: SessionId): UIO[Boolean] = 
     for {
       currentSessionId <- this.sessionId.get
       result <- if (currentSessionId.contains(sessionId)) {
@@ -290,52 +189,18 @@ private class ConnectionManagerImpl(
     requestIdCounter.updateAndGet(_ + 1).map(RequestId.fromLong)
 }
 
-/**
- * Test implementation for ConnectionManager.
- */
-private class ConnectionManagerTestImpl extends ConnectionManager {
+object ConnectionManager {
   
-  override def currentState: UIO[ClientConnectionState] = 
-    ZIO.succeed(Disconnected)
-  
-  override def startConnection(): UIO[Unit] = 
-    ZIO.unit
-  
-  override def sessionEstablished(sessionId: SessionId): UIO[Unit] = 
-    ZIO.unit
-  
-  override def handleSessionRejected(rejection: SessionRejected): UIO[Boolean] = 
-    ZIO.succeed(false)
-  
-  override def handleConnectionFailure(error: Throwable): UIO[Unit] = 
-    ZIO.unit
-  
-  override def disconnect(): UIO[Unit] = 
-    ZIO.unit
-  
-  override def submitRequest(
-    request: ClientRequest,
-    promise: Promise[RequestErrorReason, ByteVector]
-  ): UIO[RequestAction] = 
-    ZIO.succeed(RejectRequest)
-  
-  override def getPendingRequests(): UIO[List[PendingRequest]] = 
-    ZIO.succeed(List.empty)
-  
-  override def handleClientResponse(response: ClientResponse): UIO[Unit] = 
-    ZIO.unit
-  
-  override def handleRequestError(error: RequestError): UIO[Unit] = 
-    ZIO.unit
-  
-  override def getSessionId(): UIO[Option[SessionId]] = 
-    ZIO.succeed(None)
-  
-  override def isSessionActive(sessionId: SessionId): UIO[Boolean] = 
-    ZIO.succeed(false)
-  
-  override def closeSession(sessionId: SessionId): UIO[Boolean] = 
-    ZIO.succeed(false)
+  /**
+   * Create a ConnectionManager with the given configuration.
+   */
+  def make(config: ClientConfig): UIO[ConnectionManager] = 
+    for {
+      state <- Ref.make[ClientConnectionState](Disconnected)
+      sessionId <- Ref.make[Option[SessionId]](None)
+      pendingRequests <- Ref.make(Map.empty[RequestId, PendingRequest])
+      requestIdCounter <- Ref.make(0L)
+    } yield new ConnectionManager(state, sessionId, pendingRequests, requestIdCounter, config)
 }
 
 /**

@@ -12,128 +12,22 @@ import zio.raft.protocol._
  * - Session lifecycle operations
  * - Server-initiated request tracking
  */
-trait SessionState {
-  
-  /**
-   * Get current session ID, if any.
-   */
-  def getCurrentSessionId(): UIO[Option[SessionId]]
-  
-  /**
-   * Get session capabilities that were registered.
-   */
-  def getSessionCapabilities(): UIO[Map[String, String]]
-  
-  /**
-   * Create a new session with given capabilities.
-   * 
-   * @param capabilities Client capabilities to register
-   * @return Session ID if successful
-   */
-  def createSession(capabilities: Map[String, String]): Task[SessionId]
-  
-  /**
-   * Continue an existing session after reconnection.
-   * 
-   * @param sessionId Session ID to continue
-   * @return Success if session was continued
-   */
-  def continueSession(sessionId: SessionId): Task[Unit]
-  
-  /**
-   * Check if current session is active.
-   */
-  def isSessionActive(): UIO[Boolean]
-  
-  /**
-   * Check if a specific session ID is active.
-   */
-  def isSessionActive(sessionId: SessionId): UIO[Boolean]
-  
-  /**
-   * Close current session gracefully.
-   */
-  def closeSession(): Task[Unit]
-  
-  /**
-   * Handle session created response from server.
-   */
-  def handleSessionCreated(sessionId: SessionId, nonce: Nonce): UIO[Unit]
-  
-  /**
-   * Handle session continued response from server.
-   */
-  def handleSessionContinued(nonce: Nonce): UIO[Unit]
-  
-  /**
-   * Handle session rejection from server.
-   */
-  def handleSessionRejected(rejection: SessionRejected): UIO[Unit]
-  
-  /**
-   * Handle session closure from server.
-   */
-  def handleSessionClosed(closure: SessionClosed): UIO[Unit]
-  
-  /**
-   * Get server request tracker for idempotency.
-   */
-  def getServerRequestTracker(): UIO[ServerRequestTracker]
-  
-  /**
-   * Track server-initiated request acknowledgment.
-   */
-  def acknowledgeServerRequest(requestId: RequestId): UIO[Unit]
-  
-  /**
-   * Get session metadata.
-   */
-  def getSessionMetadata(): UIO[Option[SessionMetadata]]
-}
-
-object SessionState {
-  
-  /**
-   * Create a SessionState with the given configuration.
-   */
-  def make(
-    connectionManager: ConnectionManager,
-    config: ClientConfig
-  ): UIO[SessionState] = 
-    for {
-      currentSessionId <- Ref.make[Option[SessionId]](None)
-      capabilities <- Ref.make[Map[String, String]](Map.empty)
-      serverRequestTracker <- Ref.make(ServerRequestTracker())
-      pendingOperations <- Ref.make[Map[Nonce, SessionOperation]](Map.empty)
-    } yield new SessionStateImpl(
-      currentSessionId,
-      capabilities,
-      serverRequestTracker,
-      pendingOperations,
-      connectionManager,
-      config
-    )
-}
-
-/**
- * Internal implementation of SessionState.
- */
-private class SessionStateImpl(
+class SessionState private (
   currentSessionId: Ref[Option[SessionId]],
   capabilities: Ref[Map[String, String]],
   serverRequestTracker: Ref[ServerRequestTracker],
   pendingOperations: Ref[Map[Nonce, SessionOperation]],
   connectionManager: ConnectionManager,
   config: ClientConfig
-) extends SessionState {
+) {
   
-  override def getCurrentSessionId(): UIO[Option[SessionId]] = 
+  def getCurrentSessionId(): UIO[Option[SessionId]] = 
     currentSessionId.get
   
-  override def getSessionCapabilities(): UIO[Map[String, String]] = 
+  def getSessionCapabilities(): UIO[Map[String, String]] = 
     capabilities.get
   
-  override def createSession(capabilities: Map[String, String]): Task[SessionId] = 
+  def createSession(capabilities: Map[String, String]): Task[SessionId] = 
     for {
       // Validate capabilities
       _ <- validateCapabilities(capabilities)
@@ -166,7 +60,7 @@ private class SessionStateImpl(
       
     } yield sessionId
   
-  override def continueSession(sessionId: SessionId): Task[Unit] = 
+  def continueSession(sessionId: SessionId): Task[Unit] = 
     for {
       // Generate nonce for operation tracking
       nonce <- Nonce.generate()
@@ -192,19 +86,19 @@ private class SessionStateImpl(
       
     } yield ()
   
-  override def isSessionActive(): UIO[Boolean] = 
+  def isSessionActive(): UIO[Boolean] = 
     for {
       sessionIdOpt <- currentSessionId.get
       state <- connectionManager.currentState
     } yield sessionIdOpt.isDefined && state == Connected
   
-  override def isSessionActive(sessionId: SessionId): UIO[Boolean] = 
+  def isSessionActive(sessionId: SessionId): UIO[Boolean] = 
     for {
       currentIdOpt <- currentSessionId.get
       state <- connectionManager.currentState
     } yield currentIdOpt.contains(sessionId) && state == Connected
   
-  override def closeSession(): Task[Unit] = 
+  def closeSession(): Task[Unit] = 
     for {
       sessionIdOpt <- currentSessionId.get
       _ <- sessionIdOpt match {
@@ -221,7 +115,7 @@ private class SessionStateImpl(
       }
     } yield ()
   
-  override def handleSessionCreated(sessionId: SessionId, nonce: Nonce): UIO[Unit] = 
+  def handleSessionCreated(sessionId: SessionId, nonce: Nonce): UIO[Unit] = 
     for {
       operationsMap <- pendingOperations.get
       _ <- operationsMap.get(nonce) match {
@@ -236,7 +130,7 @@ private class SessionStateImpl(
       }
     } yield ()
   
-  override def handleSessionContinued(nonce: Nonce): UIO[Unit] = 
+  def handleSessionContinued(nonce: Nonce): UIO[Unit] = 
     for {
       operationsMap <- pendingOperations.get
       _ <- operationsMap.get(nonce) match {
@@ -250,7 +144,7 @@ private class SessionStateImpl(
       }
     } yield ()
   
-  override def handleSessionRejected(rejection: SessionRejected): UIO[Unit] = 
+  def handleSessionRejected(rejection: SessionRejected): UIO[Unit] = 
     for {
       operationsMap <- pendingOperations.get
       _ <- operationsMap.get(rejection.nonce) match {
@@ -271,17 +165,17 @@ private class SessionStateImpl(
       }
     } yield ()
   
-  override def handleSessionClosed(closure: SessionClosed): UIO[Unit] = 
+  def handleSessionClosed(closure: SessionClosed): UIO[Unit] = 
     for {
       _ <- currentSessionId.set(None)
       _ <- capabilities.set(Map.empty)
       _ <- ZIO.logInfo(s"Session closed by server: ${closure.reason}")
     } yield ()
   
-  override def getServerRequestTracker(): UIO[ServerRequestTracker] = 
+  def getServerRequestTracker(): UIO[ServerRequestTracker] = 
     serverRequestTracker.get
   
-  override def acknowledgeServerRequest(requestId: RequestId): UIO[Unit] = 
+  def acknowledgeServerRequest(requestId: RequestId): UIO[Unit] = 
     for {
       tracker <- serverRequestTracker.get
       _ <- if (tracker.shouldProcess(requestId)) {
@@ -295,7 +189,7 @@ private class SessionStateImpl(
       }
     } yield ()
   
-  override def getSessionMetadata(): UIO[Option[SessionMetadata]] = 
+  def getSessionMetadata(): UIO[Option[SessionMetadata]] = 
     for {
       sessionIdOpt <- currentSessionId.get
       caps <- capabilities.get
@@ -338,6 +232,30 @@ private class SessionStateImpl(
     // This would be handled by the action stream in practice
     ZIO.logDebug(s"Submitting session message: $message")
   }
+}
+
+object SessionState {
+  
+  /**
+   * Create a SessionState with the given configuration.
+   */
+  def make(
+    connectionManager: ConnectionManager,
+    config: ClientConfig
+  ): UIO[SessionState] = 
+    for {
+      currentSessionId <- Ref.make[Option[SessionId]](None)
+      capabilities <- Ref.make[Map[String, String]](Map.empty)
+      serverRequestTracker <- Ref.make(ServerRequestTracker())
+      pendingOperations <- Ref.make[Map[Nonce, SessionOperation]](Map.empty)
+    } yield new SessionState(
+      currentSessionId,
+      capabilities,
+      serverRequestTracker,
+      pendingOperations,
+      connectionManager,
+      config
+    )
 }
 
 /**

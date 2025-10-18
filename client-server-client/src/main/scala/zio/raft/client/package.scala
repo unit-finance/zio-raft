@@ -20,22 +20,6 @@ package object client {
   val DEFAULT_SESSION_TIMEOUT: Duration = 90.seconds
   val DEFAULT_REQUEST_TIMEOUT: Duration = 10.seconds
 
-  // Client connection states for request queuing behavior
-  sealed trait ClientConnectionState
-  case object Connecting extends ClientConnectionState    // Attempting connection/session
-  case object Connected extends ClientConnectionState     // Active session, can send requests  
-  case object Disconnected extends ClientConnectionState  // User-initiated disconnection
-
-  // Client action types for unified stream processing
-  sealed trait ClientAction
-  case class NetworkMessageAction(message: protocol.ServerMessage) extends ClientAction
-  case class UserClientRequestAction(
-    request: protocol.ClientRequest,
-    promise: Promise[protocol.RequestErrorReason, scodec.bits.ByteVector]
-  ) extends ClientAction
-  case object TimeoutCheckAction extends ClientAction
-  case object SendKeepAliveAction extends ClientAction
-
   // Pending request tracking for timeout logic
   case class PendingRequest(
     request: protocol.ClientRequest,
@@ -45,16 +29,7 @@ package object client {
   )
 
   // Note: ClientConfig is defined in ClientConfig.scala
-
-  // Client connection state with request management
-  case class ClientState(
-    connectionState: ClientConnectionState = Disconnected,
-    sessionId: Option[protocol.SessionId] = None,
-    pendingRequests: Map[protocol.RequestId, PendingRequest] = Map.empty,
-    capabilities: Map[String, String] = Map.empty,
-    config: ClientConfig = ClientConfig(),
-    serverRequestTracker: ServerRequestTracker = ServerRequestTracker()
-  )
+  // Note: ClientState is now defined in RaftClient.scala as a functional ADT
 
   // Server-initiated request idempotency tracking
   case class ServerRequestTracker(

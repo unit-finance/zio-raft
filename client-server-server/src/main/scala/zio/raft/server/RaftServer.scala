@@ -108,11 +108,6 @@ object RaftServer {
     def stepDown(leaderId: Option[MemberId]): UIO[Unit] =
       actionQueue.offer(ServerAction.StepDown(leaderId)).unit
     
-    /**
-     * Shutdown the server cleanly by closing all sessions.
-     */
-    def shutdown(): UIO[Unit] =
-      actionQueue.offer(ServerAction.Shutdown).unit
   }
   
   def make(bindAddress: String): ZIO[Scope, Throwable, RaftServer] = {
@@ -128,12 +123,21 @@ object RaftServer {
       
       // Start main loop in Follower state (not leader initially)
       initialState = ServerState.Follower
+      stateRef <- Ref.make[ServerState](initialState)
       
-      _ <- startMainLoop(transport, validatedConfig, actionQueue, raftActionsOut, initialState).forkScoped
+      _ <- startMainLoop(transport, validatedConfig, actionQueue, raftActionsOut, stateRef).forkScoped
       
       // Register finalizer to cleanly shutdown all sessions on scope exit
       _ <- ZIO.addFinalizer(
-        server.shutdown()
+        for {
+          state <- stateRef.get
+          _ <- state match {
+            case leader: ServerState.Leader =>
+              leader.sessions.shutdown(transport)
+            case _ =>
+              ZIO.unit
+          }
+        } yield ()
       )
       
     } yield server
@@ -150,7 +154,7 @@ object RaftServer {
     config: ServerConfig,
     actionQueue: Queue[ServerAction],
     raftActionsOut: Queue[RaftAction],
-    initialState: ServerState
+    stateRef: Ref[ServerState]
   ): Task[Unit] = {
     
     val actionStream = ZStream.fromQueue(actionQueue)
@@ -166,12 +170,17 @@ object RaftServer {
       .merge(messageStream)
       .merge(cleanupStream)
     
-    // Pure functional state machine
-    unifiedStream
-      .runFoldZIO(initialState) { (state, event) =>
-        state.handle(event, transport, config, raftActionsOut)
-      }
-      .unit
+    // Pure functional state machine with Ref tracking
+    for {
+      initialState <- stateRef.get
+      _ <- unifiedStream
+        .runFoldZIO(initialState) { (state, event) =>
+          for {
+            newState <- state.handle(event, transport, config, raftActionsOut)
+            _ <- stateRef.set(newState)
+          } yield newState
+        }
+    } yield ()
   }
   
   /**

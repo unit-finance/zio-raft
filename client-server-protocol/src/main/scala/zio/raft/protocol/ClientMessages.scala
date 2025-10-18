@@ -91,12 +91,9 @@ case class CloseSession(
  */
 sealed trait CloseReason
 
-/**
- * Client is shutting down normally.
- */
-case object ClientShutdown extends CloseReason
-
-/**
- * Client switching to different server.
- */
-case object SwitchingServer extends CloseReason
+object CloseReason {
+  /**
+   * Client is shutting down normally.
+   */
+  case object ClientShutdown extends CloseReason
+}

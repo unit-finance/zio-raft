@@ -69,7 +69,7 @@ object RaftClient {
       _ <- socket.options.setImmediate(false)
       _ <- socket.options.setLinger(0)
       _ <- socket.options.setHeartbeat(1.seconds, 10.second, 30.second)
-      timeoutConnectionClosed = serverMessageCodec.encode(SessionClosed(ConnectionClosed, None)).require.toByteArray
+      timeoutConnectionClosed = serverMessageCodec.encode(SessionClosed(SessionCloseReason.ConnectionClosed, None)).require.toByteArray
       _ <- socket.options.setHiccupMessage(timeoutConnectionClosed)
       _ <- socket.options.setHighWatermark(200000, 200000)
       lastAddressRef <- Ref.make(Option.empty[String])
@@ -249,13 +249,13 @@ object RaftClient {
           case StreamEvent.ServerMsg(SessionRejected(reason, responseNonce, leaderId)) =>
             if (nonce == responseNonce) {
               reason match {
-                case NotLeader =>
+                case RejectionReason.NotLeader =>
                   connectToMember(leaderId, transport, s"Not leader at $currentMemberId")
 
-                case SessionNotFound =>
+                case RejectionReason.SessionNotFound =>
                   ZIO.dieMessage("Session not found - cannot continue")
 
-                case InvalidCapabilities =>
+                case RejectionReason.InvalidCapabilities =>
                   ZIO.dieMessage(s"Invalid capabilities - cannot connect: ${capabilities}")
               }
             } else {
@@ -390,13 +390,13 @@ object RaftClient {
           case StreamEvent.ServerMsg(SessionRejected(reason, responseNonce, leaderId)) =>
             if (nonce == responseNonce) {
               reason match {
-                case NotLeader =>
+                case RejectionReason.NotLeader =>
                   connectToMember(leaderId, transport, s"Not leader at $currentMemberId")
 
-                case SessionNotFound =>
+                case RejectionReason.SessionNotFound =>
                   ZIO.dieMessage("Session not found - cannot continue")
 
-                case InvalidCapabilities =>
+                case RejectionReason.InvalidCapabilities =>
                   ZIO.dieMessage(s"Invalid capabilities - cannot connect: ${capabilities}")
               }
             } else {
@@ -517,7 +517,7 @@ object RaftClient {
         event match {
           case StreamEvent.Action(ClientAction.Disconnect) =>
             for {
-              _ <- transport.sendMessage(CloseSession(ClientShutdown)).orDie
+              _ <- transport.sendMessage(CloseSession(CloseReason.ClientShutdown)).orDie
               _ <- transport.disconnect().orDie
               _ <- ZIO.logInfo("Disconnected")
             } yield Disconnected
@@ -569,53 +569,29 @@ object RaftClient {
                   .as(this)
             }
 
-          case StreamEvent.ServerMsg(RequestError(NotLeaderRequest, leaderId)) =>
+          case StreamEvent.ServerMsg(RequestError(RequestErrorReason.NotLeaderRequest, leaderId)) =>
             val currentAddr = clusterMembers.get(currentMemberId)
             reconnectTo(leaderId, transport, s"Not leader at $currentMemberId (${currentAddr.getOrElse("unknown")}), reconnecting")
 
-          case StreamEvent.ServerMsg(RequestError(SessionTerminated, _)) =>
+          case StreamEvent.ServerMsg(RequestError(RequestErrorReason.SessionTerminated, _)) =>
             ZIO.dieMessage(s"Session terminated by server for session $sessionId")
-          
-          case StreamEvent.ServerMsg(RequestError(InvalidRequest, _)) =>
-            ZIO.logWarning("Received InvalidRequest error").as(this)
-          
-          case StreamEvent.ServerMsg(RequestError(NotConnected, _)) =>
-            ZIO.logWarning("Received NotConnected error").as(this)
-          
-          case StreamEvent.ServerMsg(RequestError(ConnectionLost, _)) =>
-            ZIO.logWarning("Received ConnectionLost error").as(this)
-          
-          case StreamEvent.ServerMsg(RequestError(UnsupportedVersion, _)) =>
-            ZIO.dieMessage(s"Unsupported protocol version for session $sessionId")
-          
-          case StreamEvent.ServerMsg(RequestError(PayloadTooLarge, _)) =>
-            ZIO.logWarning("Received PayloadTooLarge error").as(this)
-          
-          case StreamEvent.ServerMsg(RequestError(ServiceUnavailable, _)) =>
-            ZIO.logWarning("Received ServiceUnavailable error").as(this)
-          
-          case StreamEvent.ServerMsg(RequestError(ProcessingFailed, _)) =>
-            ZIO.logWarning("Received ProcessingFailed error").as(this)
-          
-          case StreamEvent.ServerMsg(RequestError(RequestTimeout, _)) =>
-            ZIO.logWarning("Received RequestTimeout error").as(this)
 
-          case StreamEvent.ServerMsg(SessionClosed(Shutdown, _)) =>
+          case StreamEvent.ServerMsg(SessionClosed(SessionCloseReason.Shutdown, _)) =>
             ZIO.logInfo("Server shutdown, session closed").as(Disconnected)
           
-          case StreamEvent.ServerMsg(SessionClosed(NotLeaderAnymore, leaderId)) =>
+          case StreamEvent.ServerMsg(SessionClosed(SessionCloseReason.NotLeaderAnymore, leaderId)) =>
             val currentAddr = clusterMembers.get(currentMemberId)
             reconnectTo(leaderId, transport, s"Session closed: not leader anymore at $currentMemberId (${currentAddr.getOrElse("unknown")})")
           
-          case StreamEvent.ServerMsg(SessionClosed(SessionError, _)) =>
+          case StreamEvent.ServerMsg(SessionClosed(SessionCloseReason.SessionError, _)) =>
             val currentAddr = clusterMembers.get(currentMemberId)
             reconnectTo(Some(currentMemberId), transport, s"Session closed: session error, reconnecting to same member: $currentMemberId (${currentAddr.getOrElse("unknown")})")
           
-          case StreamEvent.ServerMsg(SessionClosed(ConnectionClosed, _)) =>
+          case StreamEvent.ServerMsg(SessionClosed(SessionCloseReason.ConnectionClosed, _)) =>
             val currentAddr = clusterMembers.get(currentMemberId)
             reconnectTo(Some(currentMemberId), transport, s"Session closed: connection closed, reconnecting to same member: $currentMemberId (${currentAddr.getOrElse("unknown")})")
           
-          case StreamEvent.ServerMsg(SessionClosed(SessionTimeout, _)) =>
+          case StreamEvent.ServerMsg(SessionClosed(SessionCloseReason.SessionTimeout, _)) =>
             val currentAddr = clusterMembers.get(currentMemberId)
             reconnectTo(Some(currentMemberId), transport, s"Session closed: timeout, reconnecting to same member: $currentMemberId (${currentAddr.getOrElse("unknown")})")
 

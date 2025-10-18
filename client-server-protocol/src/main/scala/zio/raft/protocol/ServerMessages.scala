@@ -102,17 +102,6 @@ case class ServerRequest(
   createdAt: Instant
 ) extends ServerMessage
 
-/**
- * Client request processing error.
- * Server responds to same ZeroMQ routing ID, no session ID needed.
- *
- * @param reason Error classification and details
- * @param leaderId Optional leader ID for redirection
- */
-case class RequestError(
-  reason: RequestErrorReason,
-  leaderId: Option[MemberId]
-) extends ServerMessage
 
 // ============================================================================
 // REASON ENUMS
@@ -172,19 +161,3 @@ object SessionCloseReason {
   case object SessionTimeout extends SessionCloseReason
 }
 
-/**
- * Reasons for client request processing errors.
- */
-sealed trait RequestErrorReason
-
-object RequestErrorReason {
-  /**
-   * Server is not the current Raft leader (extends NotLeader for requests).
-   */
-  case object NotLeaderRequest extends RequestErrorReason
-
-  /**
-   * Client session was closed by the server.
-   */
-  case object SessionTerminated extends RequestErrorReason
-}

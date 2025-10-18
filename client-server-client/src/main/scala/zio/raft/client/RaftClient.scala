@@ -294,8 +294,6 @@ object RaftClient {
           case StreamEvent.ServerMsg(_: ServerRequest) =>
             ZIO.logWarning("Received ServerRequest while connecting, ignoring").as(this)
 
-          case StreamEvent.ServerMsg(RequestError(_, _)) =>
-            ZIO.logWarning("Received RequestError while connecting, ignoring").as(this)
 
           case StreamEvent.ServerMsg(SessionClosed(_, _)) =>
             ZIO.logWarning("Received SessionClosed while connecting, ignoring").as(this)
@@ -435,8 +433,6 @@ object RaftClient {
           case StreamEvent.ServerMsg(_: ServerRequest) =>
             ZIO.logWarning("Received ServerRequest while connecting, ignoring").as(this)
 
-          case StreamEvent.ServerMsg(RequestError(_, _)) =>
-            ZIO.logWarning("Received RequestError while connecting, ignoring").as(this)
 
           case StreamEvent.ServerMsg(SessionClosed(_, _)) =>
             ZIO.logWarning("Received SessionClosed while connecting, ignoring").as(this)
@@ -569,12 +565,6 @@ object RaftClient {
                   .as(this)
             }
 
-          case StreamEvent.ServerMsg(RequestError(RequestErrorReason.NotLeaderRequest, leaderId)) =>
-            val currentAddr = clusterMembers.get(currentMemberId)
-            reconnectTo(leaderId, transport, s"Not leader at $currentMemberId (${currentAddr.getOrElse("unknown")}), reconnecting")
-
-          case StreamEvent.ServerMsg(RequestError(RequestErrorReason.SessionTerminated, _)) =>
-            ZIO.dieMessage(s"Session terminated by server for session $sessionId")
 
           case StreamEvent.ServerMsg(SessionClosed(SessionCloseReason.Shutdown, _)) =>
             ZIO.logInfo("Server shutdown, session closed").as(Disconnected)

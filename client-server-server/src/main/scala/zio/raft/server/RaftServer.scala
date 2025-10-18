@@ -217,16 +217,16 @@ object RaftServer {
       ): UIO[ServerState] = {
         message match {
           case CreateSession(_, nonce) =>
-            transport.sendMessage(routingId, SessionRejected(NotLeader, nonce, None)).orDie.as(this)
+            transport.sendMessage(routingId, SessionRejected(RejectionReason.NotLeader, nonce, None)).orDie.as(this)
           
           case ContinueSession(_, nonce) =>
-            transport.sendMessage(routingId, SessionRejected(NotLeader, nonce, None)).orDie.as(this)
+            transport.sendMessage(routingId, SessionRejected(RejectionReason.NotLeader, nonce, None)).orDie.as(this)
           
           case KeepAlive(timestamp) =>
-            transport.sendMessage(routingId, SessionClosed(SessionError, None)).orDie.as(this)
+            transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionError, None)).orDie.as(this)
           
           case _: ClientRequest =>
-            transport.sendMessage(routingId, RequestError(NotLeaderRequest, None)).orDie.as(this)
+            transport.sendMessage(routingId, RequestError(RequestErrorReason.NotLeaderRequest, None)).orDie.as(this)
           
           case ServerRequestAck(_) =>
             ZIO.succeed(this)
@@ -292,7 +292,7 @@ object RaftServer {
                   routingIdOpt = sessions.getRoutingId(sessionId)
                   _ <- routingIdOpt match {
                     case Some(routingId) =>
-                      transport.sendMessage(routingId, SessionClosed(SessionTimeout, None)).orDie
+                      transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionTimeout, None)).orDie
                     case None => ZIO.unit
                   }
                 } yield ()
@@ -326,7 +326,7 @@ object RaftServer {
                   newSessions = sessions.reconnect(sessionId, routingId, now)
                 } yield copy(sessions = newSessions)
               case None =>
-                transport.sendMessage(routingId, SessionRejected(SessionNotFound, nonce, None)).orDie.as(this)
+                transport.sendMessage(routingId, SessionRejected(RejectionReason.SessionNotFound, nonce, None)).orDie.as(this)
             }
           
           case KeepAlive(timestamp) =>
@@ -338,7 +338,7 @@ object RaftServer {
                   newSessions = sessions.updateExpiry(sessionId, now)
                 } yield copy(sessions = newSessions)
               case None =>
-                transport.sendMessage(routingId, SessionClosed(SessionError, None)).orDie.as(this)
+                transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionError, None)).orDie.as(this)
             }
           
           case clientRequest: ClientRequest =>
@@ -348,7 +348,7 @@ object RaftServer {
                   _ <- raftActionsOut.offer(RaftAction.ClientRequest(sessionId, clientRequest.requestId, clientRequest.payload))
                 } yield this
               case None =>
-                transport.sendMessage(routingId, RequestError(SessionTerminated, None)).orDie.as(this)
+                transport.sendMessage(routingId, RequestError(RequestErrorReason.SessionTerminated, None)).orDie.as(this)
             }
           
           case ServerRequestAck(requestId) =>
@@ -433,7 +433,7 @@ object RaftServer {
     
     def closeAll(transport: ZmqServerTransport): UIO[Unit] =
       ZIO.foreachDiscard(connections.values.flatMap(_.routingId)) { routingId =>
-        transport.sendMessage(routingId, SessionClosed(Shutdown, None)).orDie
+        transport.sendMessage(routingId, SessionClosed(SessionCloseReason.Shutdown, None)).orDie
       }
   }
   

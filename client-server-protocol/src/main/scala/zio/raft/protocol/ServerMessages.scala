@@ -123,102 +123,68 @@ case class RequestError(
  */
 sealed trait RejectionReason
 
-/**
- * Server is not the current Raft leader.
- */
-case object NotLeader extends RejectionReason
+object RejectionReason {
+  /**
+   * Server is not the current Raft leader.
+   */
+  case object NotLeader extends RejectionReason
 
-/**
- * Requested session ID does not exist (expired or never created).
- */
-case object SessionNotFound extends RejectionReason
+  /**
+   * Requested session ID does not exist (expired or never created).
+   */
+  case object SessionNotFound extends RejectionReason
 
-/**
- * Client capabilities are invalid or unsupported.
- */
-case object InvalidCapabilities extends RejectionReason
+  /**
+   * Client capabilities are invalid or unsupported.
+   */
+  case object InvalidCapabilities extends RejectionReason
+}
 
 /**
  * Reasons for server-initiated session closure.
  */
 sealed trait SessionCloseReason
 
-/**
- * Server is shutting down gracefully.
- */
-case object Shutdown extends SessionCloseReason
+object SessionCloseReason {
+  /**
+   * Server is shutting down gracefully.
+   */
+  case object Shutdown extends SessionCloseReason
 
-/**
- * Server lost leadership and cannot serve clients.
- */
-case object NotLeaderAnymore extends SessionCloseReason
+  /**
+   * Server lost leadership and cannot serve clients.
+   */
+  case object NotLeaderAnymore extends SessionCloseReason
 
-/**
- * Client sent unexpected/invalid message for current session state.
- */
-case object SessionError extends SessionCloseReason
+  /**
+   * Client sent unexpected/invalid message for current session state.
+   */
+  case object SessionError extends SessionCloseReason
 
-/**
- * Client connection was closed by the server or OS (e.g. timeout, network error).
- */
-case object ConnectionClosed extends SessionCloseReason
+  /**
+   * Client connection was closed by the server or OS (e.g. timeout, network error).
+   */
+  case object ConnectionClosed extends SessionCloseReason
 
-/**
- * Session expired due to client inactivity (no keep-alive messages).
- */
-case object SessionTimeout extends SessionCloseReason
+  /**
+   * Session expired due to client inactivity (no keep-alive messages).
+   */
+  case object SessionTimeout extends SessionCloseReason
+}
 
 /**
  * Reasons for client request processing errors.
  */
 sealed trait RequestErrorReason
 
-/**
- * Server is not the current Raft leader (extends NotLeader for requests).
- */
-case object NotLeaderRequest extends RequestErrorReason
+object RequestErrorReason {
+  /**
+   * Server is not the current Raft leader (extends NotLeader for requests).
+   */
+  case object NotLeaderRequest extends RequestErrorReason
 
-/**
- * Request payload is malformed or invalid.
- */
-case object InvalidRequest extends RequestErrorReason
-
-/**
- * Client is not currently connected to the server.
- */
-case object NotConnected extends RequestErrorReason
-
-/**
- * Client connection was closed by the server.
- */
-case object ConnectionLost extends RequestErrorReason
-
-/**
- * Client session was closed by the server.
- */
-case object SessionTerminated extends RequestErrorReason
-
-/**
- * Protocol version is not supported by the server.
- */
-case object UnsupportedVersion extends RequestErrorReason
-
-/**
- * Request payload exceeds server limits.
- */
-case object PayloadTooLarge extends RequestErrorReason
-
-/**
- * Server is temporarily unavailable.
- */
-case object ServiceUnavailable extends RequestErrorReason
-
-/**
- * Server failed to process the request due to internal error.
- */
-case object ProcessingFailed extends RequestErrorReason
-
-/**
- * Request timed out on the server side.
- */
-case object RequestTimeout extends RequestErrorReason
+  /**
+   * Client session was closed by the server.
+   */
+  case object SessionTerminated extends RequestErrorReason
+}

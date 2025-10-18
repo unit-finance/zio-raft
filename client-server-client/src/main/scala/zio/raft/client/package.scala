@@ -26,7 +26,7 @@ package object client {
 
   // Server-initiated request idempotency tracking
   case class ServerRequestTracker(
-    lastAcknowledgedRequestId: protocol.RequestId = protocol.RequestId.zero  // Last consecutive request ID we acknowledged
+    lastAcknowledgedRequestId: protocol.RequestId = protocol.RequestId.fromLong(-1L)  // Start from -1 so first request is 0
   ) {
     /**
      * Check if we should process this server request.
@@ -57,7 +57,5 @@ package object client {
       payload: scodec.bits.ByteVector,
       promise: Promise[Throwable, scodec.bits.ByteVector]
     ) extends ClientAction
-    case class AcknowledgeServerRequest(requestId: protocol.RequestId) extends ClientAction
-    case class ProcessServerMessage(message: protocol.ServerMessage) extends ClientAction
   }
 }

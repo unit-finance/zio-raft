@@ -49,7 +49,7 @@ package object client {
     def shouldProcess(requestId: protocol.RequestId): ServerRequestResult = {
       if (requestId == lastAcknowledgedRequestId.next) {
         ServerRequestResult.Process
-      } else if (requestId <= lastAcknowledgedRequestId) {
+      } else if (protocol.RequestId.unwrap(requestId) <= protocol.RequestId.unwrap(lastAcknowledgedRequestId)) {
         ServerRequestResult.OldRequest
       } else {
         ServerRequestResult.OutOfOrder

@@ -6,8 +6,9 @@ import zio.raft.protocol._
 import scodec.bits.{BitVector, ByteVector}
 import java.time.Instant
 import zio.raft.client.RaftClient.ZmqClientTransport
-import zio.zmq.ZSocket
+import zio.zmq.{ZContext, ZSocket}
 import zio.raft.protocol.Codecs.{clientMessageCodec, serverMessageCodec}
+import zio.raft.protocol.{SessionClosed, ConnectionClosed}
 
 /** Main RaftClient implementation using pure functional state machine.
   *
@@ -43,7 +44,7 @@ class RaftClient private (
 
 object RaftClient {
 
-  def make(addresses: List[String], capabilities: Map[String, String]): ZIO[Scope, Throwable, RaftClient] = {
+  def make(addresses: List[String], capabilities: Map[String, String]): ZIO[Scope & ZContext, Throwable, RaftClient] = {
     val config = ClientConfig.make(addresses, capabilities)
     for {
       validatedConfig <- ClientConfig.validated(config).mapError(new IllegalArgumentException(_))
@@ -63,8 +64,18 @@ object RaftClient {
     } yield client
   }
 
-  private def createZmqTransport(config: ClientConfig): UIO[ZmqClientTransport] =
-    ZIO.succeed(new ZmqClientTransportStub())
+  private def createZmqTransport(config: ClientConfig) =     
+    for {
+      socket <- ZSocket.client
+      _ <- socket.options.setImmediate(false)
+      _ <- socket.options.setLinger(0)
+      _ <- socket.options.setHeartbeat(1.seconds, 10.second, 30.second)
+      timeoutConnectionClosed = serverMessageCodec.encode(SessionClosed(ConnectionClosed, None)).require.toByteArray
+      _ <- socket.options.setHiccupMessage(timeoutConnectionClosed)
+      _ <- socket.options.setHighWatermark(200000, 200000)
+      lastAddressRef <- Ref.make(Option.empty[String])
+      transport = new ZmqClientTransportLive(socket, lastAddressRef)      
+    } yield transport
 
   /** Main loop accepts initial state as parameter.
     */

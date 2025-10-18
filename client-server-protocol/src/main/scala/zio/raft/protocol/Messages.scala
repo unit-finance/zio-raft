@@ -255,6 +255,16 @@ case object NotLeaderAnymore extends SessionCloseReason
 case object SessionError extends SessionCloseReason
 
 /**
+ * Client connection was closed by the server or OS (e.g. timeout, network error).
+ */
+case object ConnectionClosed extends SessionCloseReason
+
+/**
+ * Session expired due to client inactivity (no keep-alive messages).
+ */
+case object SessionTimeout extends SessionCloseReason
+
+/**
  * Reasons for client request processing errors.
  */
 sealed trait RequestErrorReason

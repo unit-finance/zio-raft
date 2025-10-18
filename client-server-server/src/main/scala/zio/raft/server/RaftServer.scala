@@ -7,50 +7,104 @@ import zio.zmq.RoutingId
 import scodec.bits.ByteVector
 import java.time.Instant
 
-/**
- * Simplified RaftServer using pure functional state machine.
- * 
- * Similar to RaftClient, the server uses a unified stream that merges all events.
- * Each ServerState knows how to handle events and transition to new states.
- */
-class RaftServer private (
-  transport: ZmqServerTransport,
-  config: ServerConfig,
-  actionQueue: Queue[ServerAction],
-  raftActionsOut: Queue[RaftAction]
-) {
-  
-  /**
-   * Stream of actions to forward to Raft state machine.
-   */
-  def raftActions: ZStream[Any, Nothing, RaftAction] =
-    ZStream.fromQueue(raftActionsOut)
-  
-  /**
-   * Submit a response from Raft back to a client.
-   */
-  def sendClientResponse(sessionId: SessionId, response: ClientResponse): UIO[Unit] =
-    actionQueue.offer(ServerAction.SendResponse(sessionId, response)).unit
-  
-  /**
-   * Send server-initiated request to a client.
-   */
-  def sendServerRequest(sessionId: SessionId, request: ServerRequest): UIO[Unit] =
-    actionQueue.offer(ServerAction.SendServerRequest(sessionId, request)).unit
-  
-  /**
-   * Notify server of leadership change.
-   */
-  def handleLeadershipChange(isLeader: Boolean, sessions: Map[SessionId, SessionMetadata]): UIO[Unit] =
-    actionQueue.offer(ServerAction.LeadershipChange(isLeader, sessions)).unit
-}
-
 object RaftServer {
+  
+  /**
+   * Actions initiated by the server (internal or from Raft).
+   */
+  sealed trait ServerAction
+  
+  object ServerAction {
+    case class SendResponse(sessionId: SessionId, response: ClientResponse) extends ServerAction
+    case class SendServerRequest(sessionId: SessionId, request: ServerRequest) extends ServerAction
+    case class LeadershipChange(isLeader: Boolean, sessions: Map[SessionId, SessionMetadata]) extends ServerAction
+  }
+  
+  /**
+   * Actions to forward to Raft state machine.
+   */
+  sealed trait RaftAction
+  
+  object RaftAction {
+    case class CreateSession(sessionId: SessionId, capabilities: Map[String, String]) extends RaftAction
+    case class ClientRequest(sessionId: SessionId, requestId: RequestId, payload: ByteVector) extends RaftAction
+    case class ExpireSession(sessionId: SessionId) extends RaftAction
+  }
+  
+  /**
+   * Transport abstraction for ZeroMQ SERVER socket.
+   */
+  trait ZmqServerTransport {
+    def sendMessage(routingId: RoutingId, message: ServerMessage): Task[Unit]
+    def incomingMessages: ZStream[Any, Throwable, IncomingMessage]
+  }
+  
+  case class IncomingMessage(
+    routingId: RoutingId,
+    message: ClientMessage
+  )
+  
+  case class SessionConnection(
+    routingId: Option[RoutingId],
+    expiresAt: Instant
+  )
+  
+  case class SessionMetadata(
+    capabilities: Map[String, String],
+    createdAt: Instant
+  )
+  
+  /**
+   * Reference for generating unique request IDs.
+   */
+  type RequestIdRef = Ref[RequestId]
+  
+  object RequestIdRef {
+    def make: UIO[RequestIdRef] = Ref.make(RequestId.zero)
+  }
+  
+  /**
+   * Simplified RaftServer using pure functional state machine.
+   * 
+   * Similar to RaftClient, the server uses a unified stream that merges all events.
+   * Each ServerState knows how to handle events and transition to new states.
+   */
+  class RaftServer(
+    transport: ZmqServerTransport,
+    config: ServerConfig,
+    actionQueue: Queue[ServerAction],
+    raftActionsOut: Queue[RaftAction]
+  ) {
+    
+    /**
+     * Stream of actions to forward to Raft state machine.
+     */
+    def raftActions: ZStream[Any, Nothing, RaftAction] =
+      ZStream.fromQueue(raftActionsOut)
+    
+    /**
+     * Submit a response from Raft back to a client.
+     */
+    def sendClientResponse(sessionId: SessionId, response: ClientResponse): UIO[Unit] =
+      actionQueue.offer(ServerAction.SendResponse(sessionId, response)).unit
+    
+    /**
+     * Send server-initiated request to a client.
+     */
+    def sendServerRequest(sessionId: SessionId, request: ServerRequest): UIO[Unit] =
+      actionQueue.offer(ServerAction.SendServerRequest(sessionId, request)).unit
+    
+    /**
+     * Notify server of leadership change.
+     */
+    def handleLeadershipChange(isLeader: Boolean, sessions: Map[SessionId, SessionMetadata]): UIO[Unit] =
+      actionQueue.offer(ServerAction.LeadershipChange(isLeader, sessions)).unit
+  }
   
   def make(bindAddress: String): ZIO[Scope, Throwable, RaftServer] = {
     val config = ServerConfig.make(bindAddress)
     for {
-      validatedConfig <- ServerConfig.validated(config).mapError(new IllegalArgumentException(_))
+      validatedConfig <- ZIO.fromEither(ServerConfig.validated(config).left.map(new IllegalArgumentException(_)))
       
       transport <- createTransport(validatedConfig)
       actionQueue <- Queue.unbounded[ServerAction]
@@ -84,7 +138,7 @@ object RaftServer {
       .map(StreamEvent.Action(_))
     
     val messageStream = transport.incomingMessages
-      .map(msg => StreamEvent.ClientMessage(msg.routingId, msg.message))
+      .map(msg => StreamEvent.IncomingClientMessage(msg.routingId, msg.message))
     
     val cleanupStream = ZStream.tick(config.cleanupInterval)
       .map(_ => StreamEvent.CleanupTick)
@@ -114,7 +168,7 @@ object RaftServer {
     ): UIO[ServerState]
   }
   
-  object ServerState {
+  private object ServerState {
     
     /**
      * Follower state - not leader, rejects all session operations.
@@ -129,7 +183,7 @@ object RaftServer {
         raftActionsOut: Queue[RaftAction]
       ): UIO[ServerState] = {
         event match {
-          case StreamEvent.ClientMessage(routingId, message) =>
+          case StreamEvent.IncomingClientMessage(routingId, message) =>
             handleClientMessage(routingId, message, transport)
           
           case StreamEvent.Action(ServerAction.LeadershipChange(isLeader, sessions)) =>
@@ -199,7 +253,7 @@ object RaftServer {
         raftActionsOut: Queue[RaftAction]
       ): UIO[ServerState] = {
         event match {
-          case StreamEvent.ClientMessage(routingId, message) =>
+          case StreamEvent.IncomingClientMessage(routingId, message) =>
             handleClientMessage(routingId, message, transport, raftActionsOut)
           
           case StreamEvent.Action(ServerAction.LeadershipChange(isLeader, _)) =>
@@ -379,7 +433,7 @@ object RaftServer {
     
     def closeAll(transport: ZmqServerTransport): UIO[Unit] =
       ZIO.foreachDiscard(connections.values.flatMap(_.routingId)) { routingId =>
-        transport.sendMessage(routingId, SessionClosed(ServerShutdown, None)).orDie
+        transport.sendMessage(routingId, SessionClosed(Shutdown, None)).orDie
       }
   }
   
@@ -396,38 +450,6 @@ object RaftServer {
     }
   }
   
-  case class SessionConnection(
-    routingId: Option[RoutingId],
-    expiresAt: Instant
-  )
-  
-  case class SessionMetadata(
-    capabilities: Map[String, String],
-    createdAt: Instant
-  )
-  
-  /**
-   * Actions initiated by the server (internal or from Raft).
-   */
-  sealed trait ServerAction
-  
-  object ServerAction {
-    case class SendResponse(sessionId: SessionId, response: ClientResponse) extends ServerAction
-    case class SendServerRequest(sessionId: SessionId, request: ServerRequest) extends ServerAction
-    case class LeadershipChange(isLeader: Boolean, sessions: Map[SessionId, SessionMetadata]) extends ServerAction
-  }
-  
-  /**
-   * Actions to forward to Raft state machine.
-   */
-  sealed trait RaftAction
-  
-  object RaftAction {
-    case class CreateSession(sessionId: SessionId, capabilities: Map[String, String]) extends RaftAction
-    case class ClientRequest(sessionId: SessionId, requestId: RequestId, payload: ByteVector) extends RaftAction
-    case class ExpireSession(sessionId: SessionId) extends RaftAction
-  }
-  
   /**
    * Unified stream events.
    */
@@ -435,22 +457,9 @@ object RaftServer {
   
   private object StreamEvent {
     case class Action(action: ServerAction) extends StreamEvent
-    case class ClientMessage(routingId: RoutingId, message: ClientMessage) extends StreamEvent
+    case class IncomingClientMessage(routingId: RoutingId, message: ClientMessage) extends StreamEvent
     case object CleanupTick extends StreamEvent
   }
-  
-  /**
-   * Transport abstraction for ZeroMQ SERVER socket.
-   */
-  trait ZmqServerTransport {
-    def sendMessage(routingId: RoutingId, message: ServerMessage): Task[Unit]
-    def incomingMessages: ZStream[Any, Throwable, IncomingMessage]
-  }
-  
-  case class IncomingMessage(
-    routingId: RoutingId,
-    message: ClientMessage
-  )
   
   private class ZmqServerTransportStub extends ZmqServerTransport {
     override def sendMessage(routingId: RoutingId, message: ServerMessage): Task[Unit] =

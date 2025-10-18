@@ -4,97 +4,15 @@ import java.time.Instant
 import scodec.bits.ByteVector
 
 /**
- * Protocol message definitions for ZIO Raft client-server communication.
+ * Server-to-client message definitions for ZIO Raft client-server communication.
  *
- * This module defines the complete message hierarchy for bidirectional
- * communication between Raft clients and servers, including:
- * - Session management (create, continue, close)
- * - Command submission and response handling
- * - Keep-alive/heartbeat protocol
- * - Server-initiated work dispatch with acknowledgment
+ * This module defines all messages sent from servers to clients, including:
+ * - Session management responses
+ * - Command execution results
+ * - Keep-alive responses
+ * - Server-initiated work dispatch
  * - Error handling and leader redirection
  */
-
-// ============================================================================
-// CLIENT MESSAGES (Client → Server)
-// ============================================================================
-
-/**
- * Base trait for all client-to-server messages.
- */
-sealed trait ClientMessage
-
-/**
- * Create a new durable session with the Raft cluster.
- *
- * @param capabilities Client capability definitions (name -> version/config)
- * @param nonce Client-generated nonce for response correlation
- */
-case class CreateSession(
-  capabilities: Map[String, String],
-  nonce: Nonce
-) extends ClientMessage {
-  require(capabilities.nonEmpty, "Capabilities must be non-empty")
-}
-
-/**
- * Resume an existing durable session after reconnection.
- *
- * @param sessionId The session ID to resume (from previous SessionCreated)
- * @param nonce Client-generated nonce for response correlation
- */
-case class ContinueSession(
-  sessionId: SessionId,
-  nonce: Nonce
-) extends ClientMessage
-
-/**
- * Heartbeat message to maintain session liveness.
- * Server derives session ID from ZeroMQ routing ID.
- *
- * @param timestamp Client-generated timestamp for RTT measurement
- */
-case class KeepAlive(
-  timestamp: Instant
-) extends ClientMessage
-
-/**
- * Generic client request for both read and write operations.
- * Server derives session ID from ZeroMQ routing ID.
- *
- * @param requestId Unique identifier for request deduplication and correlation
- * @param payload Binary payload containing the actual command or query
- * @param createdAt Timestamp when request was created (for debugging/monitoring)
- */
-case class ClientRequest(
-  requestId: RequestId,
-  payload: ByteVector,
-  createdAt: Instant
-) extends ClientMessage
-
-/**
- * Acknowledgment of server-initiated request receipt.
- * Server derives session ID from ZeroMQ routing ID.
- *
- * @param requestId The server request ID being acknowledged
- */
-case class ServerRequestAck(
-  requestId: RequestId
-) extends ClientMessage
-
-/**
- * Explicit session termination by client.
- * Server derives session ID from ZeroMQ routing ID.
- *
- * @param reason Why the client is closing the session
- */
-case class CloseSession(
-  reason: CloseReason
-) extends ClientMessage
-
-// ============================================================================
-// SERVER MESSAGES (Server → Client)
-// ============================================================================
 
 /**
  * Base trait for all server-to-client messages.
@@ -216,10 +134,6 @@ case object NotLeader extends RejectionReason
 case object SessionNotFound extends RejectionReason
 
 /**
- * Server-specific rejection reasons.
- */
-
-/**
  * Client capabilities are invalid or unsupported.
  */
 case object InvalidCapabilities extends RejectionReason
@@ -270,10 +184,6 @@ case object NotLeaderRequest extends RequestErrorReason
 case object InvalidRequest extends RequestErrorReason
 
 /**
- * Client connection-related error reasons.
- */
-
-/**
  * Client is not currently connected to the server.
  */
 case object NotConnected extends RequestErrorReason
@@ -287,10 +197,6 @@ case object ConnectionLost extends RequestErrorReason
  * Client session was closed by the server.
  */
 case object SessionTerminated extends RequestErrorReason
-
-/**
- * Server-specific error reasons.
- */
 
 /**
  * Protocol version is not supported by the server.
@@ -316,20 +222,3 @@ case object ProcessingFailed extends RequestErrorReason
  * Request timed out on the server side.
  */
 case object RequestTimeout extends RequestErrorReason
-
-/**
- * Reasons for client-initiated session closure.
- */
-sealed trait CloseReason
-
-/**
- * Client is shutting down normally.
- */
-case object ClientShutdown extends CloseReason
-
-/**
- * Client switching to different server.
- */
-case object SwitchingServer extends CloseReason
-
-// ClientMessage and ServerMessage are used directly without a common abstraction

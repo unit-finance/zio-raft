@@ -14,13 +14,6 @@ import zio.*
  */
 package object client {
 
-  // Client configuration defaults
-  val DEFAULT_KEEP_ALIVE_INTERVAL: Duration = 30.seconds
-  val DEFAULT_CONNECTION_TIMEOUT: Duration = 5.seconds
-  val DEFAULT_SESSION_TIMEOUT: Duration = 90.seconds
-  val DEFAULT_REQUEST_TIMEOUT: Duration = 10.seconds
-
-
   // Note: ClientConfig is defined in ClientConfig.scala
   // Note: ClientState is now defined in RaftClient.scala as a functional ADT
 

@@ -13,19 +13,16 @@ import zio._
  * - Performance tuning
  */
 case class ClientConfig(
-  // Connection Settings
-  clusterAddresses: List[String] = ClientConfig.DEFAULT_CLUSTER_ADDRESSES,
-  connectionTimeout: Duration = ClientConfig.DEFAULT_CONNECTION_TIMEOUT,
-  maxReconnectAttempts: Int = ClientConfig.DEFAULT_MAX_RECONNECT_ATTEMPTS,
-  reconnectDelay: Duration = ClientConfig.DEFAULT_RECONNECT_DELAY,
+  // Connection Settings - must be provided
+  clusterAddresses: List[String],
+  capabilities: Map[String, String],
   
-  // Session Management
-  capabilities: Map[String, String] = ClientConfig.DEFAULT_CAPABILITIES,
+  // Connection and Session Management
+  connectionTimeout: Duration = ClientConfig.DEFAULT_CONNECTION_TIMEOUT,
   sessionTimeout: Duration = ClientConfig.DEFAULT_SESSION_TIMEOUT,
   keepAliveInterval: Duration = ClientConfig.DEFAULT_KEEP_ALIVE_INTERVAL,
   
   // Request Handling
-  requestTimeout: Duration = ClientConfig.DEFAULT_REQUEST_TIMEOUT,
   maxConcurrentRequests: Int = ClientConfig.DEFAULT_MAX_CONCURRENT_REQUESTS,
   
   // Capability Validation
@@ -33,7 +30,6 @@ case class ClientConfig(
   maxCapabilityValueLength: Int = ClientConfig.DEFAULT_MAX_CAPABILITY_VALUE_LENGTH,
   
   // ZeroMQ Transport
-  zmqSocketType: String = "CLIENT", // ZeroMQ CLIENT socket
   maxMessageSize: Int = ClientConfig.DEFAULT_MAX_MESSAGE_SIZE,
   
   // Performance
@@ -65,14 +61,6 @@ case class ClientConfig(
       errors += "connectionTimeout must be positive"
     }
     
-    if (maxReconnectAttempts < 0) {
-      errors += "maxReconnectAttempts must be non-negative"
-    }
-    
-    if (reconnectDelay.toSeconds < 0) {
-      errors += "reconnectDelay must be non-negative"
-    }
-    
     if (sessionTimeout.toSeconds <= 0) {
       errors += "sessionTimeout must be positive"
     }
@@ -83,10 +71,6 @@ case class ClientConfig(
     
     if (keepAliveInterval >= sessionTimeout) {
       errors += "keepAliveInterval must be less than sessionTimeout"
-    }
-    
-    if (requestTimeout.toSeconds <= 0) {
-      errors += "requestTimeout must be positive"
     }
     
     if (maxConcurrentRequests < 1) {
@@ -131,15 +115,6 @@ case class ClientConfig(
   }
   
   /**
-   * Get request timeout with backoff for retries.
-   */
-  def backoffRequestTimeout(attempt: Int): Duration = {
-    val baseTimeout = requestTimeout.toMillis
-    val backoffMultiplier = Math.pow(1.5, attempt.min(5)).toLong // Cap at 5 attempts
-    Duration.fromMillis(baseTimeout * backoffMultiplier)
-  }
-  
-  /**
    * Check if all required capabilities are present.
    */
   def hasRequiredCapabilities(required: Set[String]): Boolean = {
@@ -163,16 +138,10 @@ case class ClientConfig(
 object ClientConfig {
   
   // Default values
-  val DEFAULT_CLUSTER_ADDRESSES: List[String] = List("tcp://localhost:5555")
   val DEFAULT_CONNECTION_TIMEOUT: Duration = 5.seconds
-  val DEFAULT_MAX_RECONNECT_ATTEMPTS: Int = 3
-  val DEFAULT_RECONNECT_DELAY: Duration = 1.second
-  
-  val DEFAULT_CAPABILITIES: Map[String, String] = Map("client-type" -> "default")
   val DEFAULT_SESSION_TIMEOUT: Duration = 90.seconds
   val DEFAULT_KEEP_ALIVE_INTERVAL: Duration = 30.seconds
   
-  val DEFAULT_REQUEST_TIMEOUT: Duration = 10.seconds
   val DEFAULT_MAX_CONCURRENT_REQUESTS: Int = 100
   
   val DEFAULT_MAX_CAPABILITY_COUNT: Int = 20
@@ -181,87 +150,97 @@ object ClientConfig {
   val DEFAULT_MAX_MESSAGE_SIZE: Int = 1024 * 1024 // 1MB
   val DEFAULT_MESSAGE_BUFFER_SIZE: Int = 1000
   
+  // Hard-coded constants
+  val REQUEST_TIMEOUT: Duration = 10.seconds
+  val ZMQ_SOCKET_TYPE: String = "CLIENT"
+  
   /**
-   * Create default configuration.
+   * Create configuration with required parameters.
    */
-  def default: ClientConfig = ClientConfig()
+  def make(addresses: List[String], capabilities: Map[String, String]): ClientConfig = 
+    ClientConfig(
+      clusterAddresses = addresses,
+      capabilities = capabilities
+    )
   
   /**
    * Create configuration for development/testing.
    */
-  def development: ClientConfig = ClientConfig(
-    clusterAddresses = List("tcp://localhost:5556"),
-    connectionTimeout = 2.seconds,
-    sessionTimeout = 30.seconds,
-    keepAliveInterval = 10.seconds,
-    requestTimeout = 5.seconds,
-    maxReconnectAttempts = 1,
-    enableRequestTracing = true,
-    logLevel = "DEBUG"
-  )
+  def development(addresses: List[String], capabilities: Map[String, String]): ClientConfig = 
+    ClientConfig(
+      clusterAddresses = addresses,
+      capabilities = capabilities,
+      connectionTimeout = 2.seconds,
+      sessionTimeout = 30.seconds,
+      keepAliveInterval = 10.seconds,
+      enableRequestTracing = true,
+      logLevel = "DEBUG"
+    )
   
   /**
    * Create configuration for production.
    */
-  def production: ClientConfig = ClientConfig(
-    sessionTimeout = 120.seconds,
-    keepAliveInterval = 30.seconds,
-    requestTimeout = 15.seconds,
-    maxConcurrentRequests = 500,
-    maxReconnectAttempts = 5,
-    reconnectDelay = 2.seconds,
-    enableHeartbeatOptimization = true,
-    logLevel = "INFO"
-  )
+  def production(addresses: List[String], capabilities: Map[String, String]): ClientConfig = 
+    ClientConfig(
+      clusterAddresses = addresses,
+      capabilities = capabilities,
+      sessionTimeout = 120.seconds,
+      keepAliveInterval = 30.seconds,
+      maxConcurrentRequests = 500,
+      enableHeartbeatOptimization = true,
+      logLevel = "INFO"
+    )
   
   /**
    * Create configuration for high-throughput scenarios.
    */
-  def highThroughput: ClientConfig = ClientConfig(
-    maxConcurrentRequests = 1000,
-    messageBufferSize = 10000,
-    keepAliveInterval = 15.seconds,
-    requestTimeout = 30.seconds,
-    enableHeartbeatOptimization = true
-  )
+  def highThroughput(addresses: List[String], capabilities: Map[String, String]): ClientConfig = 
+    ClientConfig(
+      clusterAddresses = addresses,
+      capabilities = capabilities,
+      maxConcurrentRequests = 1000,
+      messageBufferSize = 10000,
+      keepAliveInterval = 15.seconds,
+      enableHeartbeatOptimization = true
+    )
   
   /**
    * Create configuration for low-latency scenarios.
    */
-  def lowLatency: ClientConfig = ClientConfig(
-    connectionTimeout = 1.second,
-    keepAliveInterval = 5.seconds,
-    requestTimeout = 3.seconds,
-    reconnectDelay = 500.millis,
-    messageBufferSize = 100
-  )
+  def lowLatency(addresses: List[String], capabilities: Map[String, String]): ClientConfig = 
+    ClientConfig(
+      clusterAddresses = addresses,
+      capabilities = capabilities,
+      connectionTimeout = 1.second,
+      keepAliveInterval = 5.seconds,
+      messageBufferSize = 100
+    )
   
   /**
    * Load configuration from environment variables and system properties.
+   * Requires RAFT_CLUSTER_ADDRESSES and RAFT_CLIENT_CAPABILITIES environment variables.
    */
-  def fromEnvironment: UIO[ClientConfig] = 
+  def fromEnvironment: IO[String, ClientConfig] = 
     for {
-      addresses <- loadAddressesFromEnv("RAFT_CLUSTER_ADDRESSES", DEFAULT_CLUSTER_ADDRESSES)
+      addresses <- loadAddressesFromEnv("RAFT_CLUSTER_ADDRESSES")
+      capabilities <- loadCapabilitiesFromEnv("RAFT_CLIENT_CAPABILITIES")
       connectionTimeout <- loadDurationFromEnv("RAFT_CONNECTION_TIMEOUT", DEFAULT_CONNECTION_TIMEOUT)
       sessionTimeout <- loadDurationFromEnv("RAFT_SESSION_TIMEOUT", DEFAULT_SESSION_TIMEOUT)
       keepAliveInterval <- loadDurationFromEnv("RAFT_KEEP_ALIVE_INTERVAL", DEFAULT_KEEP_ALIVE_INTERVAL)
-      requestTimeout <- loadDurationFromEnv("RAFT_REQUEST_TIMEOUT", DEFAULT_REQUEST_TIMEOUT)
-      capabilities <- loadCapabilitiesFromEnv("RAFT_CLIENT_CAPABILITIES", DEFAULT_CAPABILITIES)
     } yield ClientConfig(
       clusterAddresses = addresses,
+      capabilities = capabilities,
       connectionTimeout = connectionTimeout,
       sessionTimeout = sessionTimeout,
-      keepAliveInterval = keepAliveInterval,
-      requestTimeout = requestTimeout,
-      capabilities = capabilities
+      keepAliveInterval = keepAliveInterval
     )
   
-  private def loadAddressesFromEnv(envVar: String, default: List[String]): UIO[List[String]] = 
-    ZIO.succeed(
-      sys.env.get(envVar)
-        .map(_.split(",").map(_.trim).toList)
-        .getOrElse(default)
-    )
+  private def loadAddressesFromEnv(envVar: String): IO[String, List[String]] = 
+    ZIO.succeed(sys.env.get(envVar))
+      .flatMap {
+        case Some(value) => ZIO.succeed(value.split(",").map(_.trim).toList)
+        case None => ZIO.fail(s"Required environment variable $envVar not found")
+      }
   
   private def loadDurationFromEnv(envVar: String, default: Duration): UIO[Duration] = 
     ZIO.succeed(
@@ -270,19 +249,20 @@ object ClientConfig {
         .getOrElse(default)
     )
   
-  private def loadCapabilitiesFromEnv(envVar: String, default: Map[String, String]): UIO[Map[String, String]] = 
-    ZIO.succeed(
-      sys.env.get(envVar)
-        .map { capsString =>
-          capsString.split(",").map(_.trim).foldLeft(Map.empty[String, String]) { (acc, pair) =>
-            pair.split("=", 2) match {
-              case Array(key, value) => acc + (key.trim -> value.trim)
-              case _ => acc
+  private def loadCapabilitiesFromEnv(envVar: String): IO[String, Map[String, String]] = 
+    ZIO.succeed(sys.env.get(envVar))
+      .flatMap {
+        case Some(capsString) =>
+          ZIO.succeed(
+            capsString.split(",").map(_.trim).foldLeft(Map.empty[String, String]) { (acc, pair) =>
+              pair.split("=", 2) match {
+                case Array(key, value) => acc + (key.trim -> value.trim)
+                case _ => acc
+              }
             }
-          }
-        }
-        .getOrElse(default)
-    )
+          )
+        case None => ZIO.fail(s"Required environment variable $envVar not found")
+      }
   
   /**
    * Create configuration with validation.
@@ -296,7 +276,8 @@ object ClientConfig {
   /**
    * Builder pattern for creating configurations.
    */
-  def builder: ClientConfigBuilder = new ClientConfigBuilder(default)
+  def builder(addresses: List[String], capabilities: Map[String, String]): ClientConfigBuilder = 
+    new ClientConfigBuilder(make(addresses, capabilities))
 }
 
 /**
@@ -326,27 +307,17 @@ class ClientConfigBuilder(private var config: ClientConfig) {
   
   def withTimeouts(
     connection: Duration = config.connectionTimeout,
-    session: Duration = config.sessionTimeout,
-    request: Duration = config.requestTimeout
+    session: Duration = config.sessionTimeout
   ): ClientConfigBuilder = {
     config = config.copy(
       connectionTimeout = connection,
-      sessionTimeout = session,
-      requestTimeout = request
+      sessionTimeout = session
     )
     this
   }
   
   def withKeepAlive(interval: Duration): ClientConfigBuilder = {
     config = config.copy(keepAliveInterval = interval)
-    this
-  }
-  
-  def withReconnect(maxAttempts: Int, delay: Duration): ClientConfigBuilder = {
-    config = config.copy(
-      maxReconnectAttempts = maxAttempts,
-      reconnectDelay = delay
-    )
     this
   }
   

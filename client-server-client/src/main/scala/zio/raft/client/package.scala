@@ -24,16 +24,36 @@ package object client {
   // Note: ClientConfig is defined in ClientConfig.scala
   // Note: ClientState is now defined in RaftClient.scala as a functional ADT
 
+  // Server request processing result
+  sealed trait ServerRequestResult
+  
+  object ServerRequestResult {
+    /** Process this new request */
+    case object Process extends ServerRequestResult
+    
+    /** Old request - already processed */
+    case object OldRequest extends ServerRequestResult
+    
+    /** Out of order - skip this request */
+    case object OutOfOrder extends ServerRequestResult
+  }
+  
   // Server-initiated request idempotency tracking
   case class ServerRequestTracker(
-    lastAcknowledgedRequestId: protocol.RequestId = protocol.RequestId.fromLong(-1L)  // Start from -1 so first request is 0
+    lastAcknowledgedRequestId: protocol.RequestId = protocol.RequestId.zero  // Start from 0 so first request is 1
   ) {
     /**
-     * Check if we should process this server request.
-     * Only process if it's the next consecutive request ID.
+     * Check what to do with this server request.
+     * Returns Process, OldRequest, or OutOfOrder.
      */
-    def shouldProcess(requestId: protocol.RequestId): Boolean = {
-      requestId == lastAcknowledgedRequestId.next
+    def shouldProcess(requestId: protocol.RequestId): ServerRequestResult = {
+      if (requestId == lastAcknowledgedRequestId.next) {
+        ServerRequestResult.Process
+      } else if (requestId <= lastAcknowledgedRequestId) {
+        ServerRequestResult.OldRequest
+      } else {
+        ServerRequestResult.OutOfOrder
+      }
     }
     
     /**
@@ -57,7 +77,7 @@ package object client {
   
   object RequestIdRef {
     def make: UIO[RequestIdRef] =
-      Ref.make(protocol.RequestId.fromLong(0L)).map(RequestIdRef(_))
+      Ref.make(protocol.RequestId.zero).map(RequestIdRef(_))
   }
   
   // Client actions for stream-based processing

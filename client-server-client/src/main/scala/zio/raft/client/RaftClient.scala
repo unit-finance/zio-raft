@@ -459,20 +459,23 @@ object ClientState {
           ZIO.succeed(this)
         
         case StreamEvent.ServerMsg(serverRequest: ServerRequest) =>
-          if (serverRequestTracker.shouldProcess(serverRequest.requestId)) {
-            for {
-              _ <- serverRequestQueue.offer(serverRequest).orDie
-              newTracker = serverRequestTracker.acknowledge(serverRequest.requestId)
-              _ <- transport.sendMessage(ServerRequestAck(serverRequest.requestId)).orDie
-              _ <- ZIO.logDebug(s"Enqueued and acknowledged server request: ${serverRequest.requestId}")
-            } yield copy(serverRequestTracker = newTracker)
-          } else if (serverRequestTracker.lastAcknowledgedRequestId >= serverRequest.requestId) {
-            for {
-              _ <- transport.sendMessage(ServerRequestAck(serverRequest.requestId)).orDie
-              _ <- ZIO.logDebug(s"Re-acknowledged already processed request: ${serverRequest.requestId}")
-            } yield this
-          } else {
-            ZIO.logWarning(s"Dropping out-of-order server request: ${serverRequest.requestId}, expected: ${serverRequestTracker.lastAcknowledgedRequestId.next}").as(this)
+          serverRequestTracker.shouldProcess(serverRequest.requestId) match {
+            case ServerRequestResult.Process =>
+              for {
+                _ <- serverRequestQueue.offer(serverRequest).orDie
+                newTracker = serverRequestTracker.acknowledge(serverRequest.requestId)
+                _ <- transport.sendMessage(ServerRequestAck(serverRequest.requestId)).orDie
+                _ <- ZIO.logDebug(s"Enqueued and acknowledged server request: ${serverRequest.requestId}")
+              } yield copy(serverRequestTracker = newTracker)
+            
+            case ServerRequestResult.OldRequest =>
+              for {
+                _ <- transport.sendMessage(ServerRequestAck(serverRequest.requestId)).orDie
+                _ <- ZIO.logDebug(s"Re-acknowledged already processed request: ${serverRequest.requestId}")
+              } yield this
+            
+            case ServerRequestResult.OutOfOrder =>
+              ZIO.logWarning(s"Dropping out-of-order server request: ${serverRequest.requestId}, expected: ${serverRequestTracker.lastAcknowledgedRequestId.next}").as(this)
           }
         
         case StreamEvent.ServerMsg(RequestError(NotLeaderRequest, leaderId)) =>
@@ -507,8 +510,9 @@ object ClientState {
           for {
             _ <- ZIO.logInfo(s"Session closed: $reason, reconnecting")
             nonce <- Nonce.generate()
+            currentAddr = addresses(currentAddressIndex)
             _ <- transport.disconnect().orDie
-            _ <- transport.connect(addresses.head).orDie
+            _ <- transport.connect(currentAddr).orDie
             _ <- transport.sendMessage(ContinueSession(sessionId, nonce)).orDie
             now <- Clock.instant
           } yield ConnectingExistingSession(
@@ -516,7 +520,7 @@ object ClientState {
             capabilities = capabilities,
             nonce = nonce,
             addresses = addresses,
-            currentAddressIndex = 0,
+            currentAddressIndex = currentAddressIndex,
             createdAt = now,
             serverRequestTracker = serverRequestTracker,
             nextRequestId = nextRequestId,

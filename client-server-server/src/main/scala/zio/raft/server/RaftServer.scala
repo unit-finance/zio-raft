@@ -17,7 +17,6 @@ object RaftServer {
   object ServerAction {
     case class SendResponse(sessionId: SessionId, response: ClientResponse) extends ServerAction
     case class SendServerRequest(sessionId: SessionId, request: ServerRequest) extends ServerAction
-    case class SessionCreationConfirmed(sessionId: SessionId) extends ServerAction
     case class StepUp(sessions: Map[SessionId, SessionMetadata]) extends ServerAction
     case class StepDown(leaderId: Option[MemberId]) extends ServerAction
     case object Shutdown extends ServerAction
@@ -69,7 +68,8 @@ object RaftServer {
     transport: ZmqServerTransport,
     config: ServerConfig,
     actionQueue: Queue[ServerAction],
-    raftActionsOut: Queue[RaftAction]
+    raftActionsOut: Queue[RaftAction],
+    stateRef: Ref[ServerState]
   ) {
     
     /**
@@ -92,9 +92,28 @@ object RaftServer {
     
     /**
      * Confirm that a session has been committed by Raft.
+     * This is called directly by Raft and sends the response immediately.
      */
     def confirmSessionCreation(sessionId: SessionId): UIO[Unit] =
-      actionQueue.offer(ServerAction.SessionCreationConfirmed(sessionId)).unit
+      for {
+        now <- Clock.instant
+        state <- stateRef.get
+        _ <- state match {
+          case leader: ServerState.Leader =>
+            leader.sessions.confirmSession(sessionId, now, config) match {
+              case Some((routingId, nonce, newSessions)) =>
+                for {
+                  _ <- transport.sendMessage(routingId, SessionCreated(sessionId, nonce)).orDie
+                  _ <- ZIO.logInfo(s"Session $sessionId confirmed and created")
+                  _ <- stateRef.set(leader.copy(sessions = newSessions))
+                } yield ()
+              case None =>
+                ZIO.logWarning(s"Session $sessionId confirmation failed - not found in pending")
+            }
+          case _ =>
+            ZIO.logWarning(s"Cannot confirm session $sessionId - not leader")
+        }
+      } yield ()
     
     /**
      * Notify server that this node has become the leader.
@@ -119,11 +138,11 @@ object RaftServer {
       actionQueue <- Queue.unbounded[ServerAction]
       raftActionsOut <- Queue.unbounded[RaftAction]
       
-      server = new RaftServer(transport, validatedConfig, actionQueue, raftActionsOut)
-      
       // Start main loop in Follower state (not leader initially)
       initialState = ServerState.Follower
       stateRef <- Ref.make[ServerState](initialState)
+      
+      server = new RaftServer(transport, validatedConfig, actionQueue, raftActionsOut, stateRef)
       
       _ <- startMainLoop(transport, validatedConfig, actionQueue, raftActionsOut, stateRef).forkScoped
       
@@ -307,20 +326,6 @@ object RaftServer {
                 ZIO.logWarning(s"Cannot send server request - session $sessionId not found").as(this)
             }
           
-          case StreamEvent.Action(ServerAction.SessionCreationConfirmed(sessionId)) =>
-            for {
-              now <- Clock.instant
-              result <- sessions.confirmSession(sessionId, now) match {
-                case Some((routingId, nonce, newSessions)) =>
-                  for {
-                    _ <- transport.sendMessage(routingId, SessionCreated(sessionId, nonce)).orDie
-                    _ <- ZIO.logInfo(s"Session $sessionId confirmed and created")
-                  } yield copy(sessions = newSessions)
-                case None =>
-                  ZIO.logWarning(s"Session $sessionId confirmation failed - not found in pending").as(this)
-              }
-            } yield result
-          
           case StreamEvent.Action(ServerAction.Shutdown) =>
             for {
               _ <- ZIO.logInfo("Server shutdown - closing all sessions")
@@ -367,7 +372,7 @@ object RaftServer {
                 for {
                   now <- Clock.instant
                   _ <- transport.sendMessage(routingId, SessionContinued(nonce)).orDie
-                  newSessions = sessions.reconnect(sessionId, routingId, now)
+                  newSessions = sessions.reconnect(sessionId, routingId, now, config)
                 } yield copy(sessions = newSessions)
               case None =>
                 transport.sendMessage(routingId, SessionRejected(RejectionReason.SessionNotFound, nonce, None)).orDie.as(this)
@@ -379,7 +384,7 @@ object RaftServer {
                 for {
                   now <- Clock.instant
                   _ <- transport.sendMessage(routingId, KeepAliveResponse(timestamp)).orDie
-                  newSessions = sessions.updateExpiry(sessionId, now)
+                  newSessions = sessions.updateExpiry(sessionId, now, config)
                 } yield copy(sessions = newSessions)
               case Some(_) =>
                 // Session is pending, ignore keep-alive
@@ -435,7 +440,8 @@ object RaftServer {
   case class Sessions(
     metadata: Map[SessionId, SessionMetadata],
     connections: Map[SessionId, SessionConnection],
-    routingToSession: Map[RoutingId, SessionId]
+    routingToSession: Map[RoutingId, SessionId],
+    pendingSessions: Map[SessionId, PendingSession]
   ) {
     def addPending(sessionId: SessionId, routingId: RoutingId, nonce: Nonce, capabilities: Map[String, String], now: Instant): Sessions = {
       copy(
@@ -443,9 +449,9 @@ object RaftServer {
       )
     }
     
-    def confirmSession(sessionId: SessionId, now: Instant): Option[(RoutingId, Nonce, Sessions)] = {
+    def confirmSession(sessionId: SessionId, now: Instant, config: ServerConfig): Option[(RoutingId, Nonce, Sessions)] = {
       pendingSessions.get(sessionId).map { pending =>
-        val expiresAt = now.plusSeconds(90) // TODO: use config
+        val expiresAt = now.plus(config.sessionTimeout)
         val newSessions = copy(
           metadata = metadata.updated(sessionId, SessionMetadata(pending.capabilities, pending.createdAt)),
           connections = connections.updated(sessionId, SessionConnection(Some(pending.routingId), expiresAt)),
@@ -456,10 +462,10 @@ object RaftServer {
       }
     }
     
-    def reconnect(sessionId: SessionId, routingId: RoutingId, now: Instant): Sessions = {
+    def reconnect(sessionId: SessionId, routingId: RoutingId, now: Instant, config: ServerConfig): Sessions = {
       connections.get(sessionId) match {
         case Some(conn) =>
-          val expiresAt = now.plusSeconds(90) // TODO: use config
+          val expiresAt = now.plus(config.sessionTimeout)
           // Remove old routing mapping if it exists
           val cleanedRouting = conn.routingId.map(old => routingToSession.removed(old)).getOrElse(routingToSession)
           copy(
@@ -476,10 +482,10 @@ object RaftServer {
         routingToSession = routingToSession.removed(routingId)
       )
     
-    def updateExpiry(sessionId: SessionId, now: Instant): Sessions = {
+    def updateExpiry(sessionId: SessionId, now: Instant, config: ServerConfig): Sessions = {
       connections.get(sessionId) match {
         case Some(conn) =>
-          val expiresAt = now.plusSeconds(90) // TODO: use config
+          val expiresAt = now.plus(config.sessionTimeout)
           copy(connections = connections.updated(sessionId, conn.copy(expiresAt = expiresAt)))
         case None => this
       }

@@ -43,8 +43,8 @@ class RaftClient private (
 
 object RaftClient {
 
-  def make(addresses: List[String], capabilities: Map[String, String]): ZIO[Scope & ZContext, Throwable, RaftClient] = {
-    val config = ClientConfig.make(addresses, capabilities)
+  def make(clusterMembers: Map[MemberId, String], capabilities: Map[String, String]): ZIO[Scope & ZContext, Throwable, RaftClient] = {
+    val config = ClientConfig.make(clusterMembers, capabilities)
     for {
       validatedConfig <- ClientConfig.validated(config).mapError(new IllegalArgumentException(_))
 
@@ -144,16 +144,18 @@ object RaftClient {
             for {
               nonce <- Nonce.generate()
               now <- Clock.instant
-              address = config.clusterAddresses.head
+              // Pick first member from the cluster
+              firstMember = config.clusterMembers.head
+              (memberId, address) = firstMember
               nextRequestId <- RequestIdRef.make
               _ <- transport.connect(address).orDie
               _ <- transport.sendMessage(CreateSession(config.capabilities, nonce)).orDie
-              _ <- ZIO.logInfo(s"Connecting to $address")
+              _ <- ZIO.logInfo(s"Connecting to $memberId at $address")
             } yield ConnectingNewSession(
               capabilities = config.capabilities,
               nonce = nonce,
-              addresses = config.clusterAddresses,
-              currentAddressIndex = 0,
+              clusterMembers = config.clusterMembers,
+              currentMemberId = memberId,
               createdAt = now,
               nextRequestId = nextRequestId,
               pendingRequests = PendingRequests.empty
@@ -179,13 +181,42 @@ object RaftClient {
     private case class ConnectingNewSession(
         capabilities: Map[String, String],
         nonce: Nonce,
-        addresses: List[String],
-        currentAddressIndex: Int,
+        clusterMembers: Map[MemberId, String],
+        currentMemberId: MemberId,
         createdAt: Instant,
         nextRequestId: RequestIdRef,
         pendingRequests: PendingRequests
     ) extends ClientState {
       override def stateName: String = "ConnectingNewSession"
+      
+      /** Get the next member to try (round-robin through available members) */
+      private def nextMember: (MemberId, String) = {
+        val membersList = clusterMembers.toList
+        val currentIndex = membersList.indexWhere(_._1 == currentMemberId)
+        val nextIndex = (currentIndex + 1) % membersList.size
+        membersList(nextIndex)
+      }
+      
+      /** Connect to a specific member or use hint */
+      private def connectToMember(
+        targetMemberId: Option[MemberId],
+        transport: ZmqClientTransport,
+        logPrefix: String
+      ): UIO[ConnectingNewSession] = {
+        val (memberId, address) = targetMemberId.flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
+          .getOrElse(nextMember)
+        
+        for {
+          currentAddr = clusterMembers.get(currentMemberId)
+          _ <- ZIO.logInfo(s"$logPrefix at ${currentAddr.getOrElse("unknown")}, trying $memberId at $address")
+          _ <- transport.disconnect().orDie
+          _ <- transport.connect(address).orDie
+          newNonce <- Nonce.generate()
+          _ <- transport.sendMessage(CreateSession(capabilities, newNonce)).orDie
+          _ <- ZIO.logInfo(s"Connecting New Session to $memberId at $address")
+          now <- Clock.instant
+        } yield copy(nonce = newNonce, currentMemberId = memberId, createdAt = now)
+      }
 
       override def handle(
           event: StreamEvent,
@@ -208,8 +239,8 @@ object RaftClient {
                 serverRequestTracker = ServerRequestTracker(),
                 nextRequestId = nextRequestId,
                 pendingRequests = updatedPending,
-                addresses = addresses,
-                currentAddressIndex = currentAddressIndex
+                clusterMembers = clusterMembers,
+                currentMemberId = currentMemberId
               )
             } else {
               ZIO.logWarning("Nonce mismatch, ignoring SessionCreated").as(this)
@@ -219,18 +250,7 @@ object RaftClient {
             if (nonce == responseNonce) {
               reason match {
                 case NotLeader =>
-                  val nextIndex = (currentAddressIndex + 1) % addresses.length
-                  val nextAddr = addresses(nextIndex)
-                  val currentAddr = addresses(currentAddressIndex)
-                  for {
-                    _ <- ZIO.logInfo(s"Not leader at $currentAddr, trying next: $nextAddr")
-                    _ <- transport.disconnect().orDie
-                    _ <- transport.connect(nextAddr).orDie
-                    newNonce <- Nonce.generate()
-                    _ <- transport.sendMessage(CreateSession(capabilities, newNonce)).orDie
-                    _ <- ZIO.logInfo(s"Connecting New Session to $nextAddr")
-                    now <- Clock.instant
-                  } yield copy(nonce = newNonce, currentAddressIndex = nextIndex, createdAt = now)
+                  connectToMember(leaderId, transport, s"Not leader at $currentMemberId")
 
                 case SessionNotFound =>
                   ZIO.dieMessage("Session not found - cannot continue")
@@ -256,18 +276,7 @@ object RaftClient {
               elapsed = Duration.fromInterval(createdAt, now)
               nextState <-
                 if (elapsed > config.connectionTimeout) {
-                  val nextIndex = (currentAddressIndex + 1) % addresses.length
-                  val nextAddr = addresses(nextIndex)
-                  val currentAddr = addresses(currentAddressIndex)
-                  for {
-                    _ <- ZIO.logWarning(s"Connection timeout at $currentAddr, trying next address: $nextAddr")
-                    _ <- transport.disconnect().orDie
-                    _ <- transport.connect(nextAddr).orDie
-                    newNonce <- Nonce.generate()
-                    _ <- transport.sendMessage(CreateSession(capabilities, newNonce)).orDie
-                    _ <- ZIO.logInfo(s"Connecting New Session to $nextAddr")
-                    now <- Clock.instant
-                  } yield copy(nonce = newNonce, currentAddressIndex = nextIndex, createdAt = now)
+                  connectToMember(None, transport, s"Connection timeout at $currentMemberId")
                 } else {
                   ZIO.succeed(this)
                 }
@@ -311,14 +320,43 @@ object RaftClient {
         sessionId: SessionId,
         capabilities: Map[String, String],
         nonce: Nonce,
-        addresses: List[String],
-        currentAddressIndex: Int,
+        clusterMembers: Map[MemberId, String],
+        currentMemberId: MemberId,
         createdAt: Instant,
         serverRequestTracker: ServerRequestTracker,
         nextRequestId: RequestIdRef,
         pendingRequests: PendingRequests
     ) extends ClientState {
       override def stateName: String = s"ConnectingExistingSession($sessionId)"
+      
+      /** Get the next member to try (round-robin through available members) */
+      private def nextMember: (MemberId, String) = {
+        val membersList = clusterMembers.toList
+        val currentIndex = membersList.indexWhere(_._1 == currentMemberId)
+        val nextIndex = (currentIndex + 1) % membersList.size
+        membersList(nextIndex)
+      }
+      
+      /** Connect to a specific member or use hint */
+      private def connectToMember(
+        targetMemberId: Option[MemberId],
+        transport: ZmqClientTransport,
+        logPrefix: String
+      ): UIO[ConnectingExistingSession] = {
+        val (memberId, address) = targetMemberId.flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
+          .getOrElse(nextMember)
+        
+        for {
+          currentAddr = clusterMembers.get(currentMemberId)
+          _ <- ZIO.logInfo(s"$logPrefix at ${currentAddr.getOrElse("unknown")}, trying $memberId at $address")
+          _ <- transport.disconnect().orDie
+          _ <- transport.connect(address).orDie
+          newNonce <- Nonce.generate()
+          _ <- transport.sendMessage(ContinueSession(sessionId, newNonce)).orDie
+          _ <- ZIO.logInfo(s"Connecting Existing Session $sessionId to $memberId at $address")
+          now <- Clock.instant
+        } yield copy(nonce = newNonce, currentMemberId = memberId, createdAt = now)
+      }
 
       override def handle(
           event: StreamEvent,
@@ -330,8 +368,8 @@ object RaftClient {
           case StreamEvent.ServerMsg(SessionContinued(responseNonce)) =>
             if (nonce == responseNonce) {
               for {
-                currentAddr = addresses(currentAddressIndex)
-                _ <- ZIO.logInfo(s"Session continued: $sessionId at $currentAddr")
+                currentAddr = clusterMembers.get(currentMemberId)
+                _ <- ZIO.logInfo(s"Session continued: $sessionId at $currentMemberId (${currentAddr.getOrElse("unknown")})")
                 now <- Clock.instant
                 // Send all pending requests
                 updatedPending <- pendingRequests.resendAll(transport)
@@ -342,8 +380,8 @@ object RaftClient {
                 serverRequestTracker = serverRequestTracker,
                 nextRequestId = nextRequestId,
                 pendingRequests = updatedPending,
-                addresses = addresses,
-                currentAddressIndex = currentAddressIndex
+                clusterMembers = clusterMembers,
+                currentMemberId = currentMemberId
               )
             } else {
               ZIO.logWarning("Nonce mismatch, ignoring SessionContinued").as(this)
@@ -353,18 +391,7 @@ object RaftClient {
             if (nonce == responseNonce) {
               reason match {
                 case NotLeader =>
-                  val nextIndex = (currentAddressIndex + 1) % addresses.length
-                  val nextAddr = addresses(nextIndex)
-                  val currentAddr = addresses(currentAddressIndex)
-                  for {
-                    _ <- ZIO.logInfo(s"Not leader at $currentAddr, trying next: $nextAddr")
-                    _ <- transport.disconnect().orDie
-                    _ <- transport.connect(nextAddr).orDie
-                    newNonce <- Nonce.generate()
-                    _ <- transport.sendMessage(ContinueSession(sessionId, newNonce)).orDie
-                    _ <- ZIO.logInfo(s"Connecting Existing Session $sessionId to $nextAddr")
-                    now <- Clock.instant
-                  } yield copy(nonce = newNonce, currentAddressIndex = nextIndex, createdAt = now)
+                  connectToMember(leaderId, transport, s"Not leader at $currentMemberId")
 
                 case SessionNotFound =>
                   ZIO.dieMessage("Session not found - cannot continue")
@@ -390,18 +417,7 @@ object RaftClient {
               elapsed = Duration.fromInterval(createdAt, now)
               nextState <-
                 if (elapsed > config.connectionTimeout) {
-                  val nextIndex = (currentAddressIndex + 1) % addresses.length
-                  val nextAddr = addresses(nextIndex)
-                  val currentAddr = addresses(currentAddressIndex)
-                  for {
-                    _ <- ZIO.logWarning(s"Connection timeout at $currentAddr, trying next address: $nextAddr")
-                    _ <- transport.disconnect().orDie
-                    _ <- transport.connect(nextAddr).orDie
-                    newNonce <- Nonce.generate()
-                    _ <- transport.sendMessage(ContinueSession(sessionId, newNonce)).orDie
-                    _ <- ZIO.logInfo(s"Connecting Existing Session $sessionId to $nextAddr")
-                    now <- Clock.instant
-                  } yield copy(nonce = newNonce, currentAddressIndex = nextIndex, createdAt = now)
+                  connectToMember(None, transport, s"Connection timeout at $currentMemberId")
                 } else {
                   ZIO.succeed(this)
                 }
@@ -446,34 +462,45 @@ object RaftClient {
         serverRequestTracker: ServerRequestTracker,
         nextRequestId: RequestIdRef,
         pendingRequests: PendingRequests,
-        addresses: List[String],
-        currentAddressIndex: Int
+        clusterMembers: Map[MemberId, String],
+        currentMemberId: MemberId
     ) extends ClientState {
       override def stateName: String = s"Connected($sessionId)"
       
+      /** Get the next member to try (round-robin through available members) */
+      private def nextMember: (MemberId, String) = {
+        val membersList = clusterMembers.toList
+        val currentIndex = membersList.indexWhere(_._1 == currentMemberId)
+        val nextIndex = (currentIndex + 1) % membersList.size
+        membersList(nextIndex)
+      }
+      
       /**
-       * Helper method to reconnect to a specific address with an existing session.
+       * Helper method to reconnect to a specific member with an existing session.
+       * Uses leader hint if available, otherwise falls back to next member.
        */
       private def reconnectTo(
-        targetAddressIndex: Int,
+        targetMemberId: Option[MemberId],
         transport: ZmqClientTransport,
         logMessage: String
       ): UIO[ConnectingExistingSession] = {
+        val (memberId, address) = targetMemberId.flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
+          .getOrElse(nextMember)
+        
         for {
           _ <- ZIO.logInfo(logMessage)
           nonce <- Nonce.generate()
-          targetAddr = addresses(targetAddressIndex)
           _ <- transport.disconnect().orDie
-          _ <- transport.connect(targetAddr).orDie
+          _ <- transport.connect(address).orDie
           _ <- transport.sendMessage(ContinueSession(sessionId, nonce)).orDie
-          _ <- ZIO.logInfo(s"Connecting Existing Session $sessionId to $targetAddr")
+          _ <- ZIO.logInfo(s"Connecting Existing Session $sessionId to $memberId at $address")
           now <- Clock.instant
         } yield ConnectingExistingSession(
           sessionId = sessionId,
           capabilities = capabilities,
           nonce = nonce,
-          addresses = addresses,
-          currentAddressIndex = targetAddressIndex,
+          clusterMembers = clusterMembers,
+          currentMemberId = memberId,
           createdAt = now,
           serverRequestTracker = serverRequestTracker,
           nextRequestId = nextRequestId,
@@ -543,10 +570,8 @@ object RaftClient {
             }
 
           case StreamEvent.ServerMsg(RequestError(NotLeaderRequest, leaderId)) =>
-            val nextIndex = (currentAddressIndex + 1) % addresses.length
-            val currentAddr = addresses(currentAddressIndex)
-            val nextAddr = addresses(nextIndex)
-            reconnectTo(nextIndex, transport, s"Not leader at $currentAddr, reconnecting to $nextAddr")
+            val currentAddr = clusterMembers.get(currentMemberId)
+            reconnectTo(leaderId, transport, s"Not leader at $currentMemberId (${currentAddr.getOrElse("unknown")}), reconnecting")
 
           case StreamEvent.ServerMsg(RequestError(SessionTerminated, _)) =>
             ZIO.dieMessage(s"Session terminated by server for session $sessionId")
@@ -578,23 +603,21 @@ object RaftClient {
           case StreamEvent.ServerMsg(SessionClosed(Shutdown, _)) =>
             ZIO.logInfo("Server shutdown, session closed").as(Disconnected)
           
-          case StreamEvent.ServerMsg(SessionClosed(NotLeaderAnymore, _)) =>
-            val nextIndex = (currentAddressIndex + 1) % addresses.length
-            val currentAddr = addresses(currentAddressIndex)
-            val nextAddr = addresses(nextIndex)
-            reconnectTo(nextIndex, transport, s"Session closed: not leader anymore at $currentAddr, trying next: $nextAddr")
+          case StreamEvent.ServerMsg(SessionClosed(NotLeaderAnymore, leaderId)) =>
+            val currentAddr = clusterMembers.get(currentMemberId)
+            reconnectTo(leaderId, transport, s"Session closed: not leader anymore at $currentMemberId (${currentAddr.getOrElse("unknown")})")
           
           case StreamEvent.ServerMsg(SessionClosed(SessionError, _)) =>
-            val currentAddr = addresses(currentAddressIndex)
-            reconnectTo(currentAddressIndex, transport, s"Session closed: session error, reconnecting to same address: $currentAddr")
+            val currentAddr = clusterMembers.get(currentMemberId)
+            reconnectTo(Some(currentMemberId), transport, s"Session closed: session error, reconnecting to same member: $currentMemberId (${currentAddr.getOrElse("unknown")})")
           
           case StreamEvent.ServerMsg(SessionClosed(ConnectionClosed, _)) =>
-            val currentAddr = addresses(currentAddressIndex)
-            reconnectTo(currentAddressIndex, transport, s"Session closed: connection closed, reconnecting to same address: $currentAddr")
+            val currentAddr = clusterMembers.get(currentMemberId)
+            reconnectTo(Some(currentMemberId), transport, s"Session closed: connection closed, reconnecting to same member: $currentMemberId (${currentAddr.getOrElse("unknown")})")
           
           case StreamEvent.ServerMsg(SessionClosed(SessionTimeout, _)) =>
-            val currentAddr = addresses(currentAddressIndex)
-            reconnectTo(currentAddressIndex, transport, s"Session closed: timeout, reconnecting to same address: $currentAddr")
+            val currentAddr = clusterMembers.get(currentMemberId)
+            reconnectTo(Some(currentMemberId), transport, s"Session closed: timeout, reconnecting to same member: $currentMemberId (${currentAddr.getOrElse("unknown")})")
 
           case StreamEvent.KeepAliveTick =>
             for {

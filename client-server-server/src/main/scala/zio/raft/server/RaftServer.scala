@@ -3,322 +3,460 @@ package zio.raft.server
 import zio._
 import zio.stream._
 import zio.raft.protocol._
+import zio.zmq.RoutingId
+import scodec.bits.ByteVector
+import java.time.Instant
 
 /**
- * Main RaftServer implementation for client-server communication.
+ * Simplified RaftServer using pure functional state machine.
  * 
- * Coordinates all server components:
- * - SessionManager for session lifecycle
- * - ActionStream for unified event processing  
- * - ClientHandler for protocol message handling
- * - ZeroMQ transport for network communication
- * - Integration with Raft state machine
+ * Similar to RaftClient, the server uses a unified stream that merges all events.
+ * Each ServerState knows how to handle events and transition to new states.
  */
-trait RaftServer {
+class RaftServer private (
+  transport: ZmqServerTransport,
+  config: ServerConfig,
+  actionQueue: Queue[ServerAction],
+  raftActionsOut: Queue[RaftAction]
+) {
   
   /**
-   * Start the server and begin processing client connections.
+   * Stream of actions to forward to Raft state machine.
    */
-  def start(): Task[Unit]
+  def raftActions: ZStream[Any, Nothing, RaftAction] =
+    ZStream.fromQueue(raftActionsOut)
   
   /**
-   * Stop the server gracefully.
+   * Submit a response from Raft back to a client.
    */
-  def stop(): UIO[Unit]
+  def sendClientResponse(sessionId: SessionId, response: ClientResponse): UIO[Unit] =
+    actionQueue.offer(ServerAction.SendResponse(sessionId, response)).unit
   
   /**
-   * Check if server is currently running.
+   * Send server-initiated request to a client.
    */
-  def isRunning: UIO[Boolean]
+  def sendServerRequest(sessionId: SessionId, request: ServerRequest): UIO[Unit] =
+    actionQueue.offer(ServerAction.SendServerRequest(sessionId, request)).unit
   
   /**
-   * Get current server statistics.
+   * Notify server of leadership change.
    */
-  def getStats(): UIO[ServerStats]
-  
-  /**
-   * Handle leadership change notification from Raft.
-   * 
-   * @param isLeader True if this server is now the leader
-   * @param existingSessions Session metadata from Raft state (if becoming leader)
-   */
-  def handleLeadershipChange(
-    isLeader: Boolean,
-    existingSessions: Map[SessionId, SessionMetadata] = Map.empty
-  ): UIO[Unit]
-  
-  /**
-   * Get the action stream for Raft integration.
-   * Returns a stream of actions that should be forwarded to the Raft state machine.
-   */
-  def getActionStream(): ZStream[Any, Throwable, ServerAction]
-  
-  /**
-   * Handle client response from Raft state machine.
-   * 
-   * @param sessionId Target session ID
-   * @param response Response to deliver to client
-   */
-  def handleClientResponse(
-    sessionId: SessionId,
-    response: ClientResponse
-  ): UIO[Unit]
-  
-  /**
-   * Dispatch server-initiated request to client.
-   * 
-   * @param sessionId Target session ID  
-   * @param request Request to deliver
-   * @return Success if request was delivered
-   */
-  def dispatchServerRequest(
-    sessionId: SessionId,
-    request: ServerRequest
-  ): UIO[Boolean]
+  def handleLeadershipChange(isLeader: Boolean, sessions: Map[SessionId, SessionMetadata]): UIO[Unit] =
+    actionQueue.offer(ServerAction.LeadershipChange(isLeader, sessions)).unit
 }
 
 object RaftServer {
   
-  /**
-   * Create a RaftServer with the given configuration.
-   */
-  def make(config: ServerConfig): ZIO[Scope, Throwable, RaftServer] = 
+  def make(bindAddress: String): ZIO[Scope, Throwable, RaftServer] = {
+    val config = ServerConfig.make(bindAddress)
     for {
-      // Validate configuration
       validatedConfig <- ServerConfig.validated(config).mapError(new IllegalArgumentException(_))
       
-      // Create core components
-      sessionManager <- SessionManager.make(validatedConfig)
+      transport <- createTransport(validatedConfig)
+      actionQueue <- Queue.unbounded[ServerAction]
+      raftActionsOut <- Queue.unbounded[RaftAction]
       
-      // Create ZeroMQ transport (placeholder - needs actual ZMQ implementation)
-      zmqTransport <- createZmqTransport(validatedConfig)
+      server = new RaftServer(transport, validatedConfig, actionQueue, raftActionsOut)
       
-      // Create ZeroMQ message stream (placeholder)
-      zmqMessageStream = createZmqMessageStream(zmqTransport)
+      // Start main loop in Follower state (not leader initially)
+      initialState = ServerState.Follower
       
-      // Create action stream
-      actionStream <- ActionStream.make(sessionManager, zmqMessageStream)
-      
-      // Create client handler
-      clientHandler <- ClientHandler.make(sessionManager, zmqTransport, validatedConfig)
-      
-      // Create server instance
-      server <- ZIO.succeed(new RaftServerImpl(
-        sessionManager,
-        actionStream,
-        clientHandler,
-        zmqTransport,
-        validatedConfig
-      ))
+      _ <- startMainLoop(transport, validatedConfig, actionQueue, raftActionsOut, initialState).fork
       
     } yield server
-  
-  private def createZmqTransport(config: ServerConfig): UIO[ZmqTransport] = {
-    // Placeholder - actual ZMQ implementation would go here
-    ZIO.succeed(new ZmqTransportStub())
   }
   
-  private def createZmqMessageStream(transport: ZmqTransport): ZStream[Any, Throwable, ZmqMessage] = {
-    // Placeholder - actual ZMQ message stream would go here
-    ZStream.empty
-  }
-}
-
-/**
- * Internal implementation of RaftServer.
- */
-private class RaftServerImpl(
-  sessionManager: SessionManager,
-  actionStream: ActionStream,
-  clientHandler: ClientHandler,
-  zmqTransport: ZmqTransport,
-  config: ServerConfig
-) extends RaftServer {
+  private def createTransport(config: ServerConfig): UIO[ZmqServerTransport] =
+    ZIO.succeed(new ZmqServerTransportStub())
   
-  // Using Unsafe instance for class-level initialization
-  import zio.Unsafe
-  private implicit val unsafe: Unsafe = Unsafe.unsafe(identity)
-  
-  private val isRunningRef = Ref.unsafe.make(false)
-  private val serverFiber = Ref.unsafe.make[Option[Fiber[Throwable, Unit]]](None)
-  
-  override def start(): Task[Unit] = 
-    for {
-      running <- isRunningRef.get
-      _ <- if (running) {
-        ZIO.fail(new IllegalStateException("Server is already running"))
-      } else {
-        doStart()
-      }
-    } yield ()
-  
-  private def doStart(): Task[Unit] = 
-    for {
-      _ <- ZIO.logInfo(s"Starting RaftServer on ${config.fullBindAddress}")
-      
-      // Start the main server fiber
-      fiber <- startServerFiber().fork
-      
-      // Update state
-      _ <- isRunningRef.set(true)
-      _ <- serverFiber.set(Some(fiber))
-      
-      _ <- ZIO.logInfo("RaftServer started successfully")
-    } yield ()
-  
-  private def startServerFiber(): Task[Unit] = {
-    val messageProcessing = processIncomingMessages()
-    val actionProcessing = processActionStream()
-    val cleanupProcessing = runCleanupTask()
+  /**
+   * Main loop processes unified stream of events.
+   */
+  private def startMainLoop(
+    transport: ZmqServerTransport,
+    config: ServerConfig,
+    actionQueue: Queue[ServerAction],
+    raftActionsOut: Queue[RaftAction],
+    initialState: ServerState
+  ): Task[Unit] = {
     
-    // Run all processing concurrently
-    messageProcessing.race(actionProcessing).race(cleanupProcessing).unit
+    val actionStream = ZStream.fromQueue(actionQueue)
+      .map(StreamEvent.Action(_))
+    
+    val messageStream = transport.incomingMessages
+      .map(msg => StreamEvent.ClientMessage(msg.routingId, msg.message))
+    
+    val cleanupStream = ZStream.tick(config.cleanupInterval)
+      .map(_ => StreamEvent.CleanupTick)
+    
+    val unifiedStream = actionStream
+      .merge(messageStream)
+      .merge(cleanupStream)
+    
+    // Pure functional state machine
+    unifiedStream
+      .runFoldZIO(initialState) { (state, event) =>
+        state.handle(event, transport, config, raftActionsOut)
+      }
+      .unit
   }
   
-  private def processIncomingMessages(): Task[Unit] = {
-    // Placeholder - actual ZMQ message processing would go here
-    ZStream.fromIterable(List.empty[ZmqMessage])
-      .foreach { msg =>
-        for {
-          responseOpt <- clientHandler.processClientMessage(msg.routingId, msg.content)
-          _ <- responseOpt match {
-            case Some(response) =>
-              zmqTransport.sendMessage(msg.routingId, response)
-            case None =>
-              ZIO.unit
-          }
-        } yield ()
-      }
+  /**
+   * Functional state machine: each state handles events and returns new states.
+   */
+  private sealed trait ServerState {
+    def stateName: String
+    def handle(
+      event: StreamEvent,
+      transport: ZmqServerTransport,
+      config: ServerConfig,
+      raftActionsOut: Queue[RaftAction]
+    ): UIO[ServerState]
   }
   
-  private def processActionStream(): Task[Unit] = {
-    actionStream.resultStream
-      .foreach { serverAction =>
-        for {
-          _ <- ZIO.logDebug(s"Processing server action: $serverAction")
-          // Actions would be forwarded to Raft state machine here
-          _ <- forwardToRaftStateMachine(serverAction)
-        } yield ()
-      }
-  }
-  
-  private def runCleanupTask(): Task[Unit] = {
-    ZStream.tick(config.cleanupInterval)
-      .foreach { _ =>
-        for {
-          expiredSessions <- sessionManager.removeExpiredSessions()
-          _ <- if (expiredSessions.nonEmpty) {
-            ZIO.logInfo(s"Cleaned up ${expiredSessions.size} expired sessions")
-          } else {
-            ZIO.unit
-          }
-        } yield ()
-      }
-  }
-  
-  override def stop(): UIO[Unit] = 
-    for {
-      running <- isRunningRef.get
-      _ <- if (running) {
-        doStop()
-      } else {
-        ZIO.logInfo("Server is not running")
-      }
-    } yield ()
-  
-  private def doStop(): UIO[Unit] = 
-    for {
-      _ <- ZIO.logInfo("Stopping RaftServer...")
+  object ServerState {
+    
+    /**
+     * Follower state - not leader, rejects all session operations.
+     */
+    case object Follower extends ServerState {
+      override def stateName: String = "Follower"
       
-      // Stop the server fiber
-      fiberOpt <- serverFiber.get
-      _ <- fiberOpt match {
-        case Some(fiber) =>
-          fiber.interrupt
-        case None =>
-          ZIO.unit
+      override def handle(
+        event: StreamEvent,
+        transport: ZmqServerTransport,
+        config: ServerConfig,
+        raftActionsOut: Queue[RaftAction]
+      ): UIO[ServerState] = {
+        event match {
+          case StreamEvent.ClientMessage(routingId, message) =>
+            handleClientMessage(routingId, message, transport)
+          
+          case StreamEvent.Action(ServerAction.LeadershipChange(isLeader, sessions)) =>
+            if (isLeader) {
+              for {
+                _ <- ZIO.logInfo(s"Became leader with ${sessions.size} existing sessions")
+                nextRequestId <- RequestIdRef.make
+              } yield Leader(
+                sessions = Sessions.fromMetadata(sessions, config),
+                nextRequestId = nextRequestId
+              )
+            } else {
+              ZIO.succeed(this)
+            }
+          
+          case StreamEvent.Action(ServerAction.SendResponse(_, _)) =>
+            ZIO.logWarning("Cannot send response - not leader").as(this)
+          
+          case StreamEvent.Action(ServerAction.SendServerRequest(_, _)) =>
+            ZIO.logWarning("Cannot send server request - not leader").as(this)
+          
+          case StreamEvent.CleanupTick =>
+            ZIO.succeed(this)
+        }
       }
       
-      // Update state
-      _ <- isRunningRef.set(false)
-      _ <- serverFiber.set(None)
+      private def handleClientMessage(
+        routingId: RoutingId,
+        message: ClientMessage,
+        transport: ZmqServerTransport
+      ): UIO[ServerState] = {
+        message match {
+          case CreateSession(_, nonce) =>
+            transport.sendMessage(routingId, SessionRejected(NotLeader, nonce, None)).orDie.as(this)
+          
+          case ContinueSession(_, nonce) =>
+            transport.sendMessage(routingId, SessionRejected(NotLeader, nonce, None)).orDie.as(this)
+          
+          case KeepAlive(timestamp) =>
+            transport.sendMessage(routingId, SessionClosed(SessionError, None)).orDie.as(this)
+          
+          case _: ClientRequest =>
+            transport.sendMessage(routingId, RequestError(NotLeaderRequest, None)).orDie.as(this)
+          
+          case ServerRequestAck(_) =>
+            ZIO.succeed(this)
+          
+          case CloseSession(_) =>
+            ZIO.succeed(this)
+        }
+      }
+    }
+    
+    /**
+     * Leader state - manages sessions and forwards requests to Raft.
+     */
+    case class Leader(
+      sessions: Sessions,
+      nextRequestId: RequestIdRef
+    ) extends ServerState {
+      override def stateName: String = "Leader"
       
-      _ <- ZIO.logInfo("RaftServer stopped")
-    } yield ()
-  
-  override def isRunning: UIO[Boolean] = 
-    isRunningRef.get
-  
-  override def getStats(): UIO[ServerStats] = 
-    for {
-      running <- isRunning
-      sessionStats <- sessionManager.getSessionStats()
-    } yield ServerStats(
-      isRunning = running,
-      isLeader = false, // Would be updated from Raft integration
-      totalSessions = sessionStats.totalSessions,
-      connectedSessions = sessionStats.connectedSessions,
-      disconnectedSessions = sessionStats.disconnectedSessions,
-      uptimeSeconds = 0 // Would track actual uptime
-    )
-  
-  override def handleLeadershipChange(
-    isLeader: Boolean,
-    existingSessions: Map[SessionId, SessionMetadata]
-  ): UIO[Unit] = 
-    for {
-      _ <- ZIO.logInfo(s"Leadership change: isLeader=$isLeader, existingSessions=${existingSessions.size}")
-      _ <- if (isLeader) {
-        sessionManager.initializeFromRaftState(existingSessions)
-      } else {
-        ZIO.unit // Non-leader doesn't manage sessions
+      override def handle(
+        event: StreamEvent,
+        transport: ZmqServerTransport,
+        config: ServerConfig,
+        raftActionsOut: Queue[RaftAction]
+      ): UIO[ServerState] = {
+        event match {
+          case StreamEvent.ClientMessage(routingId, message) =>
+            handleClientMessage(routingId, message, transport, raftActionsOut)
+          
+          case StreamEvent.Action(ServerAction.LeadershipChange(isLeader, _)) =>
+            if (!isLeader) {
+              for {
+                _ <- ZIO.logInfo("Lost leadership, closing all sessions")
+                _ <- sessions.closeAll(transport)
+              } yield Follower
+            } else {
+              ZIO.succeed(this)
+            }
+          
+          case StreamEvent.Action(ServerAction.SendResponse(sessionId, response)) =>
+            sessions.getRoutingId(sessionId) match {
+              case Some(routingId) =>
+                transport.sendMessage(routingId, response).orDie.as(this)
+              case None =>
+                ZIO.logWarning(s"Cannot send response - session $sessionId not found").as(this)
+            }
+          
+          case StreamEvent.Action(ServerAction.SendServerRequest(sessionId, request)) =>
+            sessions.getRoutingId(sessionId) match {
+              case Some(routingId) =>
+                transport.sendMessage(routingId, request).orDie.as(this)
+              case None =>
+                ZIO.logWarning(s"Cannot send server request - session $sessionId not found").as(this)
+            }
+          
+          case StreamEvent.CleanupTick =>
+            for {
+              now <- Clock.instant
+              (expiredIds, newSessions) = sessions.removeExpired(now)
+              _ <- ZIO.foreachDiscard(expiredIds) { sessionId =>
+                for {
+                  _ <- raftActionsOut.offer(RaftAction.ExpireSession(sessionId))
+                  routingIdOpt = sessions.getRoutingId(sessionId)
+                  _ <- routingIdOpt match {
+                    case Some(routingId) =>
+                      transport.sendMessage(routingId, SessionClosed(SessionTimeout, None)).orDie
+                    case None => ZIO.unit
+                  }
+                } yield ()
+              }
+            } yield copy(sessions = newSessions)
+        }
       }
-    } yield ()
-  
-  override def getActionStream(): ZStream[Any, Throwable, ServerAction] = 
-    actionStream.resultStream
-  
-  override def handleClientResponse(
-    sessionId: SessionId,
-    response: ClientResponse
-  ): UIO[Unit] = 
-    for {
-      delivered <- clientHandler.deliverClientResponse(sessionId, response)
-      _ <- if (!delivered) {
-        ZIO.logWarning(s"Failed to deliver response to session $sessionId")
-      } else {
-        ZIO.unit
+      
+      private def handleClientMessage(
+        routingId: RoutingId,
+        message: ClientMessage,
+        transport: ZmqServerTransport,
+        raftActionsOut: Queue[RaftAction]
+      ): UIO[ServerState] = {
+        message match {
+          case CreateSession(capabilities, nonce) =>
+            for {
+              sessionId <- SessionId.generate()
+              now <- Clock.instant
+              _ <- raftActionsOut.offer(RaftAction.CreateSession(sessionId, capabilities))
+              _ <- transport.sendMessage(routingId, SessionCreated(sessionId, nonce)).orDie
+              newSessions = sessions.addConnected(sessionId, routingId, capabilities, now)
+            } yield copy(sessions = newSessions)
+          
+          case ContinueSession(sessionId, nonce) =>
+            sessions.getMetadata(sessionId) match {
+              case Some(metadata) =>
+                for {
+                  now <- Clock.instant
+                  _ <- transport.sendMessage(routingId, SessionContinued(nonce)).orDie
+                  newSessions = sessions.reconnect(sessionId, routingId, now)
+                } yield copy(sessions = newSessions)
+              case None =>
+                transport.sendMessage(routingId, SessionRejected(SessionNotFound, nonce, None)).orDie.as(this)
+            }
+          
+          case KeepAlive(timestamp) =>
+            sessions.findSessionByRouting(routingId) match {
+              case Some(sessionId) =>
+                for {
+                  now <- Clock.instant
+                  _ <- transport.sendMessage(routingId, KeepAliveResponse(timestamp)).orDie
+                  newSessions = sessions.updateExpiry(sessionId, now)
+                } yield copy(sessions = newSessions)
+              case None =>
+                transport.sendMessage(routingId, SessionClosed(SessionError, None)).orDie.as(this)
+            }
+          
+          case clientRequest: ClientRequest =>
+            sessions.findSessionByRouting(routingId) match {
+              case Some(sessionId) =>
+                for {
+                  _ <- raftActionsOut.offer(RaftAction.ClientRequest(sessionId, clientRequest.requestId, clientRequest.payload))
+                } yield this
+              case None =>
+                transport.sendMessage(routingId, RequestError(SessionTerminated, None)).orDie.as(this)
+            }
+          
+          case ServerRequestAck(requestId) =>
+            // Could track acknowledgments if needed
+            ZIO.succeed(this)
+          
+          case CloseSession(reason) =>
+            sessions.findSessionByRouting(routingId) match {
+              case Some(sessionId) =>
+                for {
+                  _ <- ZIO.logInfo(s"Client closed session $sessionId: $reason")
+                  newSessions = sessions.disconnect(sessionId, routingId)
+                } yield copy(sessions = newSessions)
+              case None =>
+                ZIO.succeed(this)
+            }
+        }
       }
-    } yield ()
+    }
+  }
   
-  override def dispatchServerRequest(
-    sessionId: SessionId,
-    request: ServerRequest
-  ): UIO[Boolean] = 
-    clientHandler.deliverServerRequest(sessionId, request)
+  /**
+   * Immutable sessions management.
+   */
+  case class Sessions(
+    metadata: Map[SessionId, SessionMetadata],
+    connections: Map[SessionId, SessionConnection],
+    routingToSession: Map[RoutingId, SessionId]
+  ) {
+    def addConnected(sessionId: SessionId, routingId: RoutingId, capabilities: Map[String, String], now: Instant): Sessions = {
+      val expiresAt = now.plusSeconds(90) // TODO: use config
+      copy(
+        metadata = metadata.updated(sessionId, SessionMetadata(capabilities, now)),
+        connections = connections.updated(sessionId, SessionConnection(Some(routingId), expiresAt)),
+        routingToSession = routingToSession.updated(routingId, sessionId)
+      )
+    }
+    
+    def reconnect(sessionId: SessionId, routingId: RoutingId, now: Instant): Sessions = {
+      connections.get(sessionId) match {
+        case Some(conn) =>
+          val expiresAt = now.plusSeconds(90) // TODO: use config
+          copy(
+            connections = connections.updated(sessionId, conn.copy(routingId = Some(routingId), expiresAt = expiresAt)),
+            routingToSession = routingToSession.updated(routingId, sessionId)
+          )
+        case None => this
+      }
+    }
+    
+    def disconnect(sessionId: SessionId, routingId: RoutingId): Sessions =
+      copy(
+        connections = connections.updatedWith(sessionId)(_.map(_.copy(routingId = None))),
+        routingToSession = routingToSession.removed(routingId)
+      )
+    
+    def updateExpiry(sessionId: SessionId, now: Instant): Sessions = {
+      connections.get(sessionId) match {
+        case Some(conn) =>
+          val expiresAt = now.plusSeconds(90) // TODO: use config
+          copy(connections = connections.updated(sessionId, conn.copy(expiresAt = expiresAt)))
+        case None => this
+      }
+    }
+    
+    def removeExpired(now: Instant): (List[SessionId], Sessions) = {
+      val expired = connections.filter { case (_, conn) => conn.expiresAt.isBefore(now) }.keys.toList
+      val newMetadata = metadata -- expired
+      val newConnections = connections -- expired
+      val newRouting = routingToSession.filter { case (_, sid) => !expired.contains(sid) }
+      (expired, Sessions(newMetadata, newConnections, newRouting))
+    }
+    
+    def getRoutingId(sessionId: SessionId): Option[RoutingId] =
+      connections.get(sessionId).flatMap(_.routingId)
+    
+    def getMetadata(sessionId: SessionId): Option[SessionMetadata] =
+      metadata.get(sessionId)
+    
+    def findSessionByRouting(routingId: RoutingId): Option[SessionId] =
+      routingToSession.get(routingId)
+    
+    def closeAll(transport: ZmqServerTransport): UIO[Unit] =
+      ZIO.foreachDiscard(connections.values.flatMap(_.routingId)) { routingId =>
+        transport.sendMessage(routingId, SessionClosed(ServerShutdown, None)).orDie
+      }
+  }
   
-  private def forwardToRaftStateMachine(action: ServerAction): UIO[Unit] = {
-    // Placeholder - actual Raft integration would go here
-    ZIO.logDebug(s"Forwarding to Raft: $action")
+  object Sessions {
+    def empty: Sessions = Sessions(Map.empty, Map.empty, Map.empty)
+    
+    def fromMetadata(metadata: Map[SessionId, SessionMetadata], config: ServerConfig): Sessions = {
+      val now = java.time.Instant.now() // Safe here as it's initialization
+      val expiresAt = now.plusSeconds(config.sessionTimeout.toSeconds)
+      val connections = metadata.map { case (sid, _) =>
+        sid -> SessionConnection(None, expiresAt)
+      }
+      Sessions(metadata, connections, Map.empty)
+    }
+  }
+  
+  case class SessionConnection(
+    routingId: Option[RoutingId],
+    expiresAt: Instant
+  )
+  
+  case class SessionMetadata(
+    capabilities: Map[String, String],
+    createdAt: Instant
+  )
+  
+  /**
+   * Actions initiated by the server (internal or from Raft).
+   */
+  sealed trait ServerAction
+  
+  object ServerAction {
+    case class SendResponse(sessionId: SessionId, response: ClientResponse) extends ServerAction
+    case class SendServerRequest(sessionId: SessionId, request: ServerRequest) extends ServerAction
+    case class LeadershipChange(isLeader: Boolean, sessions: Map[SessionId, SessionMetadata]) extends ServerAction
+  }
+  
+  /**
+   * Actions to forward to Raft state machine.
+   */
+  sealed trait RaftAction
+  
+  object RaftAction {
+    case class CreateSession(sessionId: SessionId, capabilities: Map[String, String]) extends RaftAction
+    case class ClientRequest(sessionId: SessionId, requestId: RequestId, payload: ByteVector) extends RaftAction
+    case class ExpireSession(sessionId: SessionId) extends RaftAction
+  }
+  
+  /**
+   * Unified stream events.
+   */
+  private sealed trait StreamEvent
+  
+  private object StreamEvent {
+    case class Action(action: ServerAction) extends StreamEvent
+    case class ClientMessage(routingId: RoutingId, message: ClientMessage) extends StreamEvent
+    case object CleanupTick extends StreamEvent
+  }
+  
+  /**
+   * Transport abstraction for ZeroMQ SERVER socket.
+   */
+  trait ZmqServerTransport {
+    def sendMessage(routingId: RoutingId, message: ServerMessage): Task[Unit]
+    def incomingMessages: ZStream[Any, Throwable, IncomingMessage]
+  }
+  
+  case class IncomingMessage(
+    routingId: RoutingId,
+    message: ClientMessage
+  )
+  
+  private class ZmqServerTransportStub extends ZmqServerTransport {
+    override def sendMessage(routingId: RoutingId, message: ServerMessage): Task[Unit] =
+      ZIO.logDebug(s"Stub: sending to $routingId: ${message.getClass.getSimpleName}")
+    
+    override def incomingMessages: ZStream[Any, Throwable, IncomingMessage] =
+      ZStream.empty
   }
 }
-
-/**
- * Server statistics for monitoring.
- */
-case class ServerStats(
-  isRunning: Boolean,
-  isLeader: Boolean,
-  totalSessions: Int,
-  connectedSessions: Int,
-  disconnectedSessions: Int,
-  uptimeSeconds: Long
-)
-/**
- * Stub implementation of ZmqTransport for compilation.
- */
-private class ZmqTransportStub extends ZmqTransport {
-  override def sendMessage(routingId: zio.zmq.RoutingId, message: ServerMessage): Task[Unit] = 
-    ZIO.logDebug(s"Stub: sending message to $routingId: $message")
-}
-

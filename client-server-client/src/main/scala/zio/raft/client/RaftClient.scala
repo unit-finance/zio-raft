@@ -7,98 +7,21 @@ import scodec.bits.ByteVector
 import java.time.Instant
 
 /**
- * Main RaftClient implementation using functional state-based approach.
+ * Main RaftClient implementation using pure functional stream-based approach.
  * 
- * Each connection state (Disconnected, Connecting, Connected) handles messages
- * differently and transitions to other states based on the protocol.
+ * The client uses a unified stream that merges:
+ * - Client actions (commands, disconnect requests)
+ * - Server messages (responses, session management)
+ * - Keep-alive ticks
  * 
- * Session management is integrated directly into the state machine.
+ * State transitions happen through stream folding, where each event
+ * produces a new ClientState without mutable refs.
  */
 class RaftClient private (
-  stateRef: Ref[ClientState],
-  pendingOperationsRef: Ref[Map[Nonce, SessionOperation]],
-  serverRequestTrackerRef: Ref[ServerRequestTracker],
-  retryManager: RetryManager,
   zmqTransport: ZmqClientTransport,
   config: ClientConfig,
   actionQueue: Queue[ClientAction]
 ) {
-  
-  /**
-   * Internal method to initiate connection to the cluster.
-   * Called automatically on client startup.
-   */
-  private def initiateConnection(): Task[SessionId] = 
-    for {
-      // Validate capabilities
-      _ <- validateCapabilities(config.capabilities)
-      
-      // Transition to Connecting state
-      _ <- transitionTo(ClientState.Connecting(config.capabilities, nonce = None, addresses = config.clusterAddresses, currentAddressIndex = 0))
-      
-      // Generate nonce for session creation
-      nonce <- Nonce.generate()
-      
-      // Create promise for session creation
-      promise <- Promise.make[SessionError, SessionId]
-      
-      // Track pending operation
-      _ <- pendingOperationsRef.update(_.updated(nonce, SessionOperation.Create(promise)))
-      
-      // Send CreateSession message
-      createMessage = CreateSession(config.capabilities, nonce)
-      _ <- zmqTransport.sendMessage(createMessage)
-      
-      // Wait for session creation response
-      sessionId <- promise.await
-      
-      _ <- ZIO.logInfo(s"Connected with session: $sessionId")
-      
-    } yield sessionId
-  
-  /**
-   * Internal method to continue an existing session after reconnection.
-   * Called automatically by the state machine when reconnecting.
-   */
-  private def continueSessionInternal(sessionId: SessionId): Task[Unit] = 
-    for {
-      // Generate nonce for session continuation
-      nonce <- Nonce.generate()
-      
-      // Transition to Connecting state with nonce
-      _ <- transitionTo(ClientState.Connecting(
-        capabilities = config.capabilities,
-        nonce = Some(nonce),
-        addresses = config.clusterAddresses,
-        currentAddressIndex = 0
-      ))
-      
-      // Create promise for session continuation
-      promise <- Promise.make[SessionError, Unit]
-      
-      // Track pending operation
-      _ <- pendingOperationsRef.update(_.updated(nonce, SessionOperation.Continue(promise)))
-      
-      // Send ContinueSession message
-      continueMessage = ContinueSession(sessionId, nonce)
-      _ <- zmqTransport.sendMessage(continueMessage)
-      
-      // Wait for session continuation response
-      _ <- promise.await
-      
-      _ <- ZIO.logInfo(s"Continued session: $sessionId")
-      
-    } yield ()
-  
-  /**
-   * Disconnect from the cluster.
-   * Enqueues a disconnect action to be processed by the stream.
-   */
-  def disconnect(): UIO[Unit] = 
-    for {
-      _ <- actionQueue.offer(ClientAction.Disconnect)
-      _ <- ZIO.logDebug("Disconnect action enqueued")
-    } yield ()
   
   /**
    * Submit a command to the cluster.
@@ -109,207 +32,39 @@ class RaftClient private (
       promise <- Promise.make[Throwable, ByteVector]
       action = ClientAction.SubmitCommand(payload, promise)
       _ <- actionQueue.offer(action)
-      _ <- ZIO.logDebug("Command submission action enqueued")
       result <- promise.await
     } yield result
   
   /**
+   * Disconnect from the cluster.
+   * Enqueues a disconnect action to be processed by the stream.
+   */
+  def disconnect(): UIO[Unit] = 
+    actionQueue.offer(ClientAction.Disconnect).unit
+  
+  /**
    * Acknowledge a server-initiated request.
-   * Enqueues an acknowledgment action to be processed by the stream.
+   * This is called immediately when we receive a server request.
    */
   def acknowledgeServerRequest(requestId: RequestId): UIO[Unit] = 
     for {
-      _ <- actionQueue.offer(ClientAction.AcknowledgeServerRequest(requestId))
-      _ <- ZIO.logDebug(s"Acknowledgment action enqueued for request: $requestId")
+      ack = ServerRequestAck(requestId)
+      _ <- zmqTransport.sendMessage(ack).orDie
+      _ <- ZIO.logDebug(s"Acknowledged server request: $requestId")
     } yield ()
-  
-  /**
-   * Process an incoming server message.
-   * State transitions happen based on current state and message type.
-   */
-  def handleServerMessage(message: ServerMessage): UIO[Unit] = 
-    for {
-      // Handle promise completion for session operations
-      _ <- message match {
-        case SessionCreated(sessionId, nonce) =>
-          completeSessionOperation(nonce, sessionId)
-        case SessionContinued(nonce) =>
-          completeSessionContinuation(nonce)
-        case rejection: SessionRejected =>
-          failSessionOperation(rejection.nonce, rejection.reason)
-        case response: ClientResponse =>
-          retryManager.completePendingRequest(response.requestId, response.result)
-        case error: RequestError =>
-          retryManager.completePendingRequestWithError(error.requestId, error.reason)
-        case _ =>
-          ZIO.unit
-      }
-      
-      // Handle state transition
-      currentState <- stateRef.get
-      newState <- currentState.handleMessage(message)
-      _ <- if (newState != currentState) {
-        stateRef.set(newState) *> ZIO.logDebug(s"State transition: ${currentState.stateName} -> ${newState.stateName}")
-      } else {
-        ZIO.unit
-      }
-    } yield ()
-  
-  private def completeSessionOperation(nonce: Nonce, sessionId: SessionId): UIO[Unit] =
-    for {
-      operationsMap <- pendingOperationsRef.get
-      _ <- operationsMap.get(nonce) match {
-        case Some(SessionOperation.Create(promise)) =>
-          promise.succeed(sessionId).ignore *> pendingOperationsRef.update(_.removed(nonce))
-        case _ =>
-          ZIO.logWarning(s"Received SessionCreated for unexpected nonce: $nonce")
-      }
-    } yield ()
-  
-  private def completeSessionContinuation(nonce: Nonce): UIO[Unit] =
-    for {
-      operationsMap <- pendingOperationsRef.get
-      _ <- operationsMap.get(nonce) match {
-        case Some(SessionOperation.Continue(promise)) =>
-          promise.succeed(()).ignore *> pendingOperationsRef.update(_.removed(nonce))
-        case _ =>
-          ZIO.logWarning(s"Received SessionContinued for unexpected nonce: $nonce")
-      }
-    } yield ()
-  
-  private def failSessionOperation(nonce: Nonce, reason: RejectionReason): UIO[Unit] =
-    for {
-      operationsMap <- pendingOperationsRef.get
-      _ <- operationsMap.get(nonce) match {
-        case Some(SessionOperation.Create(promise)) =>
-          val error = SessionError.fromRejectionReason(reason)
-          promise.fail(error).ignore *> pendingOperationsRef.update(_.removed(nonce))
-        case Some(SessionOperation.Continue(promise)) =>
-          val error = SessionError.fromRejectionReason(reason)
-          promise.fail(error).ignore *> pendingOperationsRef.update(_.removed(nonce))
-        case _ =>
-          ZIO.logWarning(s"Received SessionRejected for unexpected nonce: $nonce")
-      }
-    } yield ()
-  
-  /**
-   * Get current connection state.
-   */
-  def getState: UIO[ClientState] = 
-    stateRef.get
-  
-  /**
-   * Check if client is connected.
-   */
-  def isConnected: UIO[Boolean] = 
-    stateRef.get.map {
-      case ClientState.Connected(_, _, _, _) => true
-      case _ => false
-    }
-  
-  /**
-   * Get current session ID if connected.
-   */
-  def getSessionId: UIO[Option[SessionId]] = 
-    stateRef.get.map {
-      case ClientState.Connected(sessionId, _, _, _) => Some(sessionId)
-      case _ => None
-    }
-  
-  /**
-   * Transition to a new state.
-   */
-  private[client] def transitionTo(newState: ClientState): UIO[Unit] = 
-    for {
-      oldState <- stateRef.get
-      _ <- stateRef.set(newState)
-      _ <- ZIO.logDebug(s"State transition: ${oldState.stateName} -> ${newState.stateName}")
-    } yield ()
-  
-  private def submitRequestInConnectedState(
-    sessionId: SessionId,
-    payload: ByteVector
-  ): Task[ByteVector] = 
-    for {
-      // Generate request ID
-      requestId <- generateRequestId()
-      now <- Clock.instant
-      
-      // Create request
-      request = ClientRequest(requestId, payload, now)
-      
-      // Create promise for response
-      promise <- Promise.make[RequestErrorReason, ByteVector]
-      
-      // Track with retry manager
-      _ <- retryManager.addPendingRequest(request, promise)
-      
-      // Send request
-      _ <- zmqTransport.sendMessage(request)
-      
-      // Wait for response with timeout
-      response <- promise.await
-        .mapError {
-          case reason: RequestErrorReason => new RuntimeException(s"Request failed: $reason")
-        }
-        .timeoutFail(new TimeoutException("Request timed out"))(ClientConfig.REQUEST_TIMEOUT)
-      
-    } yield response
-  
-  private def validateCapabilities(caps: Map[String, String]): Task[Unit] = {
-    val errors = scala.collection.mutable.ListBuffer[String]()
-    
-    if (caps.isEmpty) {
-      errors += "Capabilities cannot be empty"
-    }
-    
-    if (caps.size > config.maxCapabilityCount) {
-      errors += s"Too many capabilities: ${caps.size} > ${config.maxCapabilityCount}"
-    }
-    
-    caps.foreach { case (key, value) =>
-      if (key.isEmpty) {
-        errors += "Capability key cannot be empty"
-      }
-      if (value.length > config.maxCapabilityValueLength) {
-        errors += s"Capability value too long: ${value.length} > ${config.maxCapabilityValueLength}"
-      }
-    }
-    
-    if (errors.nonEmpty) {
-      ZIO.fail(new IllegalArgumentException(s"Invalid capabilities: ${errors.mkString(", ")}"))
-    } else {
-      ZIO.unit
-    }
-  }
-  
-  private def generateRequestId(): UIO[RequestId] = 
-    Random.nextLong.map(RequestId.fromLong)
 }
 
 object RaftClient {
   
   /**
-   * Create and initialize a RaftClient.
-   * Automatically connects to the cluster on creation.
+   * Create and start a RaftClient.
+   * The client automatically connects to the cluster on creation.
    */
   def make(addresses: List[String], capabilities: Map[String, String]): ZIO[Scope, Throwable, RaftClient] = 
     for {
       // Create and validate configuration
       config = ClientConfig.make(addresses, capabilities)
       validatedConfig <- ClientConfig.validated(config).mapError(new IllegalArgumentException(_))
-      
-      // Create initial state
-      stateRef <- Ref.make[ClientState](ClientState.Disconnected)
-      
-      // Create pending operations tracking
-      pendingOperationsRef <- Ref.make[Map[Nonce, SessionOperation]](Map.empty)
-      
-      // Create server request tracker
-      serverRequestTrackerRef <- Ref.make(ServerRequestTracker())
-      
-      // Create retry manager
-      retryManager <- RetryManager.make(validatedConfig)
       
       // Create ZMQ transport
       zmqTransport <- createZmqTransport(validatedConfig)
@@ -319,151 +74,363 @@ object RaftClient {
       
       // Create client
       client = new RaftClient(
-        stateRef,
-        pendingOperationsRef,
-        serverRequestTrackerRef,
-        retryManager,
         zmqTransport,
         validatedConfig,
         actionQueue
       )
       
-      // Start action processing loop
-      _ <- startActionProcessingLoop(client, actionQueue).fork
-      
-      // Start message processing loop (enqueues actions)
-      _ <- startMessageLoop(client, zmqTransport, actionQueue).fork
-      
-      // Start keep-alive loop
-      _ <- startKeepAliveLoop(client, zmqTransport, validatedConfig).fork
+      // Start the main processing loop (forked)
+      _ <- startMainLoop(client, zmqTransport, validatedConfig, actionQueue).fork
       
       // Automatically initiate connection
-      _ <- client.initiateConnection().fork
+      _ <- initiateConnection(zmqTransport, validatedConfig, actionQueue)
       
     } yield client
+  
+  /**
+   * Initiate connection - just sends CreateSession message.
+   * Does not wait for response, which will be handled by the stream.
+   */
+  private def initiateConnection(
+    transport: ZmqClientTransport,
+    config: ClientConfig,
+    actionQueue: Queue[ClientAction]
+  ): Task[Unit] = 
+    for {
+      nonce <- Nonce.generate()
+      createMessage = CreateSession(config.capabilities, nonce)
+      _ <- transport.sendMessage(createMessage)
+      _ <- ZIO.logInfo("CreateSession sent, transitioning to Connecting")
+    } yield ()
   
   private def createZmqTransport(config: ClientConfig): UIO[ZmqClientTransport] = 
     ZIO.succeed(new ZmqClientTransportStub())
   
   /**
-   * Action processing loop - processes actions from the queue using fold.
-   * State transitions happen through the fold function.
+   * Main processing loop using unified stream with fold.
+   * Each fold iteration returns a new ClientState.
    */
-  private def startActionProcessingLoop(
+  private def startMainLoop(
     client: RaftClient,
+    transport: ZmqClientTransport,
+    config: ClientConfig,
     actionQueue: Queue[ClientAction]
   ): Task[Unit] = {
-    ZStream
-      .fromQueue(actionQueue)
-      .foreach { action =>
-        processAction(client, action)
+    
+    // Create unified stream merging all event sources
+    val actionStream = ZStream.fromQueue(actionQueue)
+      .map(StreamEvent.Action(_))
+    
+    val messageStream = transport.incomingMessages
+      .map(StreamEvent.ServerMsg(_))
+    
+    val keepAliveStream = ZStream.tick(config.keepAliveInterval)
+      .map(_ => StreamEvent.KeepAliveTick)
+    
+    val unifiedStream = actionStream
+      .merge(messageStream)
+      .merge(keepAliveStream)
+    
+    // Initial state: Connecting with first address
+    val initialState = ClientState.Connecting(
+      capabilities = config.capabilities,
+      nonce = None,
+      addresses = config.clusterAddresses,
+      currentAddressIndex = 0,
+      retryManager = RetryManager.empty(config)
+    )
+    
+    // Fold over unified stream, each fold returns new ClientState
+    unifiedStream
+      .runFold(initialState) { (state, event) =>
+        processEvent(client, transport, config, state, event)
       }
+      .unit
   }
   
   /**
-   * Process a single action based on current state.
+   * Process a single event and return new state.
+   * All state transitions happen here through pure functions.
    */
-  private def processAction(client: RaftClient, action: ClientAction): Task[Unit] = {
-    action match {
-      case ClientAction.Disconnect =>
-        for {
-          currentState <- client.stateRef.get
-          _ <- currentState match {
-            case ClientState.Connected(sessionId, _, _, _) =>
-              for {
-                closeMessage = CloseSession(ClientShutdown)
-                _ <- client.zmqTransport.sendMessage(closeMessage)
-                _ <- client.transitionTo(ClientState.Disconnected)
-                _ <- ZIO.logInfo("Disconnected from cluster")
-              } yield ()
-            case _ =>
-              client.transitionTo(ClientState.Disconnected)
-          }
-        } yield ()
+  private def processEvent(
+    client: RaftClient,
+    transport: ZmqClientTransport,
+    config: ClientConfig,
+    state: ClientState,
+    event: StreamEvent
+  ): UIO[ClientState] = {
+    event match {
+      case StreamEvent.Action(action) =>
+        handleAction(client, transport, state, action)
       
-      case ClientAction.SubmitCommand(payload, promise) =>
-        for {
-          currentState <- client.stateRef.get
-          _ <- currentState match {
-            case ClientState.Connected(sessionId, _, _, _) =>
-              client.submitRequestInConnectedState(sessionId, payload)
-                .foldZIO(
-                  error => promise.fail(error).ignore,
-                  result => promise.succeed(result).ignore
-                )
-            case _ =>
-              promise.fail(new IllegalStateException("Client is not connected")).ignore
-          }
-        } yield ()
+      case StreamEvent.ServerMsg(message) =>
+        handleServerMessage(client, transport, state, message)
       
-      case ClientAction.AcknowledgeServerRequest(requestId) =>
-        for {
-          tracker <- client.serverRequestTrackerRef.get
-          _ <- if (tracker.shouldProcess(requestId)) {
-            for {
-              updatedTracker <- ZIO.succeed(tracker.acknowledge(requestId))
-              _ <- client.serverRequestTrackerRef.set(updatedTracker)
-              ack = ServerRequestAck(requestId)
-              _ <- client.zmqTransport.sendMessage(ack)
-              _ <- ZIO.logDebug(s"Acknowledged server request: $requestId")
-            } yield ()
-          } else {
-            ZIO.logWarning(s"Cannot acknowledge out-of-order request: $requestId")
-          }
-        } yield ()
-      
-      case ClientAction.ProcessServerMessage(message) =>
-        client.handleServerMessage(message)
-      
-      case ClientAction.Connect =>
-        // Not implemented - connect happens automatically on startup
-        ZIO.unit
+      case StreamEvent.KeepAliveTick =>
+        handleKeepAliveTick(transport, state)
     }
   }
   
-  private def startMessageLoop(
+  /**
+   * Handle client actions based on current state.
+   */
+  private def handleAction(
     client: RaftClient,
     transport: ZmqClientTransport,
-    actionQueue: Queue[ClientAction]
-  ): Task[Unit] = {
-    // Process incoming messages by enqueuing them as actions
-    transport.incomingMessages
-      .foreach { message =>
-        actionQueue.offer(ClientAction.ProcessServerMessage(message))
-      }
+    state: ClientState,
+    action: ClientAction
+  ): UIO[ClientState] = {
+    action match {
+      case ClientAction.Disconnect =>
+        state match {
+          case s: ClientState.Connected =>
+            for {
+              closeMessage = CloseSession(ClientShutdown)
+              _ <- transport.sendMessage(closeMessage).orDie
+              _ <- ZIO.logInfo("Disconnected from cluster")
+            } yield ClientState.Disconnected
+          case _ =>
+            ZIO.succeed(ClientState.Disconnected)
+        }
+      
+      case ClientAction.SubmitCommand(payload, promise) =>
+        state match {
+          case s: ClientState.Connected =>
+            for {
+              requestId <- generateRequestId()
+              now <- Clock.instant
+              request = ClientRequest(requestId, payload, now)
+              newState <- s.addPendingRequest(request, promise)
+              _ <- transport.sendMessage(request).orDie
+            } yield newState
+          case _ =>
+            promise.fail(new IllegalStateException("Client is not connected")).ignore.as(state)
+        }
+      
+      case ClientAction.AcknowledgeServerRequest(requestId) =>
+        // Acknowledgment happens immediately in the acknowledgeServerRequest method
+        ZIO.succeed(state)
+      
+      case ClientAction.Connect =>
+        // Not implemented - connect happens automatically on startup
+        ZIO.succeed(state)
+      
+      case ClientAction.ProcessServerMessage(message) =>
+        // This case shouldn't occur since messages come directly in the stream
+        handleServerMessage(client, transport, state, message)
+    }
   }
   
-  private def startKeepAliveLoop(
+  /**
+   * Handle server messages based on current state.
+   * Each state knows how to handle different message types.
+   */
+  private def handleServerMessage(
     client: RaftClient,
     transport: ZmqClientTransport,
-    config: ClientConfig
-  ): Task[Unit] = {
-    ZStream
-      .tick(config.keepAliveInterval)
-      .foreach { _ =>
-        for {
-          isConnected <- client.isConnected
-          _ <- if (isConnected) {
-            for {
-              now <- Clock.instant
-              keepAlive = KeepAlive(now)
-              _ <- transport.sendMessage(keepAlive)
-            } yield ()
-          } else {
-            ZIO.unit
-          }
-        } yield ()
-      }
+    state: ClientState,
+    message: ServerMessage
+  ): UIO[ClientState] = {
+    state match {
+      case s: ClientState.Disconnected =>
+        ZIO.logWarning(s"Received message while disconnected: ${message.getClass.getSimpleName}").as(state)
+      
+      case s: ClientState.Connecting =>
+        handleMessageInConnecting(transport, s, message)
+      
+      case s: ClientState.Connected =>
+        handleMessageInConnected(client, transport, s, message)
+    }
   }
+  
+  /**
+   * Handle messages in Connecting state.
+   */
+  private def handleMessageInConnecting(
+    transport: ZmqClientTransport,
+    state: ClientState.Connecting,
+    message: ServerMessage
+  ): UIO[ClientState] = {
+    message match {
+      case SessionCreated(sessionId, responseNonce) =>
+        // Validate nonce if we have one
+        state.nonce match {
+          case Some(expectedNonce) if expectedNonce != responseNonce =>
+            ZIO.logWarning(s"Nonce mismatch, ignoring SessionCreated").as(state)
+          case _ =>
+            for {
+              _ <- ZIO.logInfo(s"Session created: $sessionId")
+              now <- Clock.instant
+            } yield ClientState.Connected(
+              sessionId = sessionId,
+              capabilities = state.capabilities,
+              createdAt = now,
+              serverRequestTracker = ServerRequestTracker(),
+              retryManager = state.retryManager
+            )
+        }
+      
+      case SessionContinued(responseNonce) =>
+        // Validate nonce
+        state.nonce match {
+          case Some(expectedNonce) if expectedNonce != responseNonce =>
+            ZIO.logWarning(s"Nonce mismatch, ignoring SessionContinued").as(state)
+          case _ =>
+            ZIO.logInfo("Session continued successfully").as(state)
+        }
+      
+      case rejection: SessionRejected =>
+        handleRejectionInConnecting(transport, state, rejection)
+      
+      case other =>
+        ZIO.logWarning(s"Unexpected message in Connecting: ${other.getClass.getSimpleName}").as(state)
+    }
+  }
+  
+  /**
+   * Handle session rejection in Connecting state.
+   */
+  private def handleRejectionInConnecting(
+    transport: ZmqClientTransport,
+    state: ClientState.Connecting,
+    rejection: SessionRejected
+  ): UIO[ClientState] = {
+    // Validate nonce
+    state.nonce match {
+      case Some(expectedNonce) if expectedNonce != rejection.nonce =>
+        ZIO.logWarning(s"Nonce mismatch, ignoring SessionRejected").as(state)
+      case _ =>
+        rejection.reason match {
+          case NotLeader =>
+            // Try next address
+            state.nextAddress match {
+              case Some((address, newState)) =>
+                for {
+                  _ <- ZIO.logInfo(s"Not leader, trying next address: $address")
+                  nonce <- Nonce.generate()
+                  createMessage = CreateSession(newState.capabilities, nonce)
+                  _ <- transport.sendMessage(createMessage).orDie
+                } yield newState.copy(nonce = Some(nonce))
+              case None =>
+                // No more addresses, loop back to start
+                for {
+                  _ <- ZIO.logInfo("No more addresses, retrying from beginning")
+                  nonce <- Nonce.generate()
+                  createMessage = CreateSession(state.capabilities, nonce)
+                  _ <- transport.sendMessage(createMessage).orDie
+                } yield state.copy(currentAddressIndex = 0, nonce = Some(nonce))
+            }
+          
+          case SessionNotFound =>
+            // Fatal error
+            ZIO.dieMessage("Session not found on server - cannot continue")
+          
+          case _ =>
+            ZIO.logWarning(s"Session rejected: ${rejection.reason}").as(ClientState.Disconnected)
+        }
+    }
+  }
+  
+  /**
+   * Handle messages in Connected state.
+   */
+  private def handleMessageInConnected(
+    client: RaftClient,
+    transport: ZmqClientTransport,
+    state: ClientState.Connected,
+    message: ServerMessage
+  ): UIO[ClientState] = {
+    message match {
+      case response: ClientResponse =>
+        // Complete pending request
+        state.completePendingRequest(response.requestId, response.result)
+      
+      case KeepAliveResponse(timestamp) =>
+        ZIO.logDebug(s"Keep-alive acknowledged").as(state)
+      
+      case serverRequest: ServerRequest =>
+        // Server request should be acknowledged immediately
+        for {
+          _ <- client.acknowledgeServerRequest(serverRequest.requestId)
+          _ <- ZIO.logInfo(s"Received and acknowledged server request: ${serverRequest.requestId}")
+        } yield state
+      
+      case error: RequestError =>
+        handleRequestError(transport, state, error)
+      
+      case SessionClosed(reason, leaderId) =>
+        for {
+          _ <- ZIO.logInfo(s"Session closed by server: $reason")
+        } yield ClientState.Disconnected
+      
+      case other =>
+        ZIO.logWarning(s"Unexpected message in Connected: ${other.getClass.getSimpleName}").as(state)
+    }
+  }
+  
+  /**
+   * Handle request errors in Connected state.
+   */
+  private def handleRequestError(
+    transport: ZmqClientTransport,
+    state: ClientState.Connected,
+    error: RequestError
+  ): UIO[ClientState] = {
+    error.reason match {
+      case NotLeaderRequest =>
+        for {
+          _ <- ZIO.logInfo(s"Not leader, redirect to: ${error.leaderId}")
+          // Transition to Connecting to find new leader
+          nonce <- Nonce.generate()
+          continueMessage = ContinueSession(state.sessionId, nonce)
+          _ <- transport.sendMessage(continueMessage).orDie
+        } yield ClientState.Connecting(
+          capabilities = state.capabilities,
+          nonce = Some(nonce),
+          addresses = List.empty, // TODO: use addresses from config
+          currentAddressIndex = 0,
+          retryManager = state.retryManager
+        )
+      
+      case SessionTerminated =>
+        for {
+          _ <- ZIO.logWarning("Session terminated by server")
+        } yield ClientState.Disconnected
+      
+      case _ =>
+        ZIO.logWarning(s"Request error: ${error.reason}").as(state)
+    }
+  }
+  
+  /**
+   * Handle keep-alive tick.
+   */
+  private def handleKeepAliveTick(
+    transport: ZmqClientTransport,
+    state: ClientState
+  ): UIO[ClientState] = {
+    state match {
+      case s: ClientState.Connected =>
+        for {
+          now <- Clock.instant
+          keepAlive = KeepAlive(now)
+          _ <- transport.sendMessage(keepAlive).orDie
+        } yield state
+      case _ =>
+        ZIO.succeed(state)
+    }
+  }
+  
+  private def generateRequestId(): UIO[RequestId] = 
+    Random.nextLong.map(RequestId.fromLong)
 }
 
 /**
  * Client connection states using functional ADT approach.
- * Each state knows how to handle different server messages.
+ * Each state contains all data needed and returns new states on transitions.
  */
 sealed trait ClientState {
   def stateName: String
-  def handleMessage(message: ServerMessage): UIO[ClientState]
 }
 
 object ClientState {
@@ -473,21 +440,17 @@ object ClientState {
    */
   case object Disconnected extends ClientState {
     override def stateName: String = "Disconnected"
-    
-    override def handleMessage(message: ServerMessage): UIO[ClientState] = 
-      ZIO.logWarning(s"Received message while disconnected (ignored): ${message.getClass.getSimpleName}").as(this)
   }
   
   /**
    * Client is attempting to establish a connection/session.
-   * Stores capabilities for the session being created/continued.
-   * The nonce is stored in the state to validate responses.
    */
   case class Connecting(
     capabilities: Map[String, String],
     nonce: Option[Nonce],
     addresses: List[String],
-    currentAddressIndex: Int
+    currentAddressIndex: Int,
+    retryManager: RetryManager
   ) extends ClientState {
     override def stateName: String = "Connecting"
     
@@ -499,182 +462,60 @@ object ClientState {
         None
       }
     }
-    
-    override def handleMessage(message: ServerMessage): UIO[ClientState] = 
-      message match {
-        case SessionCreated(sessionId, responseNonce) =>
-          // Validate nonce if we have one
-          nonce match {
-            case Some(expectedNonce) if expectedNonce != responseNonce =>
-              ZIO.logWarning(s"Received SessionCreated with mismatched nonce, ignoring").as(this)
-            case _ =>
-              // Transition to Connected state
-              for {
-                _ <- ZIO.logInfo(s"Session created: $sessionId")
-                now <- Clock.instant
-              } yield Connected(
-                sessionId = sessionId,
-                capabilities = capabilities,
-                createdAt = now,
-                serverRequestTracker = ServerRequestTracker()
-              )
-          }
-        
-        case SessionContinued(responseNonce) =>
-          // Validate nonce if we have one
-          nonce match {
-            case Some(expectedNonce) if expectedNonce != responseNonce =>
-              ZIO.logWarning(s"Received SessionContinued with mismatched nonce, ignoring").as(this)
-            case _ =>
-              // We need to recover the sessionId from somewhere - this is a design issue
-              // For now, log and stay in connecting
-              ZIO.logWarning("SessionContinued received but sessionId not tracked properly").as(this)
-          }
-        
-        case rejection: SessionRejected =>
-          // Validate nonce if we have one
-          nonce match {
-            case Some(expectedNonce) if expectedNonce != rejection.nonce =>
-              ZIO.logWarning(s"Received SessionRejected with mismatched nonce, ignoring").as(this)
-            case _ =>
-              handleRejection(rejection)
-          }
-        
-        case other =>
-          ZIO.logWarning(s"Unexpected message in Connecting state: ${other.getClass.getSimpleName}").as(this)
-      }
-    
-    private def handleRejection(rejection: SessionRejected): UIO[ClientState] = 
-      rejection.reason match {
-        case NotLeader =>
-          // Try next address in the list
-          nextAddress match {
-            case Some((address, newState)) =>
-              for {
-                _ <- ZIO.logInfo(s"Not leader, trying next address: $address")
-              } yield newState
-            case None =>
-              // No more addresses, stay in Connecting (will retry from beginning)
-              ZIO.logInfo("No more addresses to try, staying in Connecting").as(this)
-          }
-          
-        case SessionNotFound =>
-          // Session doesn't exist - this is a fatal error for session continuation
-          ZIO.dieMessage("Session not found on server - cannot continue")
-          
-        case _ =>
-          // Other errors - transition to Disconnected
-          ZIO.logWarning(s"Session rejected: ${rejection.reason}, transitioning to Disconnected").as(Disconnected)
-      }
   }
   
   /**
    * Client has an active session and can send/receive requests.
-   * Contains all session-related data.
    */
   case class Connected(
     sessionId: SessionId,
     capabilities: Map[String, String],
     createdAt: Instant,
-    serverRequestTracker: ServerRequestTracker
+    serverRequestTracker: ServerRequestTracker,
+    retryManager: RetryManager,
+    pendingRequests: Map[RequestId, Promise[Throwable, ByteVector]] = Map.empty
   ) extends ClientState {
     override def stateName: String = s"Connected($sessionId)"
     
-    override def handleMessage(message: ServerMessage): UIO[ClientState] = 
-      message match {
-        case response: ClientResponse =>
-          // Stay in Connected state, response handled elsewhere
-          ZIO.logDebug(s"Received response for request: ${response.requestId}").as(this)
-        
-        case KeepAliveResponse(timestamp) =>
-          ZIO.logDebug(s"Keep-alive acknowledged: $timestamp").as(this)
-        
-        case serverRequest: ServerRequest =>
-          // Server request should be enqueued for processing
-          ZIO.logInfo(s"Received server request: ${serverRequest.requestId}").as(this)
-        
-        case error: RequestError =>
-          handleRequestError(error)
-        
-        case SessionClosed(reason, leaderId) =>
-          for {
-            _ <- ZIO.logInfo(s"Session closed by server: $reason")
-          } yield Disconnected
-        
-        case other =>
-          ZIO.logWarning(s"Unexpected message in Connected state: ${other.getClass.getSimpleName}").as(this)
-      }
+    def addPendingRequest(
+      request: ClientRequest,
+      promise: Promise[Throwable, ByteVector]
+    ): UIO[Connected] = {
+      ZIO.succeed(copy(pendingRequests = pendingRequests.updated(request.requestId, promise)))
+    }
     
-    private def handleRequestError(error: RequestError): UIO[ClientState] = 
-      error.reason match {
-        case NotLeaderRequest =>
-          for {
-            _ <- ZIO.logInfo(s"Not leader, redirect to: ${error.leaderId}")
-            // Stay connected, error will be handled by retry manager
-          } yield this
-        
-        case SessionTerminated =>
-          for {
-            _ <- ZIO.logWarning("Session terminated by server")
-          } yield Disconnected
-        
-        case _ =>
-          ZIO.logWarning(s"Request error: ${error.reason}").as(this)
+    def completePendingRequest(
+      requestId: RequestId,
+      result: ByteVector
+    ): UIO[Connected] = {
+      pendingRequests.get(requestId) match {
+        case Some(promise) =>
+          promise.succeed(result).ignore.as(
+            copy(pendingRequests = pendingRequests.removed(requestId))
+          )
+        case None =>
+          ZIO.logWarning(s"Received response for unknown request: $requestId").as(this)
       }
+    }
   }
 }
 
 /**
- * Pending session operations tracked by nonce.
+ * Events in the unified stream.
  */
-private sealed trait SessionOperation
+private sealed trait StreamEvent
 
-private object SessionOperation {
-  case class Create(promise: Promise[SessionError, SessionId]) extends SessionOperation
-  case class Continue(promise: Promise[SessionError, Unit]) extends SessionOperation
+private object StreamEvent {
+  case class Action(action: ClientAction) extends StreamEvent
+  case class ServerMsg(message: ServerMessage) extends StreamEvent
+  case object KeepAliveTick extends StreamEvent
 }
-
-/**
- * Session-related errors.
- */
-sealed trait SessionError extends Throwable
-
-object SessionError {
-  case object NotLeader extends SessionError
-  case object SessionNotFound extends SessionError
-  case object InvalidCapabilities extends SessionError
-  case object InternalError extends SessionError
-  
-  def fromRejectionReason(reason: RejectionReason): SessionError = reason match {
-    case zio.raft.protocol.NotLeader => SessionError.NotLeader
-    case zio.raft.protocol.SessionNotFound => SessionError.SessionNotFound
-    case _ => SessionError.InternalError
-  }
-}
-
-/**
- * Session metadata for client tracking.
- */
-case class SessionMetadata(
-  sessionId: SessionId,
-  capabilities: Map[String, String],
-  createdAt: java.time.Instant
-)
 
 /**
  * ZeroMQ client transport abstraction.
- * Provides a functional stream-based interface for message communication.
  */
 trait ZmqClientTransport {
-  /**
-   * Send a message to the server.
-   */
   def sendMessage(message: ClientMessage): Task[Unit]
-  
-  /**
-   * Stream of incoming messages from the server.
-   * This stream should be consumed by the client to handle server messages.
-   */
   def incomingMessages: ZStream[Any, Throwable, ServerMessage]
 }
 
@@ -686,7 +527,7 @@ private class ZmqClientTransportStub extends ZmqClientTransport {
     ZIO.logDebug(s"Stub: sending message: ${message.getClass.getSimpleName}")
   
   override def incomingMessages: ZStream[Any, Throwable, ServerMessage] = 
-    ZStream.empty // Would implement actual ZMQ receiving stream here
+    ZStream.empty
 }
 
 /**

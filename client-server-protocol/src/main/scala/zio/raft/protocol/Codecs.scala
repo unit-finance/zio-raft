@@ -145,6 +145,8 @@ object Codecs {
       .subcaseP(1) { case Shutdown => Shutdown } (provide(Shutdown))
       .subcaseP(2) { case NotLeaderAnymore => NotLeaderAnymore } (provide(NotLeaderAnymore))
       .subcaseP(3) { case SessionError => SessionError } (provide(SessionError))
+      .subcaseP(4) { case ConnectionClosed => ConnectionClosed } (provide(ConnectionClosed))
+      .subcaseP(5) { case SessionTimeout => SessionTimeout } (provide(SessionTimeout))
   }
 
   /**

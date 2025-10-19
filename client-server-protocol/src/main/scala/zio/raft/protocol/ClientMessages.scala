@@ -87,6 +87,17 @@ case class CloseSession(
 ) extends ClientMessage
 
 /**
+ * Connection closed notification for OS or TCP level disconnection.
+ * 
+ * This indicates a transport-level connection failure detected by the client
+ * (e.g., network error, TCP connection reset, socket closed by OS). The client
+ * sends this to notify the server before attempting to reconnect.
+ * 
+ * Note: No additional parameters needed - the routing ID identifies the connection.
+ */
+case object ConnectionClosed extends ClientMessage
+
+/**
  * Reasons for client-initiated session closure.
  */
 sealed trait CloseReason

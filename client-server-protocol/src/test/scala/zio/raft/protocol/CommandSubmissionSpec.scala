@@ -5,7 +5,6 @@ import zio.test.*
 import zio.test.Assertion.*
 import scodec.bits.ByteVector
 import java.time.Instant
-import zio.raft.protocol.RequestErrorReason.*
 
 /**
  * Contract tests for command submission protocol.
@@ -13,9 +12,7 @@ import zio.raft.protocol.RequestErrorReason.*
  * These tests validate client request processing:
  * - ClientRequest for both read and write operations
  * - ClientResponse with execution results
- * - RequestError for processing failures and leader redirection
  * - Request deduplication using unique request IDs
- * - Leader redirection flow
  */
 object CommandSubmissionSpec extends ZIOSpecDefault {
 
@@ -84,55 +81,6 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
             
             response.requestId == requestId &&
             response.result == resultData
-          }.catchAll(_ => ZIO.succeed(false))
-        } yield assertTrue(result) // Should succeed - codecs are implemented
-      }
-    }
-
-    suiteAll("RequestError") {
-      test("should include error reason and optional leader ID") {
-        for {
-          result <- ZIO.attempt {
-            val error = RequestError(
-              reason = NotLeaderRequest,
-              leaderId = Some(MemberId.fromString("node-3"))
-            )
-            
-            error.reason == NotLeaderRequest &&
-            error.leaderId.contains(MemberId.fromString("node-3"))
-          }.catchAll(_ => ZIO.succeed(false))
-        } yield assertTrue(result) // Should succeed - codecs are implemented
-      }
-      
-      test("should support invalid operation errors") {
-        val error = RequestError(
-          reason = InvalidRequest,
-          leaderId = None
-        )
-        assertTrue(error.reason == InvalidRequest && error.leaderId.isEmpty)
-      }
-    }
-
-    suiteAll("Leader Redirection Flow") {
-      test("should redirect non-leader requests") {
-        for {
-          result <- ZIO.attempt {
-            // Client sends request to follower
-            val request = ClientRequest(
-              requestId = RequestId.fromLong(1L),
-              payload = ByteVector.fromValidHex("12345678"),
-              createdAt = Instant.parse("2023-01-01T00:00:00Z")
-            )
-            
-            // Follower responds with leader redirect
-            val redirect = RequestError(
-              reason = NotLeaderRequest,
-              leaderId = Some(MemberId.fromString("leader-node"))
-            )
-            
-            // Validate redirect flow
-            redirect.reason == NotLeaderRequest &&
-            redirect.leaderId.isDefined
           }.catchAll(_ => ZIO.succeed(false))
         } yield assertTrue(result) // Should succeed - codecs are implemented
       }

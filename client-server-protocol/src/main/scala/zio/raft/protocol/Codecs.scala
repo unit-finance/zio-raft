@@ -7,7 +7,6 @@ import java.time.Instant
 import zio.raft.protocol.RejectionReason.*
 import zio.raft.protocol.SessionCloseReason.*
 import zio.raft.protocol.CloseReason.*
-import zio.raft.protocol.RequestErrorReason.*
 
 /**
  * scodec binary serialization codecs for ZIO Raft protocol messages.
@@ -159,19 +158,6 @@ object Codecs {
       .subcaseP(1) { case CloseReason.ClientShutdown => CloseReason.ClientShutdown } (provide(CloseReason.ClientShutdown))
   }
 
-  /**
-   * Codec for RequestErrorReason.
-   */
-  implicit val requestErrorReasonCodec: Codec[RequestErrorReason] = {
-    discriminated[RequestErrorReason].by(uint8)
-      .subcaseP(1) { case NotLeaderRequest => NotLeaderRequest } (provide(NotLeaderRequest))
-      .subcaseP(2) { case InvalidRequest => InvalidRequest } (provide(InvalidRequest))
-      .subcaseP(3) { case NotConnected => NotConnected } (provide(NotConnected))
-      .subcaseP(4) { case SessionTerminated => SessionTerminated } (provide(SessionTerminated))
-      .subcaseP(5) { case UnsupportedVersion => UnsupportedVersion } (provide(UnsupportedVersion))
-      .subcaseP(6) { case ProcessingFailed => ProcessingFailed } (provide(ProcessingFailed))
-  }
-
   // ============================================================================
   // CLIENT MESSAGE CODECS
   // ============================================================================
@@ -219,6 +205,15 @@ object Codecs {
   }
 
   /**
+   * Codec for ConnectionClosed client message.
+   * Simple constant codec since it's a case object with no parameters.
+   * Note: Uses fully qualified name to avoid conflict with SessionCloseReason.ConnectionClosed
+   */
+  implicit val connectionClosedClientMessageCodec: Codec[zio.raft.protocol.ConnectionClosed.type] = {
+    provide(zio.raft.protocol.ConnectionClosed)
+  }
+
+  /**
    * Discriminated codec for all ClientMessage types.
    */
   implicit val clientMessageCodec: Codec[ClientMessage] = {
@@ -229,6 +224,7 @@ object Codecs {
       .typecase(4, clientRequestCodec)
       .typecase(5, serverRequestAckCodec)
       .typecase(6, closeSessionCodec)
+      .typecase(7, connectionClosedClientMessageCodec)
   }
 
   // ============================================================================
@@ -285,13 +281,6 @@ object Codecs {
   }
 
   /**
-   * Codec for RequestError message.
-   */
-  implicit val requestErrorCodec: Codec[RequestError] = {
-    (requestErrorReasonCodec :: optional(bool, memberIdCodec)).as[RequestError]
-  }
-
-  /**
    * Discriminated codec for all ServerMessage types.
    */
   implicit val serverMessageCodec: Codec[ServerMessage] = {
@@ -303,7 +292,6 @@ object Codecs {
       .typecase(5, keepAliveResponseCodec)
       .typecase(6, clientResponseCodec)
       .typecase(7, serverRequestCodec)
-      .typecase(8, requestErrorCodec)
   }
 
   // ============================================================================

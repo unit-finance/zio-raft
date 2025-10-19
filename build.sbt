@@ -71,7 +71,8 @@ lazy val commonScalacOptions = Def.setting{
       )
     case Some((3, n)) => List(
       "-Wunused:imports",
-      "-deprecation"
+      "-deprecation",
+      "-source:future"
       )
     case _            => List()
   }
@@ -266,6 +267,11 @@ lazy val clientServerClient = project
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test
     ),
-    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13",
+    // Add better-monadic-for compiler plugin for Scala 2
+    libraryDependencies ++= (CrossVersion.partialVersion(scalaVersion.value) match {
+      case Some((2, _)) => Seq(compilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1"))
+      case _            => Seq.empty
+    })
   )
   .dependsOn(clientServerProtocol, zio2zmq)

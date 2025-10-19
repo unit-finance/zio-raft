@@ -1,6 +1,6 @@
 package zio.raft.server
 
-import zio._
+import zio.*
 
 /**
  * Simple server configuration.

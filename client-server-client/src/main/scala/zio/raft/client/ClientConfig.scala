@@ -1,6 +1,6 @@
 package zio.raft.client
 
-import zio._
+import zio.*
 import zio.raft.protocol.MemberId
 
 /**

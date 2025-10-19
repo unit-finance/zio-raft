@@ -1,8 +1,8 @@
 package zio.raft.client
 
-import zio._
-import zio.stream._
-import zio.raft.protocol._
+import zio.*
+import zio.stream.*
+import zio.raft.protocol.*
 import scodec.bits.{BitVector, ByteVector}
 import java.time.Instant
 import zio.raft.client.RaftClient.ZmqClientTransport
@@ -21,6 +21,40 @@ class RaftClient private (
     serverRequestQueue: Queue[ServerRequest]
 ) {
 
+  /**
+   * Start the client's main event loop.
+   * Must be called (typically forked) for the client to process messages.
+   */
+  def run(): UIO[Unit] = {
+    val actionStream = ZStream
+      .fromQueue(actionQueue)
+      .map(RaftClient.StreamEvent.Action(_))
+
+    val messageStream = zmqTransport.incomingMessages
+      .map(RaftClient.StreamEvent.ServerMsg(_))
+
+    val keepAliveStream = ZStream
+      .tick(config.keepAliveInterval)
+      .map(_ => RaftClient.StreamEvent.KeepAliveTick)
+
+    val timeoutStream = ZStream
+      .tick(100.millis)
+      .map(_ => RaftClient.StreamEvent.TimeoutCheck)
+
+    val unifiedStream = actionStream
+      .merge(messageStream)
+      .merge(keepAliveStream)
+      .merge(timeoutStream)
+
+    // Start in Disconnected state
+    unifiedStream
+      .runFoldZIO(RaftClient.ClientState.Disconnected: RaftClient.ClientState) { (state, event) =>
+        state.handle(event, zmqTransport, config, serverRequestQueue)
+      }
+      .orDie
+      .unit
+  }
+
   def connect(): UIO[Unit] =
     actionQueue.offer(ClientAction.Connect).unit
 
@@ -34,7 +68,6 @@ class RaftClient private (
 
   def disconnect(): UIO[Unit] =
     actionQueue.offer(ClientAction.Disconnect).unit
-  
 
   /** Stream of server-initiated requests for user to handle.
     */
@@ -44,7 +77,10 @@ class RaftClient private (
 
 object RaftClient {
 
-  def make(clusterMembers: Map[MemberId, String], capabilities: Map[String, String]): ZIO[Scope & ZContext, Throwable, RaftClient] = {
+  def make(
+      clusterMembers: Map[MemberId, String],
+      capabilities: Map[String, String]
+  ): ZIO[Scope & ZContext, Throwable, RaftClient] = {
     val config = ClientConfig.make(clusterMembers, capabilities)
     for {
       validatedConfig <- ClientConfig.validated(config).mapError(new IllegalArgumentException(_))
@@ -55,12 +91,6 @@ object RaftClient {
 
       client = new RaftClient(zmqTransport, validatedConfig, actionQueue, serverRequestQueue)
 
-      // Start in Disconnected state
-      initialState = ClientState.Disconnected
-
-      // Start main loop
-      _ <- startMainLoop(zmqTransport, validatedConfig, actionQueue, serverRequestQueue, initialState).forkScoped
-      
       // Register finalizer to cleanly close session on scope exit
       _ <- ZIO.addFinalizer(
         zmqTransport.sendMessage(CloseSession(CloseReason.ClientShutdown)).orDie
@@ -69,17 +99,20 @@ object RaftClient {
     } yield client
   }
 
-  private def createZmqTransport(config: ClientConfig) =     
+  private def createZmqTransport(config: ClientConfig) =
     for {
       socket <- ZSocket.client
-      _ <- socket.options.setImmediate(false)
+      _ <- socket.options.setImmediate(true)
       _ <- socket.options.setLinger(0)
       _ <- socket.options.setHeartbeat(1.seconds, 10.second, 30.second)
-      timeoutConnectionClosed = serverMessageCodec.encode(SessionClosed(SessionCloseReason.ConnectionClosed, None)).require.toByteArray
+      timeoutConnectionClosed = serverMessageCodec
+        .encode(SessionClosed(SessionCloseReason.ConnectionClosed, None))
+        .require
+        .toByteArray
       _ <- socket.options.setHiccupMessage(timeoutConnectionClosed)
       _ <- socket.options.setHighWatermark(200000, 200000)
       lastAddressRef <- Ref.make(Option.empty[String])
-      transport = new ZmqClientTransportLive(socket, lastAddressRef)      
+      transport = new ZmqClientTransportLive(socket, lastAddressRef)
     } yield transport
 
   /** Main loop accepts initial state as parameter.
@@ -194,7 +227,7 @@ object RaftClient {
         pendingRequests: PendingRequests
     ) extends ClientState {
       override def stateName: String = "ConnectingNewSession"
-      
+
       /** Get the next member to try (round-robin through available members) */
       private def nextMember: (MemberId, String) = {
         val membersList = clusterMembers.toList
@@ -202,17 +235,18 @@ object RaftClient {
         val nextIndex = (currentIndex + 1) % membersList.size
         membersList(nextIndex)
       }
-      
+
       /** Connect to a specific member or use hint */
       private def connectToMember(
-        targetMemberId: Option[MemberId],
-        transport: ZmqClientTransport,
-        logPrefix: String
+          targetMemberId: Option[MemberId],
+          transport: ZmqClientTransport,
+          logPrefix: String
       ): UIO[ConnectingNewSession] = {
-        val (memberId, address) = targetMemberId.flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
+        val (memberId, address) = targetMemberId
+          .flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
           .getOrElse(nextMember)
         val currentAddr = clusterMembers.get(currentMemberId)
-        
+
         for {
           _ <- ZIO.logInfo(s"$logPrefix at ${currentAddr.getOrElse("unknown")}, trying $memberId at $address")
           _ <- transport.disconnect().orDie
@@ -300,7 +334,6 @@ object RaftClient {
           case StreamEvent.ServerMsg(_: ServerRequest) =>
             ZIO.logWarning("Received ServerRequest while connecting, ignoring").as(this)
 
-
           case StreamEvent.ServerMsg(SessionClosed(_, _)) =>
             ZIO.logWarning("Received SessionClosed while connecting, ignoring").as(this)
 
@@ -309,11 +342,11 @@ object RaftClient {
               _ <- transport.disconnect().orDie
             } yield Disconnected
 
-          case StreamEvent.Action(ClientAction.Connect) => 
+          case StreamEvent.Action(ClientAction.Connect) =>
             ZIO.logWarning("Received Connect while connecting, ignoring").as(this)
 
           case StreamEvent.KeepAliveTick =>
-            ZIO.succeed(this)                    
+            ZIO.succeed(this)
         }
       }
     }
@@ -332,7 +365,7 @@ object RaftClient {
         pendingRequests: PendingRequests
     ) extends ClientState {
       override def stateName: String = s"ConnectingExistingSession($sessionId)"
-      
+
       /** Get the next member to try (round-robin through available members) */
       private def nextMember: (MemberId, String) = {
         val membersList = clusterMembers.toList
@@ -340,17 +373,18 @@ object RaftClient {
         val nextIndex = (currentIndex + 1) % membersList.size
         membersList(nextIndex)
       }
-      
+
       /** Connect to a specific member or use hint */
       private def connectToMember(
-        targetMemberId: Option[MemberId],
-        transport: ZmqClientTransport,
-        logPrefix: String
+          targetMemberId: Option[MemberId],
+          transport: ZmqClientTransport,
+          logPrefix: String
       ): UIO[ConnectingExistingSession] = {
-        val (memberId, address) = targetMemberId.flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
+        val (memberId, address) = targetMemberId
+          .flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
           .getOrElse(nextMember)
         val currentAddr = clusterMembers.get(currentMemberId)
-        
+
         for {
           _ <- ZIO.logInfo(s"$logPrefix at ${currentAddr.getOrElse("unknown")}, trying $memberId at $address")
           _ <- transport.disconnect().orDie
@@ -373,7 +407,9 @@ object RaftClient {
             if (nonce == responseNonce) {
               val currentAddr = clusterMembers.get(currentMemberId)
               for {
-                _ <- ZIO.logInfo(s"Session continued: $sessionId at $currentMemberId (${currentAddr.getOrElse("unknown")})")
+                _ <- ZIO.logInfo(
+                  s"Session continued: $sessionId at $currentMemberId (${currentAddr.getOrElse("unknown")})"
+                )
                 now <- Clock.instant
                 // Send all pending requests
                 updatedPending <- pendingRequests.resendAll(transport)
@@ -398,7 +434,9 @@ object RaftClient {
                   connectToMember(leaderId, transport, s"Not leader at $currentMemberId")
 
                 case RejectionReason.SessionNotFound =>
-                  ZIO.dieMessage("Session not found - cannot continue")
+                  ZIO.logWarning("Session not found - cannot continue") *> ZIO.dieMessage(
+                    "Session not found - cannot continue"
+                  )
 
                 case RejectionReason.InvalidCapabilities =>
                   ZIO.dieMessage(s"Invalid capabilities - cannot connect: ${capabilities}")
@@ -439,7 +477,6 @@ object RaftClient {
           case StreamEvent.ServerMsg(_: ServerRequest) =>
             ZIO.logWarning("Received ServerRequest while connecting, ignoring").as(this)
 
-
           case StreamEvent.ServerMsg(SessionClosed(_, _)) =>
             ZIO.logWarning("Received SessionClosed while connecting, ignoring").as(this)
 
@@ -468,7 +505,7 @@ object RaftClient {
         currentMemberId: MemberId
     ) extends ClientState {
       override def stateName: String = s"Connected($sessionId)"
-      
+
       /** Get the next member to try (round-robin through available members) */
       private def nextMember: (MemberId, String) = {
         val membersList = clusterMembers.toList
@@ -476,19 +513,19 @@ object RaftClient {
         val nextIndex = (currentIndex + 1) % membersList.size
         membersList(nextIndex)
       }
-      
-      /**
-       * Helper method to reconnect to a specific member with an existing session.
-       * Uses leader hint if available, otherwise falls back to next member.
-       */
+
+      /** Helper method to reconnect to a specific member with an existing session. Uses leader hint if available,
+        * otherwise falls back to next member.
+        */
       private def reconnectTo(
-        targetMemberId: Option[MemberId],
-        transport: ZmqClientTransport,
-        logMessage: String
+          targetMemberId: Option[MemberId],
+          transport: ZmqClientTransport,
+          logMessage: String
       ): UIO[ConnectingExistingSession] = {
-        val (memberId, address) = targetMemberId.flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
+        val (memberId, address) = targetMemberId
+          .flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
           .getOrElse(nextMember)
-        
+
         for {
           _ <- ZIO.logInfo(logMessage)
           nonce <- Nonce.generate()
@@ -509,7 +546,7 @@ object RaftClient {
           pendingRequests = pendingRequests
         )
       }
-      
+
       override def handle(
           event: StreamEvent,
           transport: ZmqClientTransport,
@@ -537,12 +574,7 @@ object RaftClient {
             } yield copy(pendingRequests = newPending)
 
           case StreamEvent.ServerMsg(ClientResponse(requestId, result)) =>
-            pendingRequests.complete(requestId, result) match {
-              case Some(newPending) =>
-                ZIO.succeed(copy(pendingRequests = newPending))
-              case None =>
-                ZIO.logWarning(s"Response for unknown request: $requestId").as(this)
-            }
+            pendingRequests.complete(requestId, result).map(newPending => copy(pendingRequests = newPending))
 
           case StreamEvent.ServerMsg(KeepAliveResponse(_)) =>
             ZIO.succeed(this)
@@ -560,7 +592,7 @@ object RaftClient {
               case ServerRequestResult.OldRequest =>
                 for {
                   _ <- transport.sendMessage(ServerRequestAck(serverRequest.requestId)).orDie
-                  _ <- ZIO.logDebug(s"Re-acknowledged already processed request: ${serverRequest.requestId}")
+                  _ <- ZIO.logWarning(s"Re-acknowledged already processed request: ${serverRequest.requestId}")
                 } yield this
 
               case ServerRequestResult.OutOfOrder =>
@@ -571,25 +603,37 @@ object RaftClient {
                   .as(this)
             }
 
-
           case StreamEvent.ServerMsg(SessionClosed(SessionCloseReason.Shutdown, _)) =>
             ZIO.logInfo("Server shutdown, session closed").as(Disconnected)
-          
+
           case StreamEvent.ServerMsg(SessionClosed(SessionCloseReason.NotLeaderAnymore, leaderId)) =>
             val currentAddr = clusterMembers.get(currentMemberId)
-            reconnectTo(leaderId, transport, s"Session closed: not leader anymore at $currentMemberId (${currentAddr.getOrElse("unknown")})")
-          
+            reconnectTo(
+              leaderId,
+              transport,
+              s"Session closed: not leader anymore at $currentMemberId (${currentAddr.getOrElse("unknown")})"
+            )
+
           case StreamEvent.ServerMsg(SessionClosed(SessionCloseReason.SessionError, _)) =>
             val currentAddr = clusterMembers.get(currentMemberId)
-            reconnectTo(Some(currentMemberId), transport, s"Session closed: session error, reconnecting to same member: $currentMemberId (${currentAddr.getOrElse("unknown")})")
-          
+            reconnectTo(
+              Some(currentMemberId),
+              transport,
+              s"Session closed: session error, reconnecting to same member: $currentMemberId (${currentAddr.getOrElse("unknown")})"
+            )
+
           case StreamEvent.ServerMsg(SessionClosed(SessionCloseReason.ConnectionClosed, _)) =>
             val currentAddr = clusterMembers.get(currentMemberId)
-            reconnectTo(Some(currentMemberId), transport, s"Session closed: connection closed, reconnecting to same member: $currentMemberId (${currentAddr.getOrElse("unknown")})")
-          
+            reconnectTo(
+              Some(currentMemberId),
+              transport,
+              s"Session closed: connection closed, reconnecting to same member: $currentMemberId (${currentAddr.getOrElse("unknown")})"
+            )
+
           case StreamEvent.ServerMsg(SessionClosed(SessionCloseReason.SessionTimeout, _)) =>
-            val currentAddr = clusterMembers.get(currentMemberId)
-            reconnectTo(Some(currentMemberId), transport, s"Session closed: timeout, reconnecting to same member: $currentMemberId (${currentAddr.getOrElse("unknown")})")
+            ZIO.logWarning("Session closed due to timeout, terminating client") *> ZIO.dieMessage(
+              "Session timed out: shutting down client."
+            )
 
           case StreamEvent.KeepAliveTick =>
             for {
@@ -629,10 +673,12 @@ object RaftClient {
     ): PendingRequests =
       copy(requests = requests.updated(requestId, PendingRequestData(payload, promise, sentAt, sentAt)))
 
-    def complete(requestId: RequestId, result: ByteVector): Option[PendingRequests] =
-      requests.get(requestId).map { data =>
-        data.promise.succeed(result).ignore
-        copy(requests = requests.removed(requestId))
+    def complete(requestId: RequestId, result: ByteVector): ZIO[Any, Nothing, PendingRequests] =
+      requests.get(requestId) match {
+        case Some(data) =>
+          data.promise.succeed(result).as(copy(requests = requests.removed(requestId)))
+        case None =>
+          ZIO.succeed(this)
       }
 
     /** Resend all pending requests (used after successful connection). Returns updated PendingRequests with new
@@ -692,12 +738,12 @@ object RaftClient {
   trait ZmqClientTransport {
     def connect(address: String): ZIO[Any, Throwable, Unit]
     def disconnect(): ZIO[Any, Throwable, Unit]
-    def sendMessage(message: ClientMessage):ZIO[Any, Throwable, Unit]
+    def sendMessage(message: ClientMessage): ZIO[Any, Throwable, Unit]
     def incomingMessages: ZStream[Any, Throwable, ServerMessage]
   }
 
-  private class ZmqClientTransportLive(socket: ZSocket, lastAddressRef: Ref[Option[String]]
-  ) extends ZmqClientTransport {
+  private class ZmqClientTransportLive(socket: ZSocket, lastAddressRef: Ref[Option[String]])
+      extends ZmqClientTransport {
     override def connect(address: String): ZIO[Any, Throwable, Unit] =
       for {
         _ <- lastAddressRef.set(Some(address))
@@ -705,11 +751,11 @@ object RaftClient {
       } yield ()
 
     override def disconnect(): ZIO[Any, Throwable, Unit] =
-      for {        
+      for {
         lastAddress <- lastAddressRef.get
         _ <- lastAddress match {
           case Some(address) => socket.disconnect(address)
-          case None => ZIO.unit
+          case None          => ZIO.unit
         }
         _ <- lastAddressRef.set(None)
       } yield ()
@@ -724,5 +770,5 @@ object RaftClient {
       socket.stream.mapZIO { msg =>
         ZIO.attempt(serverMessageCodec.decode(BitVector(msg.data())).require.value)
       }
-  }  
+  }
 }

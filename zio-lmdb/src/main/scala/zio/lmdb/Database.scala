@@ -3,7 +3,7 @@ package zio.lmdb
 import org.lmdbjava.{DbiFlags, Dbi}
 import zio.ZIO
 import zio.stream.ZStream
-import java.{util as ju}
+import java.util as ju
 
 class Database(dbi: Dbi[Array[Byte]]):
   def put(key: Array[Byte], value: Array[Byte]): ZIO[TransactionScope, Throwable, Boolean] =

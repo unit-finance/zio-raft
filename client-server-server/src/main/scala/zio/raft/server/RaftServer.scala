@@ -1,8 +1,8 @@
 package zio.raft.server
 
-import zio._
-import zio.stream._
-import zio.raft.protocol._
+import zio.*
+import zio.stream.*
+import zio.raft.protocol.*
 import zio.zmq.RoutingId
 import scodec.bits.ByteVector
 import java.time.Instant
@@ -11,6 +11,7 @@ import zio.raft.protocol.Codecs.serverMessageCodec
 import scodec.bits.BitVector
 import zio.raft.protocol.Codecs.clientMessageCodec
 import zio.zmq.ZContext
+import zio.zmq.ignoreHostUnreachable
 
 object RaftServer {
 
@@ -613,7 +614,7 @@ object RaftServer {
     override def sendMessage(routingId: RoutingId, message: ServerMessage): Task[Unit] =
       for {
         bytes <- ZIO.attempt(serverMessageCodec.encode(message).require.toByteArray)
-        _ <- socket.sendImmediately(routingId, bytes)
+        _ <- socket.sendImmediately(routingId, bytes).unit.ignoreHostUnreachable
       } yield ()
 
     override def incomingMessages: ZStream[Any, Throwable, IncomingMessage] =

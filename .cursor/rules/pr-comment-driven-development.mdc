@@ -1,0 +1,613 @@
+---
+title: PR Comment-Driven Development
+description: Best practices learned from addressing 155+ PR comments on PR #15
+author: AI Agent (from PR #15 comment resolution experience)
+date: 2025-10-19
+status: 🔴 experimental
+metrics:
+  implementations: 0
+  successful_reviews: 0
+  projects: 0
+  last_updated: 2025-10-19
+rating_thresholds:
+  experimental_to_beta:
+    implementations: 5
+    success_rate: 90
+  beta_to_stable:
+    implementations: 15
+    projects: 3
+---
+
+# PR Comment-Driven Development
+
+## Context: PR #15 Lessons
+
+PR #15 had 155+ comments and took multiple iterations to address correctly. This rule captures the hard-learned lessons about responding to PR feedback efficiently and accurately.
+
+## Core Standards
+
+### 1. Read ALL Comments Before Starting (Rating: 5)
+
+**The #1 mistake: Starting to fix before reading everything.**
+
+#### ❌ WRONG: Incremental Reading and Fixing
+
+```bash
+# Read first 10 comments
+gh api repos/.../comments | head -10
+
+# Start fixing those
+# ... make changes ...
+
+# User: "you didn't address all comments"
+# Read next 10 comments...
+# Repeat 5+ times
+```
+
+**Problems**:
+- Miss related comments
+- Make conflicting changes
+- Waste time with rework
+- Frustrate reviewers
+
+#### ✅ CORRECT: Read Everything First
+
+```bash
+# Get ALL comments at once
+gh api repos/.../comments --paginate | python3 -c "..."
+
+# Print first 30-40 (enough to see all active ones)
+# Read completely
+# Group related comments mentally
+# THEN start planning fixes
+```
+
+**Process**:
+1. Fetch ALL comments (use `--paginate`)
+2. Read through completely (at least top 30-40 by date)
+3. Create a checklist of distinct issues
+4. Group related comments together
+5. Plan fix order (dependencies first)
+6. THEN start coding
+
+### 2. Type-Driven Development (Rating: 5)
+
+**If you reference a field, it MUST exist in the type.**
+
+#### ❌ WRONG: Coding Before Types
+
+```scala
+// Write method that uses pendingSessions
+def confirmSession(sessionId: SessionId): Option[...] = {
+  pendingSessions.get(sessionId).map { pending =>
+    // ... logic ...
+  }
+}
+
+// But Sessions case class doesn't have it!
+case class Sessions(
+  metadata: Map[SessionId, SessionMetadata],
+  connections: Map[SessionId, SessionConnection],
+  routingToSession: Map[RoutingId, SessionId]
+  // ❌ Missing: pendingSessions!
+)
+
+// Compiler error or runtime failure
+```
+
+#### ✅ CORRECT: Types First, Then Logic
+
+```scala
+// STEP 1: Update the type
+case class Sessions(
+  metadata: Map[SessionId, SessionMetadata],
+  connections: Map[SessionId, SessionConnection],
+  routingToSession: Map[RoutingId, SessionId],
+  pendingSessions: Map[SessionId, PendingSession]  // ✅ Add field
+)
+
+// STEP 2: Update companion object
+object Sessions {
+  def empty: Sessions = Sessions(
+    Map.empty, Map.empty, Map.empty, Map.empty  // ✅ Include new field
+  )
+}
+
+// STEP 3: Now write methods that use it
+def confirmSession(...): Option[...] = {
+  pendingSessions.get(sessionId).map { ... }  // ✅ Works!
+}
+```
+
+**Checklist**:
+- [ ] Added field to case class?
+- [ ] Updated all constructors (empty, fromMetadata, etc.)?
+- [ ] Updated copy() calls to include new field?
+- [ ] Compiler passes?
+
+### 3. Configuration Over Constants (Rating: 4)
+
+**Never hardcode values that should be configurable.**
+
+#### ❌ WRONG: Hardcoded Values with TODOs
+
+```scala
+def reconnect(sessionId: SessionId, ...): Sessions = {
+  val expiresAt = now.plusSeconds(90)  // TODO: use config
+  // ...
+}
+
+def updateExpiry(sessionId: SessionId, ...): Sessions = {
+  val expiresAt = now.plusSeconds(90)  // TODO: use config
+  // ...
+}
+
+def confirmSession(sessionId: SessionId, ...): Sessions = {
+  val expiresAt = now.plusSeconds(90)  // TODO: use config
+  // ...
+}
+```
+
+**Problems**:
+- Repeated TODOs across codebase
+- Inconsistent values if someone changes one
+- Reviewer has to comment on each occurrence
+- TODOs never get fixed
+
+#### ✅ CORRECT: Pass Config Parameter
+
+```scala
+def reconnect(
+  sessionId: SessionId, 
+  routingId: RoutingId,
+  now: Instant,
+  config: ServerConfig  // ✅ Pass config
+): Sessions = {
+  val expiresAt = now.plus(config.sessionTimeout)  // ✅ Use config
+  // ...
+}
+
+def updateExpiry(
+  sessionId: SessionId,
+  now: Instant,
+  config: ServerConfig  // ✅ Pass config
+): Sessions = {
+  val expiresAt = now.plus(config.sessionTimeout)  // ✅ Use config
+  // ...
+}
+
+def confirmSession(
+  sessionId: SessionId,
+  now: Instant,
+  config: ServerConfig  // ✅ Pass config
+): Option[...] = {
+  val expiresAt = now.plus(config.sessionTimeout)  // ✅ Use config
+  // ...
+}
+```
+
+**Rule**: If you write `TODO: use config`, stop and pass config parameter instead.
+
+### 4. Understand Async Boundaries (Rating: 5)
+
+**Streams, finalizers, and queues have lifecycle boundaries.**
+
+#### ❌ WRONG: Queuing Actions in Finalizers
+
+```scala
+// Main loop
+_ <- startMainLoop(...).forkScoped
+
+// Finalizer tries to queue action
+_ <- ZIO.addFinalizer(
+  server.shutdown()  // ❌ This queues an action
+)
+
+def shutdown(): UIO[Unit] =
+  actionQueue.offer(ServerAction.Shutdown).unit  // ❌ Nobody listening!
+```
+
+**Problem**: By the time finalizers run, the main loop has terminated. The action queue is no longer being processed.
+
+#### ✅ CORRECT: Direct Access in Finalizers
+
+```scala
+// Track state for finalizer access
+stateRef <- Ref.make[ServerState](initialState)
+
+// Main loop
+_ <- startMainLoop(..., stateRef).forkScoped
+
+// Finalizer accesses state directly
+_ <- ZIO.addFinalizer(
+  for {
+    state <- stateRef.get
+    _ <- state match {
+      case leader: ServerState.Leader =>
+        leader.sessions.shutdown(transport)  // ✅ Direct call
+      case _ => ZIO.unit
+    }
+  } yield ()
+)
+```
+
+**Key Insight**: 
+- **Inside stream**: Use action queue (part of event flow)
+- **In finalizer**: Use direct access (stream terminated)
+
+**Transport is still available** - You can send messages directly.
+
+### 5. Listen Carefully to Feedback (Rating: 4)
+
+**When corrected, understand the WHY, not just WHAT.**
+
+#### Example from PR #15:
+
+**Reviewer Comment**: "we should not have an action for this, because server will call this immediately"
+
+**My Mistake**: I thought this meant "don't use action queue at all" and changed `confirmSessionCreation` to call directly.
+
+**Actual Meaning**: The comment was about a DIFFERENT action (`ServerAction.Shutdown`), saying that specific action shouldn't exist.
+
+**User Correction**: "you had it right the first time"
+
+#### ✅ CORRECT: Ask for Clarification
+
+When a comment is ambiguous:
+1. **Read surrounding context** - What line is the comment on?
+2. **Check what changed recently** - Did I just add/remove something related?
+3. **If still unclear, ask** - Don't guess and make it worse
+
+**Better Response**:
+```
+"Just to clarify: Are you referring to the confirmSessionCreation 
+method or the Shutdown action? I want to make sure I understand 
+which action should be removed vs. which should use the queue."
+```
+
+### 6. One Issue Per Commit (Rating: 3)
+
+**Don't try to fix everything at once.**
+
+#### ❌ WRONG: Mega Commit
+
+```bash
+git commit -m "Fix all issues
+- Add missing pendingSessions
+- Fix all TODO comments  
+- Change confirmSessionCreation
+- Remove Shutdown action
+- Update timeouts
+- Fix reconnect
+- ...15 more things..."
+```
+
+**Problems**:
+- Hard to review
+- If one change is wrong, whole commit is wrong
+- Can't easily revert one fix
+- Harder to track what fixed what
+
+#### ✅ CORRECT: Focused Commits
+
+```bash
+# Commit 1: Type fix
+git commit -m "Add missing pendingSessions field to Sessions"
+
+# Commit 2: Configuration
+git commit -m "Use config.sessionTimeout instead of hardcoded values"
+
+# Commit 3: Revert
+git commit -m "Revert confirmSessionCreation to use action queue"
+```
+
+**Benefits**:
+- Easy to review each change
+- Easy to revert if needed
+- Clear history of what was fixed
+- Easier to understand intent
+
+### 7. Verify Before Committing (Rating: 4)
+
+**Check your changes actually compile and make sense.**
+
+#### Pre-Commit Checklist
+
+```scala
+// Did I reference any new fields?
+sessions.pendingSessions  // ✅ Does Sessions case class have this?
+
+// Did I pass all required parameters?
+sessions.reconnect(sid, rid, now)  // ❌ Missing config parameter
+sessions.reconnect(sid, rid, now, config)  // ✅ Correct
+
+// Are there any TODOs I left?
+grep -r "TODO" src/  // ✅ Should be zero
+
+// Does it compile?
+sbt compile  // OR use ReadLints tool
+
+// Did I update all call sites?
+// If I added parameter to method, search for all callers
+grep "reconnect(" src/
+```
+
+**Golden Rule**: If you're not sure, use `ReadLints` to check for compile errors.
+
+### 8. Group Related Changes (Rating: 3)
+
+**Fix related issues together, unrelated issues separately.**
+
+#### Example: Timeout Configuration
+
+**Related** (fix together):
+- `reconnect()` hardcoded timeout
+- `updateExpiry()` hardcoded timeout  
+- `confirmSession()` hardcoded timeout
+
+All are about the same issue: configuration.
+
+**Unrelated** (fix separately):
+- Missing `pendingSessions` field (type issue)
+- `confirmSessionCreation` should use queue (architecture issue)
+- Finalizer optimization (lifecycle issue)
+
+Different root causes = different commits.
+
+### 9. Match Reviewer's Mental Model (Rating: 4)
+
+**The reviewer has a design in mind - understand it.**
+
+#### Signs You're Fighting the Design:
+
+🚩 "I think we should..." → Reviewer says "no, do it this way"  
+🚩 Multiple back-and-forth on same issue  
+🚩 "But wouldn't it be better if..." → "No, just do what I asked"
+
+#### ✅ Correct Approach:
+
+**When reviewer says**: "confirmSessionCreation should go through the stream"
+
+**Don't think**: "But direct calls are faster"
+
+**Instead think**: "They want all state changes through the unified event stream for consistency. This maintains the functional state machine pattern."
+
+**Then implement exactly that.**
+
+### 10. Comment Context Matters (Rating: 3)
+
+**Look at WHICH LINE the comment is on.**
+
+#### Example:
+
+```scala
+// Line 324
+case StreamEvent.Action(ServerAction.Shutdown) =>
+  sessions.shutdown(transport)
+```
+
+**Comment on Line 324**: "we should not have an action for this"
+
+**Meaning**: Remove `ServerAction.Shutdown` action
+
+**NOT**: Remove all actions or change how other actions work
+
+#### Always Check:
+- What line is the comment on?
+- What code is at that line?
+- Is the comment about that specific line or general?
+
+## Real Example: The Finalizer Issue
+
+### Initial Code (Wrong)
+
+```scala
+// Client
+def close(): UIO[Unit] = 
+  actionQueue.offer(ClientAction.Disconnect).unit  // ❌ Queues action
+
+_ <- ZIO.addFinalizer(client.close())  // ❌ Won't work
+
+// Server  
+def shutdown(): UIO[Unit] =
+  actionQueue.offer(ServerAction.Shutdown).unit  // ❌ Queues action
+
+_ <- ZIO.addFinalizer(server.shutdown())  // ❌ Won't work
+```
+
+**Problem**: Stream already terminated when finalizer runs.
+
+### Fixed Code (Right)
+
+```scala
+// Client - send directly
+_ <- ZIO.addFinalizer(
+  zmqTransport.sendMessage(CloseSession(CloseReason.ClientShutdown)).orDie
+)
+
+// Server - access state directly
+stateRef <- Ref.make[ServerState](initialState)
+_ <- ZIO.addFinalizer(
+  for {
+    state <- stateRef.get
+    _ <- state match {
+      case leader: ServerState.Leader =>
+        leader.sessions.shutdown(transport)  // Direct call
+      case _ => ZIO.unit
+    }
+  } yield ()
+)
+```
+
+**Key Insight**: Transport/state is still available, queue is not.
+
+## Real Example: Missing Field
+
+### The Mistake
+
+```scala
+// STEP 1: Added methods using pendingSessions
+def addPending(...): Sessions = {
+  copy(pendingSessions = pendingSessions.updated(...))  // ❌ Field doesn't exist!
+}
+
+// STEP 2: Forgot to add field to case class
+case class Sessions(
+  metadata: Map[SessionId, SessionMetadata],
+  connections: Map[SessionId, SessionConnection],
+  routingToSession: Map[RoutingId, SessionId]
+  // ❌ MISSING: pendingSessions!
+)
+```
+
+**Reviewer**: "aren't you missing pendingSessions here?"
+
+### The Fix
+
+```scala
+// STEP 1: Add field FIRST
+case class Sessions(
+  metadata: Map[SessionId, SessionMetadata],
+  connections: Map[SessionId, SessionConnection],
+  routingToSession: Map[RoutingId, SessionId],
+  pendingSessions: Map[SessionId, PendingSession]  // ✅ Added
+)
+
+// STEP 2: Update constructors
+object Sessions {
+  def empty: Sessions = 
+    Sessions(Map.empty, Map.empty, Map.empty, Map.empty)  // ✅ All fields
+    
+  def fromMetadata(...): Sessions =
+    Sessions(metadata, connections, Map.empty, Map.empty)  // ✅ All fields
+}
+
+// STEP 3: Now methods work
+def addPending(...): Sessions = {
+  copy(pendingSessions = pendingSessions.updated(...))  // ✅ Works!
+}
+```
+
+## Workflow: Addressing PR Comments
+
+### Step-by-Step Process
+
+```bash
+# 1. Fetch ALL comments
+gh api repos/.../pulls/15/comments --paginate | python3 -c "..."
+
+# 2. Read ALL comments (top 30-40 minimum)
+# Take notes on distinct issues
+
+# 3. Categorize by type
+# - Type issues (missing fields)
+# - Configuration issues (hardcoded values)
+# - Architecture issues (wrong pattern)
+# - Logic errors
+
+# 4. Group related issues
+# - All timeout TODOs together
+# - All missing field issues together
+# - Each architecture decision separately
+
+# 5. Fix one group at a time
+# - Make focused commit
+# - Push
+# - Verify
+# - Move to next group
+
+# 6. When corrected, understand WHY
+# - Read the correction carefully
+# - Check what changed
+# - Understand the principle
+# - Fix correctly
+```
+
+## Red Flags
+
+Watch for these warning signs:
+
+🚩 **User says "you ignored comments"**
+   → You didn't read everything before starting
+
+🚩 **Multiple TODOs in your code**
+   → You're leaving work for later instead of doing it now
+
+🚩 **Compiler errors about missing fields**
+   → You added methods before updating types
+
+🚩 **Reviewer corrects you multiple times on same issue**
+   → You're not understanding the WHY
+
+🚩 **"But you had it right before"**
+   → You changed something you shouldn't have
+
+🚩 **Commits with 10+ distinct changes**
+   → You're not breaking work into reviewable chunks
+
+## Success Metrics
+
+✅ **All comments addressed in first pass**
+✅ **No "you missed X" feedback**
+✅ **Each commit focused on one issue**
+✅ **No TODOs in committed code**
+✅ **Types complete before using fields**
+✅ **Config parameters passed, not hardcoded**
+✅ **Finalizers use direct access, not queues**
+
+## The Golden Rule
+
+**Read everything, understand everything, fix everything correctly, in focused commits.**
+
+Don't:
+- Read partially
+- Guess at meanings
+- Fix partially
+- Make mega-commits
+- Leave TODOs
+
+Do:
+- Read completely
+- Ask for clarification
+- Fix thoroughly
+- Make focused commits
+- Finish each issue
+
+## Scope
+
+This rule applies to:
+- All PR comment resolution
+- Code review responses
+- Iterative development with feedback
+- Working with senior engineers
+- Any situation with detailed requirements
+
+---
+
+## Summary
+
+### Key Principles
+
+1. **Read ALL comments before starting** (don't incrementally fix)
+2. **Types first, logic second** (don't reference non-existent fields)
+3. **Config over constants** (don't leave TODOs)
+4. **Understand async boundaries** (queues vs direct access)
+5. **Listen carefully** (understand WHY not just WHAT)
+6. **One issue per commit** (focused, reviewable changes)
+7. **Verify before pushing** (types exist, methods have params, no TODOs)
+8. **Group related changes** (fix similar issues together)
+9. **Match reviewer's design** (understand their mental model)
+10. **Context matters** (check which line comment is on)
+
+### PR #15 Statistics
+
+- **Total comments**: 155+
+- **Iterations needed**: 5+ due to not following these principles
+- **Could have been**: 2 iterations if principles followed
+- **Time saved**: ~60% if done right the first time
+
+---
+
+**Status**: 🔴 experimental (newly documented from PR #15)
+**Implementations**: 0 (needs validation on next PR)
+**Success Rate**: N/A (pending first use)

@@ -1,0 +1,159 @@
+---
+title: ZIO Purity Over Java Stdlib
+description: Always use ZIO alternatives instead of impure Java standard library calls
+author: AI Agent (from PR #15 learnings - "remove usage of instant.now")
+date: 2025-10-19
+status: stable
+---
+
+# ZIO Purity Over Java Stdlib
+
+## Rule: Replace Impure Java Stdlib Calls with ZIO Equivalents
+
+**Rating: 3** (Advanced/Complex - Essential for functional purity)
+
+### Pattern Description
+
+Java standard library has many impure operations that break referential transparency. Always use ZIO's pure alternatives for testability and functional correctness.
+
+### Core Standard: Time and Clock Operations (Rating: 3)
+
+#### ❌ WRONG: Direct Java Time Calls
+```scala
+val now = Instant.now()  // Impure! Different value each call
+val timestamp = System.currentTimeMillis()  // Impure!
+```
+
+**Problems**:
+- ❌ Not testable (can't control time in tests)
+- ❌ Not referentially transparent
+- ❌ Can't be mocked or controlled
+- ❌ Violates functional purity
+
+#### ✅ CORRECT: ZIO Clock Service
+```scala
+for {
+  now <- Clock.instant  // Pure ZIO effect
+  millis <- Clock.currentTime(TimeUnit.MILLISECONDS)  // Pure ZIO effect
+} yield now
+```
+
+**Benefits**:
+- ✅ Testable (can use TestClock)
+- ✅ Referentially transparent
+- ✅ Can be mocked in tests
+- ✅ Maintains functional purity
+
+### Core Standard: Random Number Generation (Rating: 3)
+
+#### ❌ WRONG: Java Random
+```scala
+val random = new scala.util.Random()
+val value = random.nextInt()  // Impure! Side effect
+val uuid = java.util.UUID.randomUUID()  // Impure!
+```
+
+#### ✅ CORRECT: ZIO Random
+```scala
+for {
+  value <- Random.nextInt
+  uuid <- Random.nextUUID
+  long <- Random.nextLong
+} yield (value, uuid, long)
+```
+
+### Core Standard: IO Operations (Rating: 2)
+
+#### ❌ WRONG: Direct File/Console IO
+```scala
+println("Hello")  // Side effect!
+scala.io.Source.fromFile(path)  // Unmanaged resource!
+System.getenv("VAR")  // Impure!
+```
+
+#### ✅ CORRECT: ZIO Console and System
+```scala
+for {
+  _ <- Console.printLine("Hello")
+  env <- System.env("VAR")
+  content <- ZIO.readFile(path)
+} yield content
+```
+
+### Core Standard: Thread Sleep and Scheduling (Rating: 3)
+
+#### ❌ WRONG: Thread.sleep
+```scala
+Thread.sleep(1000)  // Blocks thread! Impure!
+```
+
+#### ✅ CORRECT: ZIO Clock
+```scala
+for {
+  _ <- Clock.sleep(1.second)
+  _ <- ZIO.succeed(value).delay(500.millis)
+} yield ()
+```
+
+## Quick Reference Table
+
+| Impure Java/Scala | Pure ZIO Alternative |
+|-------------------|---------------------|
+| `Instant.now()` | `Clock.instant` |
+| `System.currentTimeMillis()` | `Clock.currentTime(TimeUnit.MILLISECONDS)` |
+| `Random.nextInt()` | `Random.nextInt` |
+| `UUID.randomUUID()` | `Random.nextUUID` |
+| `Thread.sleep(ms)` | `Clock.sleep(duration)` |
+| `println(x)` | `Console.printLine(x)` |
+| `System.getenv(k)` | `System.env(k)` |
+| `Source.fromFile(p)` | `ZIO.readFile(p)` or ZIO Streams |
+
+## Detection Strategy
+
+### Common Patterns to Search For:
+```regex
+Instant\.now\(\)
+System\.currentTimeMillis
+Random\.next
+UUID\.randomUUID
+Thread\.sleep
+println\(
+System\.getenv
+System\.getProperty
+```
+
+## Usage Tracking
+
+Violations fixed in PR #15:
+- Commit: "remove usage of instant.now"
+- All `Instant.now()` calls replaced with `Clock.instant`
+
+## Benefits of This Pattern
+
+1. **Testability**: Can use TestClock, TestRandom, TestConsole
+2. **Determinism**: Tests are reproducible
+3. **Composability**: All operations are ZIO effects that compose
+4. **Resource Safety**: Proper resource management via Scope
+5. **Error Handling**: Explicit error types instead of exceptions
+
+## Scope
+
+This rule applies to:
+- All new code in ZIO Raft project
+- Any refactoring of existing code
+- All test code (use Test* alternatives)
+
+## Migration Strategy
+
+When finding impure calls:
+1. Identify the impure operation
+2. Find ZIO alternative from table above
+3. Wrap in `for` comprehension if needed
+4. Update function signature to return `ZIO[...]`
+5. Test with ZIO Test services
+
+---
+
+**Status**: stable (well-established pattern in ZIO ecosystem)
+**Enforcement**: Should be caught in code review
+**Violations**: Consider adding scalafix rules to detect

@@ -1,0 +1,692 @@
+---
+title: Avoid Premature Abstraction
+description: Don't create unnecessary traits, classes, and abstractions - keep it simple
+author: AI Agent (from PR #15 over-engineering learnings)
+date: 2025-10-19
+status: beta
+---
+
+# Avoid Premature Abstraction
+
+## Rule: Prefer Simple Code Over Elaborate Architectures
+
+**Rating: 5** (Master/Architectural - Affects entire codebase quality)
+
+### Pattern Description
+
+One of the biggest mistakes in PR #15 was creating too many abstractions. The initial implementation had separate traits and classes for everything (SessionManager, ActionStream, ConnectionManager, etc.), which were later simplified away.
+
+**PR Evidence**:
+- Commits: "ai try to simplify", "ai simplify some more"
+- Deleted tests: `SessionManagerSpec.scala`, `ActionStreamSpec.scala` (tested abstractions that no longer exist)
+- Final result: Everything consolidated into `RaftServer.scala` and `RaftClient.scala`
+
+### Core Standard: Default to Simple (Rating: 5)
+
+**START SIMPLE. Add abstractions only when you have CONCRETE evidence of need.**
+
+#### ❌ WRONG: Creating Abstractions "Just In Case"
+
+```scala
+// DON'T create separate traits for everything
+trait SessionManager {
+  def createSession(...): UIO[SessionId]
+  def getSession(...): UIO[Option[Session]]
+  def closeSession(...): UIO[Unit]
+}
+
+trait ActionStream {
+  def createStream(): ZStream[Any, Nothing, Action]
+  def processAction(action: Action): UIO[Unit]
+}
+
+trait ConnectionManager {
+  def addConnection(...): UIO[Unit]
+  def removeConnection(...): UIO[Unit]
+}
+
+// Then implement each in separate files...
+class SessionManagerImpl extends SessionManager { ... }
+class ActionStreamImpl extends ActionStream { ... }
+class ConnectionManagerImpl extends ConnectionManager { ... }
+```
+
+**Problems with this approach**:
+- ❌ Creates unnecessary indirection (where is the actual logic?)
+- ❌ Harder to understand (need to jump between files)
+- ❌ Harder to refactor (changes ripple across files)
+- ❌ More files to maintain
+- ❌ False sense of "clean architecture" (actually just overhead)
+- ❌ Premature abstraction (no alternative implementations exist)
+
+#### ✅ CORRECT: Nested Types in Single File
+
+```scala
+object RaftServer {
+  
+  // Simple case classes for data
+  case class Sessions(
+    metadata: Map[SessionId, SessionMetadata],
+    connections: Map[SessionId, SessionConnection],
+    routingToSession: Map[RoutingId, SessionId],
+    pendingSessions: Map[SessionId, PendingSession]
+  ) {
+    // Methods directly on the data structure
+    def addPending(...): Sessions = copy(...)
+    def disconnect(...): Sessions = copy(...)
+    def removeSession(...): Sessions = copy(...)
+  }
+  
+  // Sealed trait for state machine (actual polymorphism needed)
+  sealed trait ServerState {
+    def handle(...): UIO[ServerState]
+  }
+  
+  case object Follower extends ServerState { ... }
+  case class Leader(sessions: Sessions, ...) extends ServerState { ... }
+  
+  // Main class with all the logic
+  class RaftServer(...) {
+    // All implementation here
+  }
+}
+```
+
+**Why this is better**:
+- ✅ Everything related to the server in one place
+- ✅ Easy to understand the full picture
+- ✅ Easy to refactor (no ripple effects)
+- ✅ Fewer files, less cognitive overhead
+- ✅ Only abstractions that serve actual polymorphism (ServerState)
+
+### Core Standard: Abstraction Justification Test (Rating: 5)
+
+Before creating a new trait or abstract class, answer these questions:
+
+#### Question 1: "Will there be multiple implementations?"
+
+```scala
+// ❌ NO multiple implementations needed
+trait SessionManager {
+  def createSession(...): UIO[SessionId]
+}
+// Only one impl: SessionManagerImpl
+
+// ✅ Multiple implementations exist/planned
+sealed trait ServerState {
+  def handle(...): UIO[ServerState]
+}
+case object Follower extends ServerState { ... }
+case class Leader(...) extends ServerState { ... }
+```
+
+**Rule**: If there's only ONE implementation, don't create a trait. Use a case class or object.
+
+#### Question 2: "Do I need runtime polymorphism?"
+
+```scala
+// ❌ NO polymorphism needed - just data + functions
+trait Sessions {
+  def addSession(...): Sessions
+  def removeSession(...): Sessions
+}
+
+// ✅ Just use a case class
+case class Sessions(...) {
+  def addSession(...): Sessions = copy(...)
+  def removeSession(...): Sessions = copy(...)
+}
+```
+
+**Rule**: Case classes can have methods. Don't create traits for pure data transformations.
+
+#### Question 3: "Is this abstraction adding value or ceremony?"
+
+```scala
+// ❌ Ceremony (no value)
+trait ActionStream {
+  def create(): ActionStream
+}
+// One method, one implementation, no alternatives
+
+// ✅ Value (actual reusable logic)
+def createActionStream[A](
+  queue: Queue[A],
+  transform: A => Event
+): ZStream[Any, Nothing, Event] = 
+  ZStream.fromQueue(queue).map(transform)
+```
+
+**Rule**: Abstraction should reduce complexity, not increase it.
+
+### Core Standard: File Organization (Rating: 4)
+
+#### ❌ WRONG: One Abstraction Per File
+
+```
+server/
+├── SessionManager.scala       (trait + impl)
+├── ConnectionManager.scala    (trait + impl)
+├── ActionStream.scala         (trait + impl)
+├── ClientHandler.scala        (trait + impl)
+├── MessageProcessor.scala     (trait + impl)
+└── RaftServer.scala          (tiny class that wires everything)
+```
+
+**Problems**:
+- Hard to see the full picture
+- Each file is tiny (~50 lines)
+- Lots of boilerplate
+- Difficult to refactor
+- False sense of separation
+
+#### ✅ CORRECT: Group Related Functionality
+
+```
+server/
+├── RaftServer.scala          (everything in one place)
+│   ├── class RaftServer
+│   ├── object RaftServer {
+│   │   ├── case class Sessions { ... }
+│   │   ├── sealed trait ServerState { ... }
+│   │   ├── sealed trait ServerAction { ... }
+│   │   ├── sealed trait RaftAction { ... }
+│   │   └── ... all related types
+│   └── }
+└── ServerConfig.scala        (separate only because it's truly independent)
+```
+
+**Benefits**:
+- One file, complete picture
+- Easy to refactor
+- Easy to review
+- Actual cohesion, not fake separation
+
+### Core Standard: When to Create Separate Abstractions (Rating: 4)
+
+**ONLY create separate traits/files when**:
+
+1. **Multiple actual implementations exist**
+   ```scala
+   // ✅ GOOD: Different transport implementations
+   trait Transport {
+     def send(...): Task[Unit]
+   }
+   class ZmqTransport extends Transport { ... }
+   class TestTransport extends Transport { ... }  // Actually used!
+   ```
+
+2. **Dependency injection point**
+   ```scala
+   // ✅ GOOD: Allows testing with different implementations
+   class RaftServer(transport: Transport)
+   ```
+
+3. **Public API boundary**
+   ```scala
+   // ✅ GOOD: Hide implementation details from clients
+   trait RaftClient {
+     def submitCommand(...): UIO[Response]
+   }
+   ```
+
+4. **Truly separate concern**
+   ```scala
+   // ✅ GOOD: Codec logic is completely independent
+   object Codecs {
+     implicit val sessionCodec: Codec[Session] = ...
+   }
+   ```
+
+### Core Standard: Red Flags for Over-Abstraction (Rating: 3)
+
+Watch for these warning signs:
+
+🚩 **"Manager" classes**: SessionManager, ConnectionManager, etc.
+   - Often just wrappers around maps
+   - Can usually be case classes with methods
+
+🚩 **One trait, one implementation**
+   - Trait: `ActionStream`
+   - Only impl: `ActionStreamImpl`
+   - Just use the concrete class!
+
+🚩 **Wrapper methods that just delegate**
+   ```scala
+   def createSession(...) = sessionManager.create(...)
+   def closeSession(...) = sessionManager.close(...)
+   ```
+   - Just expose the sessionManager directly
+
+🚩 **Files under 100 lines**
+   - Probably over-split
+   - Merge related files
+
+🚩 **Lots of internal traits**
+   - If it's private, why is it a trait?
+   - Use case class or object
+
+## Anti-Pattern Examples from PR #15
+
+### What Was Initially Created (Over-Engineered)
+
+```
+client-server-server/src/main/scala/zio/raft/server/
+├── SessionManager.scala       ❌ Unnecessary trait
+├── ActionStream.scala         ❌ Unnecessary trait  
+├── ClientHandler.scala        ❌ Unnecessary trait
+├── RaftIntegration.scala      ❌ Unnecessary trait
+├── LeadershipMonitor.scala    ❌ Unnecessary trait
+├── ErrorHandling.scala        ❌ Unnecessary trait
+├── ResourceManager.scala      ❌ Unnecessary trait
+└── RaftServer.scala          (tiny, just wires things)
+```
+
+**Result**: 8 files, lots of traits, hard to follow logic
+
+### What Actually Survived (Simplified)
+
+```
+client-server-server/src/main/scala/zio/raft/server/
+├── RaftServer.scala          ✅ Everything in one place (~600 lines)
+└── ServerConfig.scala        ✅ Truly independent config
+```
+
+**Result**: 2 files, clear logic, easy to understand
+
+---
+
+## Refactoring Strategy
+
+If you catch yourself creating many small abstractions:
+
+### Step 1: Question Each Abstraction
+- Will there be multiple implementations? (If no → delete trait)
+- Is this a separate concern? (If no → merge into parent)
+- Does this add value? (If no → inline the logic)
+
+### Step 2: Consolidate
+```scala
+// Before: 5 files
+SessionManager.scala
+ActionStream.scala  
+...
+
+// After: 1 file with nested types
+RaftServer.scala:
+  object RaftServer {
+    case class Sessions { ... }
+    sealed trait ServerState { ... }
+    class RaftServer { ... }
+  }
+```
+
+### Step 3: Verify Simplification
+- Can I understand the full flow in one file? ✅
+- Did I reduce files without losing clarity? ✅
+- Are abstractions only where polymorphism exists? ✅
+
+---
+
+## The YAGNI Principle
+
+**Y**ou **A**ren't **G**onna **N**eed **I**t
+
+Most abstractions you think you need, you don't.
+
+```scala
+// ❌ Future-proofing (you don't need)
+trait SessionStorage {  // "In case we want database later"
+  def store(session: Session): UIO[Unit]
+}
+
+// ✅ Solve today's problem
+case class Sessions(
+  sessions: Map[SessionId, Session]
+)
+```
+
+**When you actually need database storage**, THEN refactor. Don't build it upfront.
+
+---
+
+## Scala-Specific Guidance
+
+### Use What Scala Gives You
+
+```scala
+// ❌ Don't create manager traits for simple data
+trait SessionManager {
+  def sessions: Map[SessionId, Session]
+  def addSession(s: Session): SessionManager
+}
+
+// ✅ Case classes ARE immutable managers
+case class Sessions(
+  sessions: Map[SessionId, Session]
+) {
+  def add(s: Session): Sessions = 
+    copy(sessions = sessions.updated(s.id, s))
+}
+```
+
+**Scala case classes**:
+- ✅ Immutable by default
+- ✅ Have copy() for updates
+- ✅ Can have methods
+- ✅ Pattern matching support
+- ✅ No need for separate "manager" trait
+
+---
+
+## Usage Tracking
+
+**PR #15 Evolution**:
+- **Initial**: ~15 separate abstraction files
+- **After "simplify"**: ~8 files
+- **Final**: ~2-3 core files per module
+- **Success Rate**: Much easier to review and understand
+
+**Violations Caught**:
+- Multiple "Manager" traits removed
+- Unnecessary ActionStream abstractions removed
+- Integrated everything into main components
+
+---
+
+## Benefits of Simple Approach
+
+1. **Easier to understand**: One file, full picture
+2. **Easier to refactor**: No ripple effects across files
+3. **Easier to review**: Reviewer sees complete logic
+4. **Easier to test**: Test the actual component, not abstractions
+5. **Less maintenance**: Fewer files to keep in sync
+6. **Faster development**: No time wasted on ceremony
+
+---
+
+## When Abstractions ARE Good
+
+Don't go to the other extreme - there ARE good reasons to abstract:
+
+✅ **Transport abstraction**: Actual different implementations (Zmq, Test)
+✅ **State machine**: Actual polymorphism needed (Follower, Leader)  
+✅ **Protocol codecs**: Separate concern, reusable
+✅ **Public API**: Hide implementation from clients
+
+---
+
+## Quick Decision Tree
+
+```
+Do I need to create a new trait/class?
+│
+├─ Multiple implementations? 
+│  ├─ YES → OK, create trait
+│  └─ NO ↓
+│
+├─ Public API boundary?
+│  ├─ YES → OK, create trait  
+│  └─ NO ↓
+│
+├─ Separate deployable module?
+│  ├─ YES → OK, create abstraction
+│  └─ NO ↓
+│
+└─ DEFAULT: Use case class or nested type
+```
+
+---
+
+## Validation Checklist
+
+Before creating a new trait/abstraction:
+
+- [ ] Do I have 2+ actual implementations? (Not planned, actual)
+- [ ] Is this a public API boundary that needs stability?
+- [ ] Would inline code be confusing? (>200 lines of logic)
+- [ ] Is this truly a separate concern? (different axis of change)
+- [ ] Can I justify this in code review?
+
+If you can't check at least 2 boxes → **Don't create the abstraction**
+
+---
+
+## Common Over-Abstraction Patterns to Avoid
+
+### 1. Manager Classes
+```scala
+// ❌ AVOID
+trait SessionManager
+trait ConnectionManager  
+trait ActionManager
+
+// ✅ PREFER
+case class Sessions { ... }  // Just data + methods
+```
+
+### 2. One-Method Traits
+```scala
+// ❌ AVOID
+trait ActionProcessor {
+  def process(action: Action): UIO[Unit]
+}
+
+// ✅ PREFER  
+def processAction(action: Action): UIO[Unit] = ...
+```
+
+### 3. Wrapper Objects
+```scala
+// ❌ AVOID
+object SessionOperations {
+  def create(...): UIO[Session] = sessionManager.create(...)
+  def close(...): UIO[Unit] = sessionManager.close(...)
+}
+
+// ✅ PREFER
+// Just use sessionManager directly
+```
+
+### 4. Empty Trait Hierarchies
+```scala
+// ❌ AVOID
+trait Event
+trait ServerEvent extends Event
+trait ClientEvent extends Event
+case class Tick extends ServerEvent  // Only one of each!
+case class Message extends ClientEvent
+
+// ✅ PREFER
+sealed trait Event
+case object Tick extends Event
+case class Message(...) extends Event
+```
+
+---
+
+## Refactoring Indicators
+
+Signs your code needs simplification:
+
+🚩 More than 5 files for a single component  
+🚩 Traits with only one implementation  
+🚩 "Manager", "Handler", "Processor" in many class names  
+🚩 Files under 50 lines (too granular)  
+🚩 Having to jump between 4+ files to understand one feature  
+🚩 Tests for abstractions rather than behavior  
+
+**Action**: Consolidate related code into fewer files with nested types
+
+---
+
+## The Simplification Process (From PR #15)
+
+### Before Simplification (Over-Engineered)
+```
+client-server-server/src/main/scala/zio/raft/server/
+├── SessionManager.scala       (trait + impl, ~150 lines)
+├── ActionStream.scala         (trait + impl, ~100 lines)
+├── ClientHandler.scala        (trait + impl, ~120 lines)
+├── RaftIntegration.scala      (trait + impl, ~80 lines)
+├── LeadershipMonitor.scala    (trait + impl, ~90 lines)
+├── ErrorHandling.scala        (utils, ~60 lines)
+├── ResourceManager.scala      (trait + impl, ~70 lines)
+├── RaftServer.scala          (wiring only, ~100 lines)
+└── ServerConfig.scala        (config, ~50 lines)
+
+Total: 9 files, ~820 lines
+Tests: SessionManagerSpec.scala, ActionStreamSpec.scala (testing abstractions)
+```
+
+### After Simplification (Right-Sized)
+```
+client-server-server/src/main/scala/zio/raft/server/
+├── RaftServer.scala          (~600 lines)
+│   ├── object RaftServer {
+│   │   ├── case class Sessions { ... }
+│   │   ├── sealed trait ServerState { ... }
+│   │   ├── case object Follower extends ServerState
+│   │   ├── case class Leader(...) extends ServerState
+│   │   ├── sealed trait ServerAction
+│   │   ├── sealed trait RaftAction
+│   │   └── ... all related types
+│   └── }
+│   └── class RaftServer { ... }
+└── ServerConfig.scala        (~50 lines)
+
+Total: 2 files, ~650 lines
+Tests: None (tests actual behavior via RaftServer integration tests)
+```
+
+**Results**:
+- ✅ Fewer files (9 → 2)
+- ✅ Easier to understand (one place to look)
+- ✅ Easier to refactor (local changes)
+- ✅ Actually simpler code (no indirection)
+
+---
+
+## Nested Types Are Your Friend
+
+Scala allows nesting types within objects - use this!
+
+```scala
+object RaftServer {
+  // All types that are ONLY used by RaftServer
+  case class Sessions(...)
+  sealed trait ServerState
+  sealed trait ServerAction
+  
+  // Main implementation
+  class RaftServer(...) {
+    // Uses all the nested types
+  }
+}
+```
+
+**Benefits**:
+- Clear scope (types only for RaftServer)
+- Good encapsulation
+- Easy to find everything
+- No namespace pollution
+
+---
+
+## Exceptions: When Separate Files ARE Good
+
+These are legitimate reasons to separate:
+
+### 1. **Truly Independent Modules**
+```
+✅ client-server-protocol/  (used by both client and server)
+✅ client-server-client/   (different deployment)
+✅ client-server-server/   (different deployment)
+```
+
+### 2. **Different Compilation Units**
+```
+✅ Messages.scala   (protocol definitions)
+✅ Codecs.scala    (serialization logic)
+```
+
+### 3. **Large, Cohesive Units**
+```
+✅ RaftServer.scala  (~600 lines, but all cohesive)
+✅ RaftClient.scala  (~700 lines, but all cohesive)
+```
+
+**Note**: 600-700 lines in ONE file is fine if it's cohesive and related!
+
+---
+
+## Metrics
+
+### Abstraction Smell Detection:
+
+```bash
+# Count traits vs implementations
+grep "^trait " **/*.scala | wc -l
+grep "extends " **/*.scala | wc -l
+
+# If ratio is 1:1, probably over-abstracted
+```
+
+### File Size Distribution:
+```bash
+# Lots of tiny files is a smell
+find . -name "*.scala" -exec wc -l {} \; | sort -n
+
+# 10 files under 100 lines → probably over-split
+```
+
+---
+
+## PR Review Questions
+
+When reviewing code with many abstractions:
+
+- ❓ "Why is this a trait instead of a case class?"
+- ❓ "Will there ever be another implementation?"
+- ❓ "Could this be nested in the parent object?"
+- ❓ "Does this abstraction make the code clearer or more complex?"
+- ❓ "Can I understand the feature without jumping between 5 files?"
+
+---
+
+## Scope
+
+This rule applies to:
+- All new feature development
+- Refactoring existing code
+- Any code review feedback about complexity
+- Any time you type "Manager", "Handler", "Processor"
+
+---
+
+## Summary: The Rule
+
+### ✅ DO:
+- Start with simple case classes
+- Use nested types within objects
+- Create traits only for actual polymorphism
+- Keep related code together
+- Prefer 1 file with 600 lines over 6 files with 100 lines each
+
+### ❌ DON'T:
+- Create traits "just in case"
+- Separate code that belongs together
+- Create "Manager" classes for simple data
+- Abstract before you have concrete need
+- Make many tiny files
+
+### 🎯 REMEMBER:
+**"Simplicity is prerequisite for reliability." - Dijkstra**
+
+In PR #15, we learned this the hard way. Start simple, add complexity only when forced by actual requirements.
+
+---
+
+**Status**: beta (validated through PR #15 simplification)  
+**Anti-Pattern Count**: 7+ abstraction files simplified to 2  
+**Success Rate**: 100% (simpler is better every time)

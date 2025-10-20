@@ -8,51 +8,45 @@ import zio.raft.protocol.RejectionReason.*
 import zio.raft.protocol.SessionCloseReason.*
 import zio.raft.protocol.CloseReason.*
 
-/**
- * scodec binary serialization codecs for ZIO Raft protocol messages.
- *
- * This module provides binary serialization support for all protocol messages
- * using scodec, including:
- * - Protocol signature and version handling
- * - Discriminated union encoding for message hierarchies
- * - Type-safe serialization for newtypes
- * - Backward/forward compatibility support
- */
+/** scodec binary serialization codecs for ZIO Raft protocol messages.
+  *
+  * This module provides binary serialization support for all protocol messages using scodec, including:
+  *   - Protocol signature and version handling
+  *   - Discriminated union encoding for message hierarchies
+  *   - Type-safe serialization for newtypes
+  *   - Backward/forward compatibility support
+  */
 object Codecs {
 
   // ============================================================================
   // BASIC TYPE CODECS
   // ============================================================================
 
-  /**
-   * Codec for protocol signature validation.
-   */
+  /** Codec for protocol signature validation.
+    */
   val protocolSignatureCodec: Codec[Unit] = {
     constant(ByteVector(PROTOCOL_SIGNATURE))
   }
 
-  /**
-   * Codec for protocol version.
-   */
+  /** Codec for protocol version.
+    */
   val protocolVersionCodec: Codec[Byte] = {
     byte.exmap(
-      version => 
-        if (version == PROTOCOL_VERSION) Attempt.Successful(version) 
+      version =>
+        if (version == PROTOCOL_VERSION) Attempt.Successful(version)
         else Attempt.Failure(Err(s"Unsupported protocol version: $version, expected: $PROTOCOL_VERSION")),
       version => Attempt.Successful(version)
     )
   }
 
-  /**
-   * Codec for constant protocol version.
-   */
+  /** Codec for constant protocol version.
+    */
   val constantProtocolVersionCodec: Codec[Unit] = {
     constant(ByteVector(PROTOCOL_VERSION))
   }
 
-  /**
-   * Protocol header codec (signature + version).
-   */
+  /** Protocol header codec (signature + version).
+    */
   val protocolHeaderCodec: Codec[Unit] = {
     protocolSignatureCodec ~> constantProtocolVersionCodec
   }
@@ -61,9 +55,8 @@ object Codecs {
   // NEWTYPE CODECS
   // ============================================================================
 
-  /**
-   * Codec for SessionId (UUID string).
-   */
+  /** Codec for SessionId (UUID string).
+    */
   implicit val sessionIdCodec: Codec[SessionId] = {
     variableSizeBytes(uint16, utf8).xmap(
       str => SessionId(str),
@@ -71,9 +64,8 @@ object Codecs {
     )
   }
 
-  /**
-   * Codec for RequestId (Long counter).
-   */
+  /** Codec for RequestId (Long counter).
+    */
   implicit val requestIdCodec: Codec[RequestId] = {
     int64.xmap(
       id => RequestId(id),
@@ -81,23 +73,20 @@ object Codecs {
     )
   }
 
-  /**
-   * Codec for MemberId from protocol.
-   */
+  /** Codec for MemberId from protocol.
+    */
   implicit val memberIdCodec: Codec[MemberId] = {
     variableSizeBytes(uint16, utf8).xmap(MemberId.fromString, MemberId.unwrap)
   }
 
-  /**
-   * Codec for Nonce.
-   */
+  /** Codec for Nonce.
+    */
   implicit val nonceCodec: Codec[Nonce] = {
     long(64).xmap(Nonce.fromLong, Nonce.unwrap)
   }
 
-  /**
-   * Codec for Instant timestamps.
-   */
+  /** Codec for Instant timestamps.
+    */
   implicit val instantCodec: Codec[Instant] = {
     int64.xmap(
       epochMillis => Instant.ofEpochMilli(epochMillis),
@@ -105,20 +94,16 @@ object Codecs {
     )
   }
 
-  /**
-   * Codec for ByteVector payloads.
-   */
+  /** Codec for ByteVector payloads.
+    */
   implicit val payloadCodec: Codec[ByteVector] = {
     variableSizeBytes(int32, bytes)
   }
 
-  /**
-   * Codec for string-to-string maps (capabilities).
-   */
+  /** Codec for string-to-string maps (capabilities).
+    */
   implicit val capabilitiesCodec: Codec[Map[String, String]] = {
-    listOfN(uint16, 
-      (variableSizeBytes(uint16, utf8) :: variableSizeBytes(uint16, utf8)).as[(String, String)]
-    ).xmap(
+    listOfN(uint16, (variableSizeBytes(uint16, utf8) :: variableSizeBytes(uint16, utf8)).as[(String, String)]).xmap(
       list => list.toMap,
       map => map.toList
     )
@@ -128,96 +113,90 @@ object Codecs {
   // REASON ENUM CODECS
   // ============================================================================
 
-  /**
-   * Codec for RejectionReason.
-   */
+  /** Codec for RejectionReason.
+    */
   implicit val rejectionReasonCodec: Codec[RejectionReason] = {
-    discriminated[RejectionReason].by(uint8)
-      .subcaseP(1) { case NotLeader => NotLeader } (provide(NotLeader))
-      .subcaseP(2) { case SessionNotFound => SessionNotFound } (provide(SessionNotFound))      
-      .subcaseP(3) { case InvalidCapabilities => InvalidCapabilities } (provide(InvalidCapabilities))
+    discriminated[RejectionReason]
+      .by(uint8)
+      .subcaseP(1) { case NotLeader => NotLeader }(provide(NotLeader))
+      .subcaseP(2) { case SessionNotFound => SessionNotFound }(provide(SessionNotFound))
+      .subcaseP(3) { case InvalidCapabilities => InvalidCapabilities }(provide(InvalidCapabilities))
   }
 
-  /**
-   * Codec for SessionCloseReason.
-   */
+  /** Codec for SessionCloseReason.
+    */
   implicit val sessionCloseReasonCodec: Codec[SessionCloseReason] = {
-    discriminated[SessionCloseReason].by(uint8)
-      .subcaseP(1) { case Shutdown => Shutdown } (provide(Shutdown))
-      .subcaseP(2) { case NotLeaderAnymore => NotLeaderAnymore } (provide(NotLeaderAnymore))
-      .subcaseP(3) { case SessionError => SessionError } (provide(SessionError))
-      .subcaseP(4) { case ConnectionClosed => ConnectionClosed } (provide(ConnectionClosed))
-      .subcaseP(5) { case SessionTimeout => SessionTimeout } (provide(SessionTimeout))
+    discriminated[SessionCloseReason]
+      .by(uint8)
+      .subcaseP(1) { case Shutdown => Shutdown }(provide(Shutdown))
+      .subcaseP(2) { case NotLeaderAnymore => NotLeaderAnymore }(provide(NotLeaderAnymore))
+      .subcaseP(3) { case SessionError => SessionError }(provide(SessionError))
+      .subcaseP(4) { case ConnectionClosed => ConnectionClosed }(provide(ConnectionClosed))
+      .subcaseP(5) { case SessionTimeout => SessionTimeout }(provide(SessionTimeout))
   }
 
-  /**
-   * Codec for CloseReason.
-   */
+  /** Codec for CloseReason.
+    */
   implicit val closeReasonCodec: Codec[CloseReason] = {
-    discriminated[CloseReason].by(uint8)
-      .subcaseP(1) { case CloseReason.ClientShutdown => CloseReason.ClientShutdown } (provide(CloseReason.ClientShutdown))
+    discriminated[CloseReason]
+      .by(uint8)
+      .subcaseP(1) { case CloseReason.ClientShutdown => CloseReason.ClientShutdown }(
+        provide(CloseReason.ClientShutdown)
+      )
   }
 
   // ============================================================================
   // CLIENT MESSAGE CODECS
   // ============================================================================
 
-  /**
-   * Codec for CreateSession message.
-   */
+  /** Codec for CreateSession message.
+    */
   implicit val createSessionCodec: Codec[CreateSession] = {
     (capabilitiesCodec :: nonceCodec).as[CreateSession]
   }
 
-  /**
-   * Codec for ContinueSession message.
-   */
+  /** Codec for ContinueSession message.
+    */
   implicit val continueSessionCodec: Codec[ContinueSession] = {
     (sessionIdCodec :: nonceCodec).as[ContinueSession]
   }
 
-  /**
-   * Codec for KeepAlive message.
-   */
+  /** Codec for KeepAlive message.
+    */
   implicit val keepAliveCodec: Codec[KeepAlive] = {
     instantCodec.as[KeepAlive]
   }
 
-  /**
-   * Codec for ClientRequest message.
-   */
+  /** Codec for ClientRequest message.
+    */
   implicit val clientRequestCodec: Codec[ClientRequest] = {
     (requestIdCodec :: payloadCodec :: instantCodec).as[ClientRequest]
   }
 
-  /**
-   * Codec for ServerRequestAck message.
-   */
+  /** Codec for ServerRequestAck message.
+    */
   implicit val serverRequestAckCodec: Codec[ServerRequestAck] = {
     requestIdCodec.as[ServerRequestAck]
   }
 
-  /**
-   * Codec for CloseSession message.
-   */
+  /** Codec for CloseSession message.
+    */
   implicit val closeSessionCodec: Codec[CloseSession] = {
     closeReasonCodec.as[CloseSession]
   }
 
-  /**
-   * Codec for ConnectionClosed client message.
-   * Simple constant codec since it's a case object with no parameters.
-   * Note: Uses fully qualified name to avoid conflict with SessionCloseReason.ConnectionClosed
-   */
+  /** Codec for ConnectionClosed client message. Simple constant codec since it's a case object with no parameters.
+    * Note: Uses fully qualified name to avoid conflict with SessionCloseReason.ConnectionClosed
+    */
   implicit val connectionClosedClientMessageCodec: Codec[zio.raft.protocol.ConnectionClosed.type] = {
     provide(zio.raft.protocol.ConnectionClosed)
   }
 
-  /**
-   * Discriminated codec for all ClientMessage types.
-   */
+  /** Discriminated codec for all ClientMessage types.
+    */
   implicit val clientMessageCodec: Codec[ClientMessage] = {
-    protocolHeaderCodec ~> discriminated[ClientMessage].by(uint8)
+    protocolHeaderCodec ~> discriminated[ClientMessage]
+      .by(uint8)
       .typecase(1, createSessionCodec)
       .typecase(2, continueSessionCodec)
       .typecase(3, keepAliveCodec)
@@ -231,60 +210,53 @@ object Codecs {
   // SERVER MESSAGE CODECS
   // ============================================================================
 
-  /**
-   * Codec for SessionCreated message.
-   */
+  /** Codec for SessionCreated message.
+    */
   implicit val sessionCreatedCodec: Codec[SessionCreated] = {
     (sessionIdCodec :: nonceCodec).as[SessionCreated]
   }
 
-  /**
-   * Codec for SessionContinued message.
-   */
+  /** Codec for SessionContinued message.
+    */
   implicit val sessionContinuedCodec: Codec[SessionContinued] = {
     nonceCodec.as[SessionContinued]
   }
 
-  /**
-   * Codec for SessionRejected message.
-   */
+  /** Codec for SessionRejected message.
+    */
   implicit val sessionRejectedCodec: Codec[SessionRejected] = {
     (rejectionReasonCodec :: nonceCodec :: optional(bool, memberIdCodec)).as[SessionRejected]
   }
 
-  /**
-   * Codec for SessionClosed message.
-   */
+  /** Codec for SessionClosed message.
+    */
   implicit val sessionClosedCodec: Codec[SessionClosed] = {
     (sessionCloseReasonCodec :: optional(bool, memberIdCodec)).as[SessionClosed]
   }
 
-  /**
-   * Codec for KeepAliveResponse message.
-   */
+  /** Codec for KeepAliveResponse message.
+    */
   implicit val keepAliveResponseCodec: Codec[KeepAliveResponse] = {
     instantCodec.as[KeepAliveResponse]
   }
 
-  /**
-   * Codec for ClientResponse message.
-   */
+  /** Codec for ClientResponse message.
+    */
   implicit val clientResponseCodec: Codec[ClientResponse] = {
     (requestIdCodec :: payloadCodec).as[ClientResponse]
   }
 
-  /**
-   * Codec for ServerRequest message.
-   */
+  /** Codec for ServerRequest message.
+    */
   implicit val serverRequestCodec: Codec[ServerRequest] = {
     (requestIdCodec :: payloadCodec :: instantCodec).as[ServerRequest]
   }
 
-  /**
-   * Discriminated codec for all ServerMessage types.
-   */
+  /** Discriminated codec for all ServerMessage types.
+    */
   implicit val serverMessageCodec: Codec[ServerMessage] = {
-    protocolHeaderCodec ~> discriminated[ServerMessage].by(uint8)
+    protocolHeaderCodec ~> discriminated[ServerMessage]
+      .by(uint8)
       .typecase(1, sessionCreatedCodec)
       .typecase(2, sessionContinuedCodec)
       .typecase(3, sessionRejectedCodec)
@@ -298,30 +270,26 @@ object Codecs {
   // UTILITY FUNCTIONS
   // ============================================================================
 
-  /**
-   * Encode a ClientMessage to bytes.
-   */
+  /** Encode a ClientMessage to bytes.
+    */
   def encodeClientMessage(message: ClientMessage): Attempt[ByteVector] = {
     clientMessageCodec.encode(message).map(_.bytes)
   }
 
-  /**
-   * Decode bytes to a ClientMessage.
-   */
+  /** Decode bytes to a ClientMessage.
+    */
   def decodeClientMessage(bytes: ByteVector): Attempt[ClientMessage] = {
     clientMessageCodec.decode(bytes.bits).map(_.value)
   }
 
-  /**
-   * Encode a ServerMessage to bytes.
-   */
+  /** Encode a ServerMessage to bytes.
+    */
   def encodeServerMessage(message: ServerMessage): Attempt[ByteVector] = {
     serverMessageCodec.encode(message).map(_.bytes)
   }
 
-  /**
-   * Decode bytes to a ServerMessage.
-   */
+  /** Decode bytes to a ServerMessage.
+    */
   def decodeServerMessage(bytes: ByteVector): Attempt[ServerMessage] = {
     serverMessageCodec.decode(bytes.bits).map(_.value)
   }

@@ -21,14 +21,13 @@ object ZContext {
       ZIO.acquireRelease(
         ZIO.attemptBlocking(new ZContext).refineToOrDie[ZMQException]
       )(ctx =>
-
-        ZIO.debug("Shutting down context") *> ZIO
+        ZIO
           .attemptBlocking(ctx.shutdown())
           .catchSome {
             case e: ZMQException if e.getErrorCode == InterruptedFunction =>
               ZIO.unit
           }
-          .orDie *> ZIO.debug("Context shut down")
+          .orDie
       )
     )
 }

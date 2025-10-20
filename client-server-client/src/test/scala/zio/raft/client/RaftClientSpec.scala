@@ -121,9 +121,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
           _ <- client.connect()
 
           (_, createMsg) <- expectMessage[CreateSession](mockServer)
-        } yield {
-          assertTrue(createMsg.capabilities == Map("test-worker" -> "v1.0"))
-        }
+        } yield assertTrue(createMsg.capabilities == Map("test-worker" -> "v1.0"))
       }
 
       test("should transition to Connected after receiving SessionCreated") {
@@ -146,9 +144,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Verify connected by doing request-response round-trip
           connected <- verifyConnection(client, mockServer)
-        } yield {
-          assertTrue(connected)
-        }
+        } yield assertTrue(connected)
       }
 
       test("should retry on SessionRejected(NotLeader)") {
@@ -177,9 +173,8 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
           )
 
           (_, createMsg2) <- expectMessage[CreateSession](mockServer)
-        } yield {
-          assertTrue(createMsg2.capabilities == Map("test" -> "v1"))
-        }
+        } yield assertTrue(createMsg2.capabilities == Map("test" -> "v1"))
+
       }
     }
 
@@ -188,6 +183,42 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
     // ==========================================================================
 
     suiteAll("Request Submission") {
+      test("should queue request submitted during Connecting and send after Connected") {
+        val port = findOpenPort
+        for {
+          mockServer <- ZSocket.server
+          _ <- mockServer.bind(s"tcp://0.0.0.0:$port")
+
+          client <- RaftClient.make(
+            clusterMembers = Map(MemberId.fromString("node1") -> s"tcp://127.0.0.1:$port"),
+            capabilities = Map("test" -> "v1")
+          )
+          _ <- client.run().forkScoped
+
+          // Connect (moves to Connecting state)
+          _ <- client.connect()
+
+          // Submit command WHILE in Connecting state (after connect(), before SessionCreated)
+          payload = ByteVector.fromValidHex("aabbccdd")
+          responseFiber <- client.submitCommand(payload).fork
+
+          (routingId, createMsg) <- expectMessage[CreateSession](mockServer)
+
+          sessionId <- SessionId.generate()
+          _ <- sendServerMessage(mockServer, routingId, SessionCreated(sessionId, createMsg.nonce))
+
+          // Should now receive the queued request
+          (_, clientReq) <- waitForMessage[ClientRequest](mockServer)
+
+          // Respond
+          result = ByteVector.fromValidHex("11223344")
+          _ <- sendServerMessage(mockServer, routingId, ClientResponse(clientReq.requestId, result))
+
+          response <- responseFiber.join
+        } yield assertTrue(clientReq.payload == payload) &&
+          assertTrue(response == result)
+      }
+
       test("should send ClientRequest and receive ClientResponse") {
         val port = findOpenPort
         for {
@@ -216,11 +247,160 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
           _ <- sendServerMessage(mockServer, routingId, ClientResponse(clientReq.requestId, result))
 
           response <- responseFiber.join
-        } yield {
-          assertTrue(response == result) &&
+        } yield assertTrue(response == result) &&
           assertTrue(clientReq.payload == payload) &&
           assertTrue(clientReq.requestId == RequestId.fromLong(1L))
-        }
+      }
+
+      test("should queue multiple requests during Connecting and send all after Connected") {
+        val port = findOpenPort
+        for {
+          mockServer <- ZSocket.server
+          _ <- mockServer.bind(s"tcp://0.0.0.0:$port")
+
+          client <- RaftClient.make(
+            clusterMembers = Map(MemberId.fromString("node1") -> s"tcp://127.0.0.1:$port"),
+            capabilities = Map("test" -> "v1")
+          )
+          _ <- client.run().forkScoped
+
+          // Connect (moves to Connecting state)
+          _ <- client.connect()
+
+          // Submit 3 commands WHILE in Connecting state (after connect(), before SessionCreated)
+          req1Fiber <- client.submitCommand(ByteVector.fromValidHex("aa")).fork
+          req2Fiber <- client.submitCommand(ByteVector.fromValidHex("bb")).fork
+          req3Fiber <- client.submitCommand(ByteVector.fromValidHex("cc")).fork
+
+          (routingId, createMsg) <- expectMessage[CreateSession](mockServer)
+
+          sessionId <- SessionId.generate()
+          _ <- sendServerMessage(mockServer, routingId, SessionCreated(sessionId, createMsg.nonce))
+
+          // Should receive all 3 queued requests
+          (_, clientReq1) <- waitForMessage[ClientRequest](mockServer)
+          (_, clientReq2) <- waitForMessage[ClientRequest](mockServer)
+          (_, clientReq3) <- waitForMessage[ClientRequest](mockServer)
+
+          // Respond to all 3
+          _ <- sendServerMessage(
+            mockServer,
+            routingId,
+            ClientResponse(clientReq1.requestId, ByteVector.fromValidHex("01"))
+          )
+          _ <- sendServerMessage(
+            mockServer,
+            routingId,
+            ClientResponse(clientReq2.requestId, ByteVector.fromValidHex("02"))
+          )
+          _ <- sendServerMessage(
+            mockServer,
+            routingId,
+            ClientResponse(clientReq3.requestId, ByteVector.fromValidHex("03"))
+          )
+
+          resp1 <- req1Fiber.join
+          resp2 <- req2Fiber.join
+          resp3 <- req3Fiber.join
+        } yield assertTrue(resp1.nonEmpty && resp2.nonEmpty && resp3.nonEmpty)
+      }
+
+      test("should retry request after timeout when server doesn't respond") {
+        val port = findOpenPort
+        val customConfig = ClientConfig
+          .make(
+            Map(MemberId.fromString("node1") -> s"tcp://127.0.0.1:$port"),
+            Map("test" -> "v1")
+          )
+          .copy(requestTimeout = 1.second)
+
+        for {
+          mockServer <- ZSocket.server
+          _ <- mockServer.bind(s"tcp://0.0.0.0:$port")
+
+          client <- RaftClient.make(customConfig)
+          _ <- client.run().forkScoped
+          _ <- client.connect()
+
+          (routingId, createMsg) <- expectMessage[CreateSession](mockServer)
+
+          sessionId <- SessionId.generate()
+          _ <- sendServerMessage(mockServer, routingId, SessionCreated(sessionId, createMsg.nonce))
+
+          // Submit command
+          payload = ByteVector.fromValidHex("deadbeef")
+          responseFiber <- client.submitCommand(payload).fork
+
+          // Server receives first attempt but doesn't respond
+          (_, clientReq1) <- waitForMessage[ClientRequest](mockServer)
+
+          // Wait for request timeout (now 1s in this test)
+          // Client should retry the request after timeout
+          retryAttempt <- waitForMessage[ClientRequest](mockServer).timeout(3.seconds)
+
+          // Verify we got the retry
+          (_, clientReq2) = retryAttempt.get
+
+          // Now respond to the retry
+          result = ByteVector.fromValidHex("facade00")
+          _ <- sendServerMessage(mockServer, routingId, ClientResponse(clientReq2.requestId, result))
+
+          response <- responseFiber.join
+        } yield assertTrue(retryAttempt.isDefined) && // Retry was sent
+          assertTrue(clientReq1.requestId == clientReq2.requestId) && // Same request ID (idempotent retry)
+          assertTrue(response == result)
+      }
+
+      test("should resend pending request after reconnection following ConnectionClosed") {
+        val port = findOpenPort
+        for {
+          mockServer <- ZSocket.server
+          _ <- mockServer.bind(s"tcp://0.0.0.0:$port")
+
+          client <- RaftClient.make(
+            clusterMembers = Map(MemberId.fromString("node1") -> s"tcp://127.0.0.1:$port"),
+            capabilities = Map("test" -> "v1")
+          )
+          _ <- client.run().forkScoped
+          _ <- client.connect()
+
+          // 1. Establish session
+          (routingId1, createMsg) <- expectMessage[CreateSession](mockServer)
+
+          sessionId <- SessionId.generate()
+          _ <- sendServerMessage(mockServer, routingId1, SessionCreated(sessionId, createMsg.nonce))
+
+          // 2. Send one command
+          payload = ByteVector.fromValidHex("deadbeef00")
+          responseFiber <- client.submitCommand(payload).fork
+
+          // Server receives request
+          (_, clientReq1) <- waitForMessage[ClientRequest](mockServer)
+
+          // 3. Don't respond - 4. Send ConnectionClosed instead
+          _ <- sendServerMessage(
+            mockServer,
+            routingId1,
+            SessionClosed(SessionCloseReason.ConnectionClosed, None)
+          )
+
+          // 5. Client should reconnect with ContinueSession
+          (routingId2, continueMsg) <- expectMessage[ContinueSession](mockServer)
+
+          _ <- sendServerMessage(mockServer, routingId2, SessionContinued(continueMsg.nonce))
+
+          // 6. Client should resend the pending request
+          (_, clientReq2) <- waitForMessage[ClientRequest](mockServer)
+
+          // Now respond
+          result = ByteVector.fromValidHex("facade00")
+          _ <- sendServerMessage(mockServer, routingId2, ClientResponse(clientReq2.requestId, result))
+
+          response <- responseFiber.join
+        } yield assertTrue(continueMsg.sessionId == sessionId) &&
+          assertTrue(clientReq1.requestId == clientReq2.requestId) && // Same request ID
+          assertTrue(clientReq1.payload == clientReq2.payload) && // Same payload
+          assertTrue(response == result)
       }
 
       test("should handle multiple concurrent requests") {
@@ -261,9 +441,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           resp1 <- req1Fiber.join
           resp2 <- req2Fiber.join
-        } yield {
-          assertTrue(resp1.nonEmpty && resp2.nonEmpty)
-        }
+        } yield assertTrue(resp1.nonEmpty && resp2.nonEmpty)
       }
     }
     // ==========================================================================
@@ -273,14 +451,16 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
     suiteAll("Keep-Alive Protocol") {
       test("should send periodic keep-alive messages") {
         val port = findOpenPort
+        val clientConfig = ClientConfig(
+          clusterMembers = Map(MemberId.fromString("node1") -> s"tcp://127.0.0.1:$port"),
+          capabilities = Map("test" -> "v1"),
+          keepAliveInterval = 1.second // Make keep-alive interval short for fast test
+        )
         for {
           mockServer <- ZSocket.server
           _ <- mockServer.bind(s"tcp://0.0.0.0:$port")
 
-          client <- RaftClient.make(
-            clusterMembers = Map(MemberId.fromString("node1") -> s"tcp://127.0.0.1:$port"),
-            capabilities = Map("test" -> "v1")
-          )
+          client <- RaftClient.make(clientConfig)
           _ <- client.run().forkScoped
           _ <- client.connect()
 
@@ -289,22 +469,9 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
           sessionId <- SessionId.generate()
           _ <- sendServerMessage(mockServer, routingId, SessionCreated(sessionId, createMsg.nonce))
 
-          keepAliveMsgRaw <- mockServer.receiveMsg.timeout(35.seconds) // Keep-alive interval is 30s by default
-          keepAlive <- keepAliveMsgRaw match {
-            case Some(msg) =>
-              ZIO.fromEither(
-                clientMessageCodec.decode(scodec.bits.BitVector(msg.data())).toEither.map(_.value)
-              )
-            case None => ZIO.fail(new RuntimeException("Timeout waiting for keep-alive"))
-          }
-
-          _ <- keepAlive match {
-            case ka: KeepAlive => sendServerMessage(mockServer, routingId, KeepAliveResponse(ka.timestamp))
-            case _             => ZIO.unit
-          }
-        } yield {
-          assertTrue(keepAlive.isInstanceOf[KeepAlive])
-        }
+          (_, keepAlive) <- expectMessage[KeepAlive](mockServer)
+          _ <- sendServerMessage(mockServer, routingId, KeepAliveResponse(keepAlive.timestamp))
+        } yield assertCompletes
       }
     }
 
@@ -360,12 +527,10 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Verify all 3 delivered to stream
           serverReqs <- serverReqFiber.join
-        } yield {
-          assertTrue(serverReqs.size == 3) &&
+        } yield assertTrue(serverReqs.size == 3) &&
           assertTrue(ack1.requestId == RequestId.fromLong(1L)) &&
           assertTrue(ack2.requestId == RequestId.fromLong(2L)) &&
           assertTrue(ack3.requestId == RequestId.fromLong(3L))
-        }
       }
 
       test("should re-acknowledge duplicate/old requests") {
@@ -413,11 +578,10 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Verify only 1 request delivered to stream (duplicate skipped)
           serverReqs <- serverReqFiber.join
-        } yield {
-          assertTrue(serverReqs.size == 1) &&
+        } yield assertTrue(serverReqs.size == 1) &&
           assertTrue(ack1.requestId == RequestId.fromLong(1L)) &&
           assertTrue(ack2.requestId == RequestId.fromLong(1L)) // Re-acknowledged
-        }
+
       }
 
       test("should drop out-of-order requests (non-consecutive IDs)") {
@@ -463,11 +627,10 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
           // Should NOT receive ack for request 3 (dropped)
           // Verify only request 1 was delivered to stream
           serverReqs <- serverReqFiber.join
-        } yield {
-          assertTrue(serverReqs.size == 1) &&
+        } yield assertTrue(serverReqs.size == 1) &&
           assertTrue(serverReqs.head.requestId == RequestId.fromLong(1L)) &&
           assertTrue(ack1.requestId == RequestId.fromLong(1L))
-        }
+
       }
 
       test("should receive ServerRequest and send ServerRequestAck") {
@@ -495,9 +658,8 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
           _ <- sendServerMessage(mockServer, routingId, ServerRequest(requestId, payload, timestamp))
 
           (_, ack) <- waitForMessage[ServerRequestAck](mockServer)
-        } yield {
-          assertTrue(ack.requestId == RequestId.fromLong(1L))
-        }
+        } yield assertTrue(ack.requestId == RequestId.fromLong(1L))
+
       }
 
       test("should deliver ServerRequest to serverRequests stream") {
@@ -527,11 +689,9 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
           _ <- sendServerMessage(mockServer, routingId, ServerRequest(requestId, payload, timestamp))
 
           serverReqs <- serverReqFiber.join
-        } yield {
-          assertTrue(serverReqs.size == 1) &&
+        } yield assertTrue(serverReqs.size == 1) &&
           assertTrue(serverReqs.head.requestId == requestId) &&
           assertTrue(serverReqs.head.payload == payload)
-        }
       }
     }
 
@@ -621,11 +781,10 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Verify reconnection works with request-response
           reconnected <- verifyConnection(client, mockServer)
-        } yield {
-          assertTrue(continueMsg.sessionId == sessionId) &&
+        } yield assertTrue(continueMsg.sessionId == sessionId) &&
           assertTrue(newRoutingId != routingId) && // New connection = new routing ID
           assertTrue(reconnected)
-        }
+
       }
 
       test("should reconnect after server restart (session still exists)") {
@@ -640,7 +799,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           sessionId <- SessionId.generate()
 
-         // Simulate server restart - disconnect peer abruptly by stopping the server    
+          // Simulate server restart - disconnect peer abruptly by stopping the server
           _ <- ZIO.scoped {
             for {
               mockServer <- ZSocket.server
@@ -656,7 +815,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           mockServer <- ZSocket.server
           _ <- mockServer.bind(s"tcp://0.0.0.0:$port")
-          
+
           // Client detects disconnect and reconnects with ContinueSession
           (routingId2, continueMsg) <- expectMessage[ContinueSession](mockServer)
 

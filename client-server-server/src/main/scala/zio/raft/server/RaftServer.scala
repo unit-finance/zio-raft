@@ -260,13 +260,13 @@ object RaftServer {
               _ <- transport.disconnect(routingId).orDie
             } yield this
 
-          case ContinueSession(_, nonce) =>            
+          case ContinueSession(_, nonce) =>
             for {
               _ <- transport.sendMessage(routingId, SessionRejected(RejectionReason.NotLeader, nonce, leaderId)).orDie
               _ <- transport.disconnect(routingId).orDie
             } yield this
 
-          case KeepAlive(timestamp) =>            
+          case KeepAlive(timestamp) =>
             for {
               _ <- transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionError, None)).orDie
               _ <- transport.disconnect(routingId).orDie
@@ -283,7 +283,7 @@ object RaftServer {
 
           case CloseSession(_) =>
             ZIO.succeed(this)
-          
+
           case ConnectionClosed =>
             // Client detected OS/TCP level disconnection, just log it
             ZIO.logDebug(s"Client at $routingId reported connection closed").as(this)
@@ -403,7 +403,9 @@ object RaftServer {
                 } yield copy(sessions = newSessions)
               case None =>
                 for {
-                  _ <- transport.sendMessage(routingId, SessionRejected(RejectionReason.SessionNotFound, nonce, None)).orDie
+                  _ <- transport
+                    .sendMessage(routingId, SessionRejected(RejectionReason.SessionNotFound, nonce, None))
+                    .orDie
                   _ <- transport.disconnect(routingId).orDie
                 } yield this
             }
@@ -462,7 +464,7 @@ object RaftServer {
               case None =>
                 ZIO.succeed(this)
             }
-          
+
           case ConnectionClosed =>
             sessions.findSessionByRouting(routingId) match {
               case Some(sessionId) =>
@@ -533,7 +535,7 @@ object RaftServer {
       copy(
         connections = connections.updatedWith(sessionId)(_.map(_.copy(routingId = None))),
         routingToSession = routingToSession.removed(routingId)
-      )    
+      )
 
     def removeSession(sessionId: SessionId, routingId: RoutingId): Sessions =
       copy(

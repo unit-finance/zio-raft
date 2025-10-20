@@ -21,10 +21,8 @@ class RaftClient private (
     serverRequestQueue: Queue[ServerRequest]
 ) {
 
-  /**
-   * Start the client's main event loop.
-   * Must be called (typically forked) for the client to process messages.
-   */
+  /** Start the client's main event loop. Must be called (typically forked) for the client to process messages.
+    */
   def run(): UIO[Unit] = {
     val actionStream = ZStream
       .fromQueue(actionQueue)
@@ -77,11 +75,7 @@ class RaftClient private (
 
 object RaftClient {
 
-  def make(
-      clusterMembers: Map[MemberId, String],
-      capabilities: Map[String, String]
-  ): ZIO[Scope & ZContext, Throwable, RaftClient] = {
-    val config = ClientConfig.make(clusterMembers, capabilities)
+  def make(config: ClientConfig): ZIO[Scope & ZContext, Throwable, RaftClient] =
     for {
       validatedConfig <- ClientConfig.validated(config).mapError(new IllegalArgumentException(_))
 
@@ -97,12 +91,18 @@ object RaftClient {
       )
 
     } yield client
+
+  def make(
+      clusterMembers: Map[MemberId, String],
+      capabilities: Map[String, String]
+  ): ZIO[Scope & ZContext, Throwable, RaftClient] = {
+    val config = ClientConfig.make(clusterMembers, capabilities)
+    make(config)
   }
 
   private def createZmqTransport(config: ClientConfig) =
     for {
       socket <- ZSocket.client
-      _ <- socket.options.setImmediate(true)
       _ <- socket.options.setLinger(0)
       _ <- socket.options.setHeartbeat(1.seconds, 10.second, 30.second)
       timeoutConnectionClosed = serverMessageCodec

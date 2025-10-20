@@ -71,8 +71,7 @@ lazy val commonScalacOptions = Def.setting{
       )
     case Some((3, n)) => List(
       "-Wunused:imports",
-      "-deprecation",
-      "-source:future"
+      "-source:future",
       )
     case _            => List()
   }

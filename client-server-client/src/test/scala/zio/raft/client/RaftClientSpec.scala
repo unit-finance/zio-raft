@@ -40,7 +40,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
     */
   def expectMessage[A <: ClientMessage](
       socket: ZSocket
-  )(implicit tt: scala.reflect.TypeTest[ClientMessage, A], ct: scala.reflect.ClassTag[A]): Task[(RoutingId, A)] = {
+  )(implicit ct: scala.reflect.ClassTag[A]): Task[(RoutingId, A)] = {
     socket.receiveMsg.flatMap { msgRaw =>
       val routingId = RoutingId(msgRaw.getRoutingId)
       ZIO
@@ -62,7 +62,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
     */
   def waitForMessage[A <: ClientMessage](
       socket: ZSocket
-  )(implicit ct: scala.reflect.TypeTest[ClientMessage, A]): Task[(RoutingId, A)] =
+  )(implicit ct: scala.reflect.ClassTag[A]): Task[(RoutingId, A)] =
     for {
       msg <- socket.receiveMsg
       routingId = RoutingId(msg.getRoutingId)
@@ -100,7 +100,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
     } yield response == expectedResult
   }
 
-  override def spec = suiteAll("RaftClient with Real ZMQ") {
+  override def spec: Spec[ZContext with TestEnvironment with Scope, Any] = suiteAll("RaftClient with Real ZMQ") {
 
     // ==========================================================================
     // Session Creation Tests

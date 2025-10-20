@@ -103,7 +103,7 @@ object SnapshotStore:
       for
         snapshot <- latest.get
         result <- snapshot match
-          case None => ZIO.succeedNow((Index.zero, 0L))
+          case None => ZIO.succeed((Index.zero, 0L))
           case Some(snapshot) =>
             snapshot.stream.runCollect
               .map(_.size.toLong)

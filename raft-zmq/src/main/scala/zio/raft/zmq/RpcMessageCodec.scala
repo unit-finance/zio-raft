@@ -41,7 +41,7 @@ object RpcMessageCodec:
 
   // We can define better conversion between Chunk and ByteVector
   private def chunkCodec =
-    variableSizeBytes(int32, bytes).xmap(bv => Chunk.fromIterable(bv.toIterable), c => ByteVector(c.toIterable))
+    variableSizeBytes(int32, bytes).xmap(bv => Chunk.fromIterable(bv.toIterable), c => ByteVector(c.toArray))
 
   private def logEntryCodec[A <: Command](commandCodec: Codec[A]) = discriminated[LogEntry[A]]
     .by(uint8)

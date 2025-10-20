@@ -24,7 +24,7 @@ class ZSocket private (
         }
         .refineToOrDie[ZMQException]
       result <-
-        if (ready) ZIO.succeedNow(true)
+        if (ready) ZIO.succeed(true)
         else {
           val canceled = new AtomicBoolean(false)
           ZIO

@@ -58,8 +58,8 @@ jobs:
       run: sbt scalafmtCheck
 
     - name: Compile
-      run: sbt Test/compile
+      run: sbt +Test/compile
 
     - name: Run tests
-      run: sbt test
+      run: sbt +test
 

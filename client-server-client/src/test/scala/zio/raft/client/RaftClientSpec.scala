@@ -39,7 +39,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
   /** Receive next message, expecting specific type. Throws if wrong type. Does NOT skip keep-alives.
     */
   def expectMessage[A <: ClientMessage](
-      socket: ZSocket
+    socket: ZSocket
   )(implicit ct: scala.reflect.ClassTag[A]): Task[(RoutingId, A)] = {
     socket.receiveMsg.flatMap { msgRaw =>
       val routingId = RoutingId(msgRaw.getRoutingId)
@@ -61,7 +61,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
   /** Wait for message of specific type, automatically responding to and skipping keep-alives.
     */
   def waitForMessage[A <: ClientMessage](
-      socket: ZSocket
+    socket: ZSocket
   )(implicit ct: scala.reflect.ClassTag[A]): Task[(RoutingId, A)] =
     for {
       msg <- socket.receiveMsg
@@ -810,9 +810,12 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
               _ <- sendServerMessage(mockServer, routingId1, SessionCreated(sessionId, createMsg.nonce))
 
               _ <- verifyConnection(client, mockServer)
+
+              _ <- mockServer.disconnect(s"tcp://0.0.0.0:$port")
             } yield ()
           }
 
+          _ <- ZIO.sleep(100.millis)
           mockServer <- ZSocket.server
           _ <- mockServer.bind(s"tcp://0.0.0.0:$port")
 

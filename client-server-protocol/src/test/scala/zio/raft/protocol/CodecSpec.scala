@@ -20,7 +20,7 @@ import zio.raft.protocol.RejectionReason.*
   */
 object CodecSpec extends ZIOSpecDefault {
 
-  override def spec: Spec[Environment with TestEnvironment with Scope, Any] =
+  override def spec: Spec[Environment & TestEnvironment & Scope, Any] =
     suiteAll("Protocol Message Codec Contract") {
 
       suiteAll("Protocol Signature") {

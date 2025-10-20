@@ -16,7 +16,7 @@ import java.time.Instant
   */
 object KeepAliveSpec extends ZIOSpecDefault {
 
-  override def spec: Spec[Environment with TestEnvironment with Scope, Any] = suiteAll("Keep-Alive Protocol Contract") {
+  override def spec: Spec[Environment & TestEnvironment & Scope, Any] = suiteAll("Keep-Alive Protocol Contract") {
 
     suiteAll("KeepAlive Message") {
       test("should include client timestamp") {

@@ -15,7 +15,7 @@ import zio.raft.protocol.RejectionReason.*
   */
 object SessionManagementSpec extends ZIOSpecDefault {
 
-  override def spec: Spec[Environment with TestEnvironment with Scope, Any] = suiteAll("Session Management Contract") {
+  override def spec: Spec[Environment & TestEnvironment & Scope, Any] = suiteAll("Session Management Contract") {
 
     suiteAll("CreateSession") {
       test("should validate required capabilities") {

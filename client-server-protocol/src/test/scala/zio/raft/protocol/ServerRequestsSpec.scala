@@ -17,7 +17,7 @@ import java.time.Instant
   */
 object ServerRequestsSpec extends ZIOSpecDefault {
 
-  override def spec: Spec[Environment with TestEnvironment with Scope, Any] =
+  override def spec: Spec[Environment & TestEnvironment & Scope, Any] =
     suite("Server-Initiated Requests Contract")(
       suite("ServerRequest")(
         test("should include unique request ID and work payload") {

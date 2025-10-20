@@ -15,7 +15,7 @@ import java.time.Instant
   */
 object CommandSubmissionSpec extends ZIOSpecDefault {
 
-  override def spec: Spec[Environment with TestEnvironment with Scope, Any] = suiteAll("Command Submission Contract") {
+  override def spec: Spec[Environment & TestEnvironment & Scope, Any] = suiteAll("Command Submission Contract") {
 
     suiteAll("ClientRequest") {
       test("should include unique request ID and payload") {

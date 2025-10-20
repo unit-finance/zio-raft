@@ -24,8 +24,8 @@ sealed trait ClientMessage
   *   Client-generated nonce for response correlation
   */
 case class CreateSession(
-    capabilities: Map[String, String],
-    nonce: Nonce
+  capabilities: Map[String, String],
+  nonce: Nonce
 ) extends ClientMessage {
   require(capabilities.nonEmpty, "Capabilities must be non-empty")
 }
@@ -38,8 +38,8 @@ case class CreateSession(
   *   Client-generated nonce for response correlation
   */
 case class ContinueSession(
-    sessionId: SessionId,
-    nonce: Nonce
+  sessionId: SessionId,
+  nonce: Nonce
 ) extends ClientMessage
 
 /** Heartbeat message to maintain session liveness. Server derives session ID from ZeroMQ routing ID.
@@ -48,7 +48,7 @@ case class ContinueSession(
   *   Client-generated timestamp for RTT measurement
   */
 case class KeepAlive(
-    timestamp: Instant
+  timestamp: Instant
 ) extends ClientMessage
 
 /** Generic client request for both read and write operations. Server derives session ID from ZeroMQ routing ID.
@@ -61,9 +61,9 @@ case class KeepAlive(
   *   Timestamp when request was created (for debugging/monitoring)
   */
 case class ClientRequest(
-    requestId: RequestId,
-    payload: ByteVector,
-    createdAt: Instant
+  requestId: RequestId,
+  payload: ByteVector,
+  createdAt: Instant
 ) extends ClientMessage
 
 /** Acknowledgment of server-initiated request receipt. Server derives session ID from ZeroMQ routing ID.
@@ -72,7 +72,7 @@ case class ClientRequest(
   *   The server request ID being acknowledged
   */
 case class ServerRequestAck(
-    requestId: RequestId
+  requestId: RequestId
 ) extends ClientMessage
 
 /** Explicit session termination by client. Server derives session ID from ZeroMQ routing ID.
@@ -81,7 +81,7 @@ case class ServerRequestAck(
   *   Why the client is closing the session
   */
 case class CloseSession(
-    reason: CloseReason
+  reason: CloseReason
 ) extends ClientMessage
 
 /** Connection closed notification for OS or TCP level disconnection.

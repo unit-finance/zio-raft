@@ -213,6 +213,7 @@ lazy val clientServerProtocol = project
   .in(file("client-server-protocol"))
   .settings(
     name := "zio-raft-client-server-protocol",
+    scalafmtConfig := file(".scalafmt-cross.conf"),
     crossScalaVersions := supportedScalaVersions,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     scalacOptions ++= commonScalacOptions.value,
@@ -256,6 +257,7 @@ lazy val clientServerClient = project
   .in(file("client-server-client"))
   .settings(
     name := "zio-raft-client-server-client",
+    scalafmtConfig := file(".scalafmt-cross.conf"),
     crossScalaVersions := supportedScalaVersions,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     scalacOptions ++= commonScalacOptions.value,

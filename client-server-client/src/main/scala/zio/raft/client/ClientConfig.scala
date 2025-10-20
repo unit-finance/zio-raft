@@ -6,11 +6,11 @@ import zio.raft.protocol.MemberId
 /** Client configuration for ZIO Raft client-server communication.
   */
 case class ClientConfig(
-    clusterMembers: Map[MemberId, String],
-    capabilities: Map[String, String],
-    connectionTimeout: Duration = ClientConfig.DEFAULT_CONNECTION_TIMEOUT,
-    keepAliveInterval: Duration = ClientConfig.DEFAULT_KEEP_ALIVE_INTERVAL,
-    requestTimeout: Duration = ClientConfig.DEFAULT_REQUEST_TIMEOUT
+  clusterMembers: Map[MemberId, String],
+  capabilities: Map[String, String],
+  connectionTimeout: Duration = ClientConfig.DEFAULT_CONNECTION_TIMEOUT,
+  keepAliveInterval: Duration = ClientConfig.DEFAULT_KEEP_ALIVE_INTERVAL,
+  requestTimeout: Duration = ClientConfig.DEFAULT_REQUEST_TIMEOUT
 ) {
 
   def validate(): Either[String, Unit] = {

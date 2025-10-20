@@ -33,7 +33,7 @@ package object client {
 
   // Server-initiated request idempotency tracking
   case class ServerRequestTracker(
-      lastAcknowledgedRequestId: protocol.RequestId = protocol.RequestId.zero // Start from 0 so first request is 1
+    lastAcknowledgedRequestId: protocol.RequestId = protocol.RequestId.zero // Start from 0 so first request is 1
   ) {
 
     /** Check what to do with this server request. Returns Process, OldRequest, or OutOfOrder.
@@ -77,8 +77,8 @@ package object client {
     case object Connect extends ClientAction
     case object Disconnect extends ClientAction
     case class SubmitCommand(
-        payload: scodec.bits.ByteVector,
-        promise: Promise[Throwable, scodec.bits.ByteVector]
+      payload: scodec.bits.ByteVector,
+      promise: Promise[Throwable, scodec.bits.ByteVector]
     ) extends ClientAction
   }
 }

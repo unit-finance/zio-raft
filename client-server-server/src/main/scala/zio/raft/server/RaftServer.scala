@@ -47,25 +47,25 @@ object RaftServer {
   }
 
   case class IncomingMessage(
-      routingId: RoutingId,
-      message: ClientMessage
+    routingId: RoutingId,
+    message: ClientMessage
   )
 
   case class SessionConnection(
-      routingId: Option[RoutingId],
-      expiresAt: Instant
+    routingId: Option[RoutingId],
+    expiresAt: Instant
   )
 
   case class SessionMetadata(
-      capabilities: Map[String, String],
-      createdAt: Instant
+    capabilities: Map[String, String],
+    createdAt: Instant
   )
 
   case class PendingSession(
-      routingId: RoutingId,
-      nonce: Nonce,
-      capabilities: Map[String, String],
-      createdAt: Instant
+    routingId: RoutingId,
+    nonce: Nonce,
+    capabilities: Map[String, String],
+    createdAt: Instant
   )
 
   /** Simplified RaftServer using pure functional state machine.
@@ -74,11 +74,11 @@ object RaftServer {
     * handle events and transition to new states.
     */
   class RaftServer(
-      transport: ZmqServerTransport,
-      config: ServerConfig,
-      actionQueue: Queue[ServerAction],
-      raftActionsOut: Queue[RaftAction],
-      stateRef: Ref[ServerState]
+    transport: ZmqServerTransport,
+    config: ServerConfig,
+    actionQueue: Queue[ServerAction],
+    raftActionsOut: Queue[RaftAction],
+    stateRef: Ref[ServerState]
   ) {
 
     /** Stream of actions to forward to Raft state machine.
@@ -161,11 +161,11 @@ object RaftServer {
   /** Main loop processes unified stream of events.
     */
   private def startMainLoop(
-      transport: ZmqServerTransport,
-      config: ServerConfig,
-      actionQueue: Queue[ServerAction],
-      raftActionsOut: Queue[RaftAction],
-      stateRef: Ref[ServerState]
+    transport: ZmqServerTransport,
+    config: ServerConfig,
+    actionQueue: Queue[ServerAction],
+    raftActionsOut: Queue[RaftAction],
+    stateRef: Ref[ServerState]
   ): Task[Unit] = {
 
     val actionStream = ZStream
@@ -201,10 +201,10 @@ object RaftServer {
   sealed trait ServerState {
     def stateName: String
     def handle(
-        event: StreamEvent,
-        transport: ZmqServerTransport,
-        config: ServerConfig,
-        raftActionsOut: Queue[RaftAction]
+      event: StreamEvent,
+      transport: ZmqServerTransport,
+      config: ServerConfig,
+      raftActionsOut: Queue[RaftAction]
     ): UIO[ServerState]
   }
 
@@ -216,10 +216,10 @@ object RaftServer {
       override def stateName: String = "Follower"
 
       override def handle(
-          event: StreamEvent,
-          transport: ZmqServerTransport,
-          config: ServerConfig,
-          raftActionsOut: Queue[RaftAction]
+        event: StreamEvent,
+        transport: ZmqServerTransport,
+        config: ServerConfig,
+        raftActionsOut: Queue[RaftAction]
       ): UIO[ServerState] = {
         event match {
           case StreamEvent.IncomingClientMessage(routingId, message) =>
@@ -249,9 +249,9 @@ object RaftServer {
       }
 
       private def handleClientMessage(
-          routingId: RoutingId,
-          message: ClientMessage,
-          transport: ZmqServerTransport
+        routingId: RoutingId,
+        message: ClientMessage,
+        transport: ZmqServerTransport
       ): UIO[ServerState] = {
         message match {
           case CreateSession(_, nonce) =>
@@ -294,15 +294,15 @@ object RaftServer {
     /** Leader state - manages sessions and forwards requests to Raft.
       */
     case class Leader(
-        sessions: Sessions
+      sessions: Sessions
     ) extends ServerState {
       override def stateName: String = "Leader"
 
       override def handle(
-          event: StreamEvent,
-          transport: ZmqServerTransport,
-          config: ServerConfig,
-          raftActionsOut: Queue[RaftAction]
+        event: StreamEvent,
+        transport: ZmqServerTransport,
+        config: ServerConfig,
+        raftActionsOut: Queue[RaftAction]
       ): UIO[ServerState] = {
         event match {
           case StreamEvent.IncomingClientMessage(routingId, message) =>
@@ -367,11 +367,11 @@ object RaftServer {
       }
 
       private def handleClientMessage(
-          routingId: RoutingId,
-          message: ClientMessage,
-          transport: ZmqServerTransport,
-          raftActionsOut: Queue[RaftAction],
-          config: ServerConfig
+        routingId: RoutingId,
+        message: ClientMessage,
+        transport: ZmqServerTransport,
+        raftActionsOut: Queue[RaftAction],
+        config: ServerConfig
       ): UIO[ServerState] = {
         message match {
           case CreateSession(capabilities, nonce) =>
@@ -483,17 +483,17 @@ object RaftServer {
   /** Immutable sessions management.
     */
   case class Sessions(
-      metadata: Map[SessionId, SessionMetadata],
-      connections: Map[SessionId, SessionConnection],
-      routingToSession: Map[RoutingId, SessionId],
-      pendingSessions: Map[SessionId, PendingSession]
+    metadata: Map[SessionId, SessionMetadata],
+    connections: Map[SessionId, SessionConnection],
+    routingToSession: Map[RoutingId, SessionId],
+    pendingSessions: Map[SessionId, PendingSession]
   ) {
     def addPending(
-        sessionId: SessionId,
-        routingId: RoutingId,
-        nonce: Nonce,
-        capabilities: Map[String, String],
-        now: Instant
+      sessionId: SessionId,
+      routingId: RoutingId,
+      nonce: Nonce,
+      capabilities: Map[String, String],
+      now: Instant
     ): Sessions = {
       copy(
         pendingSessions = pendingSessions.updated(sessionId, PendingSession(routingId, nonce, capabilities, now))
@@ -501,9 +501,9 @@ object RaftServer {
     }
 
     def confirmSession(
-        sessionId: SessionId,
-        now: Instant,
-        config: ServerConfig
+      sessionId: SessionId,
+      now: Instant,
+      config: ServerConfig
     ): Option[(RoutingId, Nonce, Sessions)] = {
       pendingSessions.get(sessionId).map { pending =>
         val expiresAt = now.plus(config.sessionTimeout)

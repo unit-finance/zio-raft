@@ -25,8 +25,8 @@ sealed trait ServerMessage
   *   Echoed client nonce from CreateSession request
   */
 case class SessionCreated(
-    sessionId: SessionId,
-    nonce: Nonce
+  sessionId: SessionId,
+  nonce: Nonce
 ) extends ServerMessage
 
 /** Successful session resumption. Server responds to same ZeroMQ routing ID, no session ID needed.
@@ -35,7 +35,7 @@ case class SessionCreated(
   *   Echoed client nonce from ContinueSession request
   */
 case class SessionContinued(
-    nonce: Nonce
+  nonce: Nonce
 ) extends ServerMessage
 
 /** Session creation or continuation rejection. Server responds to same ZeroMQ routing ID, no session ID needed.
@@ -48,9 +48,9 @@ case class SessionContinued(
   *   Optional current leader ID for client redirection
   */
 case class SessionRejected(
-    reason: RejectionReason,
-    nonce: Nonce,
-    leaderId: Option[MemberId]
+  reason: RejectionReason,
+  nonce: Nonce,
+  leaderId: Option[MemberId]
 ) extends ServerMessage
 
 /** Server-initiated session termination. Server responds to same ZeroMQ routing ID, no session ID needed.
@@ -61,8 +61,8 @@ case class SessionRejected(
   *   Optional leader ID if reason is leadership-related
   */
 case class SessionClosed(
-    reason: SessionCloseReason,
-    leaderId: Option[MemberId]
+  reason: SessionCloseReason,
+  leaderId: Option[MemberId]
 ) extends ServerMessage
 
 /** Heartbeat acknowledgment echoing client timestamp. Server responds to same ZeroMQ routing ID, no session ID needed.
@@ -71,7 +71,7 @@ case class SessionClosed(
   *   Echoed timestamp from client KeepAlive for RTT measurement
   */
 case class KeepAliveResponse(
-    timestamp: Instant
+  timestamp: Instant
 ) extends ServerMessage
 
 /** Client request execution result. Server responds to same ZeroMQ routing ID, no session ID needed.
@@ -82,8 +82,8 @@ case class KeepAliveResponse(
   *   Binary result data from command/query execution
   */
 case class ClientResponse(
-    requestId: RequestId,
-    result: ByteVector
+  requestId: RequestId,
+  result: ByteVector
 ) extends ServerMessage
 
 /** Server-initiated work dispatch to client (one-way pattern). Server targets via ZeroMQ routing ID, no session ID
@@ -97,9 +97,9 @@ case class ClientResponse(
   *   Timestamp when request was created
   */
 case class ServerRequest(
-    requestId: RequestId,
-    payload: ByteVector,
-    createdAt: Instant
+  requestId: RequestId,
+  payload: ByteVector,
+  createdAt: Instant
 ) extends ServerMessage
 
 // ============================================================================

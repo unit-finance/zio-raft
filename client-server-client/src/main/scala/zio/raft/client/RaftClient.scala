@@ -15,10 +15,10 @@ import zio.raft.protocol.Codecs.{clientMessageCodec, serverMessageCodec}
   * to new states.
   */
 class RaftClient private (
-    zmqTransport: ZmqClientTransport,
-    config: ClientConfig,
-    actionQueue: Queue[ClientAction],
-    serverRequestQueue: Queue[ServerRequest]
+  zmqTransport: ZmqClientTransport,
+  config: ClientConfig,
+  actionQueue: Queue[ClientAction],
+  serverRequestQueue: Queue[ServerRequest]
 ) {
 
   /** Start the client's main event loop. Must be called (typically forked) for the client to process messages.
@@ -93,8 +93,8 @@ object RaftClient {
     } yield client
 
   def make(
-      clusterMembers: Map[MemberId, String],
-      capabilities: Map[String, String]
+    clusterMembers: Map[MemberId, String],
+    capabilities: Map[String, String]
   ): ZIO[Scope & ZContext, Throwable, RaftClient] = {
     val config = ClientConfig.make(clusterMembers, capabilities)
     make(config)
@@ -118,11 +118,11 @@ object RaftClient {
   /** Main loop accepts initial state as parameter.
     */
   private def startMainLoop(
-      transport: ZmqClientTransport,
-      config: ClientConfig,
-      actionQueue: Queue[ClientAction],
-      serverRequestQueue: Queue[ServerRequest],
-      initialState: ClientState
+    transport: ZmqClientTransport,
+    config: ClientConfig,
+    actionQueue: Queue[ClientAction],
+    serverRequestQueue: Queue[ServerRequest],
+    initialState: ClientState
   ): Task[Unit] = {
 
     val actionStream = ZStream
@@ -160,10 +160,10 @@ object RaftClient {
   private sealed trait ClientState {
     def stateName: String
     def handle(
-        event: StreamEvent,
-        transport: ZmqClientTransport,
-        config: ClientConfig,
-        serverRequestQueue: Queue[ServerRequest]
+      event: StreamEvent,
+      transport: ZmqClientTransport,
+      config: ClientConfig,
+      serverRequestQueue: Queue[ServerRequest]
     ): UIO[ClientState]
   }
 
@@ -173,10 +173,10 @@ object RaftClient {
       override def stateName: String = "Disconnected"
 
       override def handle(
-          event: StreamEvent,
-          transport: ZmqClientTransport,
-          config: ClientConfig,
-          serverRequestQueue: Queue[ServerRequest]
+        event: StreamEvent,
+        transport: ZmqClientTransport,
+        config: ClientConfig,
+        serverRequestQueue: Queue[ServerRequest]
       ): UIO[ClientState] = {
         event match {
           case StreamEvent.Action(ClientAction.Connect) =>
@@ -218,13 +218,13 @@ object RaftClient {
     /** Connecting to create a NEW session (no existing sessionId).
       */
     private case class ConnectingNewSession(
-        capabilities: Map[String, String],
-        nonce: Nonce,
-        clusterMembers: Map[MemberId, String],
-        currentMemberId: MemberId,
-        createdAt: Instant,
-        nextRequestId: RequestIdRef,
-        pendingRequests: PendingRequests
+      capabilities: Map[String, String],
+      nonce: Nonce,
+      clusterMembers: Map[MemberId, String],
+      currentMemberId: MemberId,
+      createdAt: Instant,
+      nextRequestId: RequestIdRef,
+      pendingRequests: PendingRequests
     ) extends ClientState {
       override def stateName: String = "ConnectingNewSession"
 
@@ -238,9 +238,9 @@ object RaftClient {
 
       /** Connect to a specific member or use hint */
       private def connectToMember(
-          targetMemberId: Option[MemberId],
-          transport: ZmqClientTransport,
-          logPrefix: String
+        targetMemberId: Option[MemberId],
+        transport: ZmqClientTransport,
+        logPrefix: String
       ): UIO[ConnectingNewSession] = {
         val (memberId, address) = targetMemberId
           .flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
@@ -259,10 +259,10 @@ object RaftClient {
       }
 
       override def handle(
-          event: StreamEvent,
-          transport: ZmqClientTransport,
-          config: ClientConfig,
-          serverRequestQueue: Queue[ServerRequest]
+        event: StreamEvent,
+        transport: ZmqClientTransport,
+        config: ClientConfig,
+        serverRequestQueue: Queue[ServerRequest]
       ): UIO[ClientState] = {
         event match {
           case StreamEvent.ServerMsg(SessionCreated(sessionId, responseNonce)) =>
@@ -354,15 +354,15 @@ object RaftClient {
     /** Connecting to resume an EXISTING session (has sessionId).
       */
     private case class ConnectingExistingSession(
-        sessionId: SessionId,
-        capabilities: Map[String, String],
-        nonce: Nonce,
-        clusterMembers: Map[MemberId, String],
-        currentMemberId: MemberId,
-        createdAt: Instant,
-        serverRequestTracker: ServerRequestTracker,
-        nextRequestId: RequestIdRef,
-        pendingRequests: PendingRequests
+      sessionId: SessionId,
+      capabilities: Map[String, String],
+      nonce: Nonce,
+      clusterMembers: Map[MemberId, String],
+      currentMemberId: MemberId,
+      createdAt: Instant,
+      serverRequestTracker: ServerRequestTracker,
+      nextRequestId: RequestIdRef,
+      pendingRequests: PendingRequests
     ) extends ClientState {
       override def stateName: String = s"ConnectingExistingSession($sessionId)"
 
@@ -376,9 +376,9 @@ object RaftClient {
 
       /** Connect to a specific member or use hint */
       private def connectToMember(
-          targetMemberId: Option[MemberId],
-          transport: ZmqClientTransport,
-          logPrefix: String
+        targetMemberId: Option[MemberId],
+        transport: ZmqClientTransport,
+        logPrefix: String
       ): UIO[ConnectingExistingSession] = {
         val (memberId, address) = targetMemberId
           .flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
@@ -397,10 +397,10 @@ object RaftClient {
       }
 
       override def handle(
-          event: StreamEvent,
-          transport: ZmqClientTransport,
-          config: ClientConfig,
-          serverRequestQueue: Queue[ServerRequest]
+        event: StreamEvent,
+        transport: ZmqClientTransport,
+        config: ClientConfig,
+        serverRequestQueue: Queue[ServerRequest]
       ): UIO[ClientState] = {
         event match {
           case StreamEvent.ServerMsg(SessionContinued(responseNonce)) =>
@@ -495,14 +495,14 @@ object RaftClient {
     }
 
     private case class Connected(
-        sessionId: SessionId,
-        capabilities: Map[String, String],
-        createdAt: Instant,
-        serverRequestTracker: ServerRequestTracker,
-        nextRequestId: RequestIdRef,
-        pendingRequests: PendingRequests,
-        clusterMembers: Map[MemberId, String],
-        currentMemberId: MemberId
+      sessionId: SessionId,
+      capabilities: Map[String, String],
+      createdAt: Instant,
+      serverRequestTracker: ServerRequestTracker,
+      nextRequestId: RequestIdRef,
+      pendingRequests: PendingRequests,
+      clusterMembers: Map[MemberId, String],
+      currentMemberId: MemberId
     ) extends ClientState {
       override def stateName: String = s"Connected($sessionId)"
 
@@ -518,9 +518,9 @@ object RaftClient {
         * otherwise falls back to next member.
         */
       private def reconnectTo(
-          targetMemberId: Option[MemberId],
-          transport: ZmqClientTransport,
-          logMessage: String
+        targetMemberId: Option[MemberId],
+        transport: ZmqClientTransport,
+        logMessage: String
       ): UIO[ConnectingExistingSession] = {
         val (memberId, address) = targetMemberId
           .flatMap(id => clusterMembers.get(id).map(addr => (id, addr)))
@@ -548,10 +548,10 @@ object RaftClient {
       }
 
       override def handle(
-          event: StreamEvent,
-          transport: ZmqClientTransport,
-          config: ClientConfig,
-          serverRequestQueue: Queue[ServerRequest]
+        event: StreamEvent,
+        transport: ZmqClientTransport,
+        config: ClientConfig,
+        serverRequestQueue: Queue[ServerRequest]
       ): UIO[ClientState] = {
         event match {
           case StreamEvent.Action(ClientAction.Disconnect) =>
@@ -663,13 +663,13 @@ object RaftClient {
   /** Manages pending requests with lastSentAt timestamps for retry.
     */
   case class PendingRequests(
-      requests: Map[RequestId, PendingRequestData]
+    requests: Map[RequestId, PendingRequestData]
   ) {
     def add(
-        requestId: RequestId,
-        payload: ByteVector,
-        promise: Promise[Throwable, ByteVector],
-        sentAt: Instant
+      requestId: RequestId,
+      payload: ByteVector,
+      promise: Promise[Throwable, ByteVector],
+      sentAt: Instant
     ): PendingRequests =
       copy(requests = requests.updated(requestId, PendingRequestData(payload, promise, sentAt, sentAt)))
 
@@ -716,10 +716,10 @@ object RaftClient {
   }
 
   case class PendingRequestData(
-      payload: ByteVector,
-      promise: Promise[Throwable, ByteVector],
-      createdAt: Instant,
-      lastSentAt: Instant
+    payload: ByteVector,
+    promise: Promise[Throwable, ByteVector],
+    createdAt: Instant,
+    lastSentAt: Instant
   )
 
   object PendingRequests {

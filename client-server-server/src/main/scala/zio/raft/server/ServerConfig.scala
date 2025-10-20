@@ -5,9 +5,9 @@ import zio.*
 /** Simple server configuration.
   */
 case class ServerConfig(
-    bindAddress: String,
-    sessionTimeout: Duration,
-    cleanupInterval: Duration
+  bindAddress: String,
+  sessionTimeout: Duration,
+  cleanupInterval: Duration
 )
 
 object ServerConfig {

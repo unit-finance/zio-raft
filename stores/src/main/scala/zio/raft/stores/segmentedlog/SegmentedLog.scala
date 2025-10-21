@@ -78,7 +78,7 @@ class SegmentedLog[A <: Command: Codec](
       )
 
   override def storeLog(entry: LogEntry[A]) =
-    for {
+    for
       logFile <- currentSegment.get
       _ <- logFile.writeEntry(entry)
 
@@ -90,10 +90,10 @@ class SegmentedLog[A <: Command: Codec](
       // We allow a file to exceed the maximum size, but immediately after that we create a new file
       logFileSize <- logFile.size
       _ <- ZIO.when(logFileSize > maxLogFileSize)(createNextSegment())
-    } yield ()
+    yield ()
 
   override def storeLogs(entries: List[LogEntry[A]]): UIO[Unit] =
-    for {
+    for
       logFile <- currentSegment.get
       _ <- logFile.writeEntries(entries)
 
@@ -106,7 +106,7 @@ class SegmentedLog[A <: Command: Codec](
       // We allow a file to exceed the maximum size, but immediately after that we create a new file
       logFileSize <- logFile.size
       _ <- ZIO.when(logFileSize > maxLogFileSize)(createNextSegment())
-    } yield ()
+    yield ()
 
   override def discardEntireLog(previousIndex: Index, previousTerm: Term): UIO[Unit] =
     for
@@ -192,7 +192,7 @@ class SegmentedLog[A <: Command: Codec](
     yield ()
 
   private def createNextSegment(): ZIO[Any, Nothing, Unit] =
-    for {
+    for
       firstIndex <- lastIndex.map(_.plusOne)
       previousTerm <- lastTerm
       newSegment <- SegmentedLog.createNewSegment[A](logDirectory, segmentMetadataDatabase, firstIndex, previousTerm)
@@ -202,7 +202,7 @@ class SegmentedLog[A <: Command: Codec](
         s"Creating new segment, old segment ${oldSegment.firstIndex}, old file size: $oldSegmentSize, new file ${firstIndex}"
       )
       _ <- currentSegment.switch(newSegment)
-    } yield ()
+    yield ()
 
   // TODO: this should be a stream or in memory
   private def listSegments =
@@ -239,7 +239,7 @@ object SegmentedLog:
     logDirectory: String,
     maxLogFileSize: Long = 1024 * 1024 * 100 /*100 MB*/
   ): ZIO[Environment & Scope, Nothing, SegmentedLog[A]] =
-    for {
+    for
       database <- SegmentMetadataDatabase.make
       segments <- database.getAll
 
@@ -265,4 +265,4 @@ object SegmentedLog:
       (lastTerm, lastIndex) = tuple
       lastIndexRef <- LocalLongRef.make(lastIndex.value).map(_.dimap[Index](Index(_), _.value))
       lastTermRef <- LocalLongRef.make(lastTerm.value).map(_.dimap[Term](Term(_), _.value))
-    } yield new SegmentedLog[A](logDirectory, maxLogFileSize, currentFile, lastIndexRef, lastTermRef, database)
+    yield new SegmentedLog[A](logDirectory, maxLogFileSize, currentFile, lastIndexRef, lastTermRef, database)

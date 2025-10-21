@@ -13,7 +13,7 @@ import zio.FiberRefs
 import zio.LogSpan
 import zio.Trace
 import java.util.concurrent.ConcurrentLinkedQueue
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 object RaftIntegrationSpec extends ZIOSpecDefault:
 

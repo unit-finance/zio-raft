@@ -57,10 +57,9 @@ case class NotALeaderError(leaderId: Option[MemberId])
 
 type CommandPromise[A] = Promise[NotALeaderError, A]
 
-sealed trait LogEntry[+A <: Command] {
+sealed trait LogEntry[+A <: Command]:
   val term: Term
   val index: Index
-}
 object LogEntry:
   case class CommandLogEntry[A <: Command](command: A, val term: Term, val index: Index)
       extends LogEntry[A]

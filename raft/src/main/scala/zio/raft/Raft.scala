@@ -240,7 +240,7 @@ class Raft[S, A <: Command](
               else if success then
                 for
                   _ <- ZIO.when(m.previousIndex < lastIndex)(
-                    ZIO.foreachDiscard(m.entries)(entry => {
+                    ZIO.foreachDiscard(m.entries)(entry =>
                       for
                         logTerm <- logStore.logTerm(entry.index)
                         _ <- ZIO.when(
@@ -249,7 +249,7 @@ class Raft[S, A <: Command](
                           logStore.deleteFrom(entry.index)
                         )
                       yield ()
-                    })
+                    )
                   )
                   _ <- logStore.storeLogs(m.entries)
                   messageLastIndex = m.entries.last.index
@@ -928,10 +928,10 @@ class Raft[S, A <: Command](
     // todo: leader only
     for
       promiseArg <- Promise.make[NotALeaderError, commandArg.Response]
-      _ <- commandsQueue.offer(new CommandMessage {
+      _ <- commandsQueue.offer(new CommandMessage:
         val command = commandArg
         val promise = promiseArg.asInstanceOf
-      })
+      )
       res <- promiseArg.await
     yield (res)
 

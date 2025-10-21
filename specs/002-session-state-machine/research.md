@@ -87,10 +87,11 @@ This document consolidates research and architectural decisions for implementing
 **Implementation**:
 ```scala
 // Dirty read (no ZIO effect needed - direct state access)
-val mayNeedRetry = stateMachine.hasPendingRequests()
+val retryThreshold = Instant.now().minusSeconds(retryInterval)
+val mayNeedRetry = stateMachine.hasPendingRequests(state, retryThreshold)
 if (mayNeedRetry) {
   // Send authoritative command through Raft
-  sendCommand(GetRequestsForRetry())
+  sendCommand(GetRequestsForRetry(retryThreshold))
 }
 ```
 

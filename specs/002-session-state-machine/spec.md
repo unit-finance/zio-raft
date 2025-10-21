@@ -98,6 +98,7 @@ As a developer building a distributed application on top of Raft with the client
 
 ## Requirements
 
+
 ### Functional Requirements
 
 #### State Machine Interface & Execution

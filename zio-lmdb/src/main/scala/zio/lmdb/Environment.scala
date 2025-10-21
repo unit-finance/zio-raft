@@ -55,16 +55,15 @@ object Environment:
       ZIO
         .acquireRelease(ZIO.attemptBlocking(b.open(file, flags*)))(env => ZIO.attemptBlocking(env.close()).orDie)
         .map(e =>
-          new Environment {
+          new Environment:
             val env = e
-          }
         )
 
     def layer(file: File) = ZLayer.scoped(build(file))
 
   final class Transact[R](env: Env[Array[Byte]]):
     def apply[E, A](zio: => ZIO[TransactionScope & R, E, A]): ZIO[R, E, A] =
-      ZIO.uninterruptibleMask(restore => {
+      ZIO.uninterruptibleMask(restore =>
         for
           txn <- ZIO.attemptBlocking(env.txnWrite()).orDie
           exit <- restore(zio.provideSomeLayer(ZLayer.succeed(TransactionScope(txn)))).exit
@@ -74,18 +73,18 @@ object Environment:
           _ <- ZIO.attemptBlocking(txn.close()).orDie
           result <- ZIO.done(exit)
         yield result
-      })
+      )
 
   final class TransactReadOnly[R](env: Env[Array[Byte]]):
     def apply[E, A](zio: => ZIO[TransactionScope & R, E, A]): ZIO[R, E, A] =
-      ZIO.uninterruptibleMask(restore => {
+      ZIO.uninterruptibleMask(restore =>
         for
           txn <- ZIO.attemptBlocking(env.txnRead()).orDie
           exit <- restore(zio.provideSomeLayer(ZLayer.succeed(TransactionScope(txn)))).exit
           _ <- ZIO.attemptBlocking(txn.close()).orDie
           result <- ZIO.done(exit)
         yield result
-      })
+      )
 
   final class TransactPartiallyApplied[R](private val dummy: Boolean = true) extends AnyVal:
     def apply[E, A](zio: => ZIO[TransactionScope & R, E, A]): ZIO[Environment & R, E, A] =
@@ -94,3 +93,4 @@ object Environment:
   final class TransactReadOnlyPartiallyApplied[R](private val dummy: Boolean = true) extends AnyVal:
     def apply[E, A](zio: => ZIO[TransactionScope & R, E, A]): ZIO[Environment & R, E, A] =
       ZIO.service[Environment].flatMap(_.transactReadOnly(zio))
+end Environment

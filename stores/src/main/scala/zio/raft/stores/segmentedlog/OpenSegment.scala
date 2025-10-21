@@ -47,12 +47,12 @@ class OpenSegment[A <: Command: Codec](
     else ZIO.none
 
   def getLastTermIndex[A <: Command: Codec]: ZIO[Any, Nothing, (Term, Index)] =
-    for {
+    for
       last <- makeStream(channel)
         .via(recordsOnly)
         .run(lastAndDecode)
         .orDie
-    } yield last match
+    yield last match
       case None    => (previousTerm, firstIndex.minusOne)
       case Some(e) => (e.term, e.index)
 
@@ -62,19 +62,19 @@ class OpenSegment[A <: Command: Codec](
   // segment size is just a recommendation at this moment.
   // TODO: we should only write entries that will fit in the segment and return the rest to be written in the next segment
   def writeEntries(entries: List[LogEntry[A]]): ZIO[Any, Nothing, Int] =
-    for {
+    for
       bytes <- ZIO.attempt(logEntriesCodec[A].encode(entries).require.toByteVector).orDie
       position <- positionRef.get
       written <- channel.write(bytes, position).orDie
       _ <- channel.force(true).orDie
       _ <- positionRef.update(_ + written)
-    } yield written
+    yield written
 
   def deleteFrom(minInclusive: Index): ZIO[Any, Nothing, Unit] =
     for
       // we need to find the offset of the entry to truncate the file
       offset <-
-        if (minInclusive == firstIndex) ZIO.succeed(BaseTransducer.headerSize)
+        if minInclusive == firstIndex then ZIO.succeed(BaseTransducer.headerSize)
         else
           makeStream(channel)
             .via(recordsOnly)
@@ -174,6 +174,7 @@ class OpenSegment[A <: Command: Codec](
     yield ()
 
   def close() = channel.close.orDie
+end OpenSegment
 
 object OpenSegment:
   def createNewSegment[A <: Command: Codec](
@@ -184,9 +185,9 @@ object OpenSegment:
   ): ZIO[Any, Nothing, ZIO[Scope, Nothing, OpenSegment[A]]] =
     val fullPath = Path(logDirectory, fileName)
 
-    for {
+    for
       _ <- createFileWithHeader(logDirectory, fullPath)
-    } yield openSegment[A](fullPath, firstIndex, previousTerm)
+    yield openSegment[A](fullPath, firstIndex, previousTerm)
 
   // atomically create a new segment with an empty log entry with the previous index and term
 
@@ -248,3 +249,4 @@ object OpenSegment:
 
       segment = new OpenSegment[A](fullPath, channel, positionRef, firstIndex, previousTerm)
     yield segment
+end OpenSegment

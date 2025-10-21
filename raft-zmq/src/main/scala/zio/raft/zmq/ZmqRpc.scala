@@ -94,6 +94,7 @@ class ZmqRpc[A <: Command: Codec](server: ZSocket, clients: Map[MemberId, ZSocke
       .collectRight
       .via(RemoveDuplicate[A]()) // Because the raft messaging might be very chatty, we want to remove duplicates
       .catchAll(err => ZStream.die(err))
+end ZmqRpc
 
 object ZmqRpc:
   def make[A <: Command: Codec](bindAddress: String, peers: Map[MemberId, String]) =

@@ -46,7 +46,7 @@ class BaseTransducer(ref: Ref[BaseTransducer.State], validateChecksum: Boolean):
       case ReadRecordType(offset, index, bits, chunkBuilder, crcBuilder) =>
         isEntryCodec.decode(bits) match
           case Successful(decodeResult) =>
-            if (decodeResult.value)
+            if decodeResult.value then
               process(results, ReadSize(offset, index, decodeResult.remainder, chunkBuilder, crcBuilder))
             else process(results, ReadChecksum(offset, index, decodeResult.remainder, chunkBuilder, crcBuilder))
           case Failure(e: Err.InsufficientBits) =>
@@ -131,6 +131,7 @@ class BaseTransducer(ref: Ref[BaseTransducer.State], validateChecksum: Boolean):
             ref.set(ReadChecksum(offset, index, bitsVector, chunkBuilder, crcBuilder)).as(results)
           case f: Failure =>
             ZIO.fail(new Throwable(s"Error decoding checksum: ${f.cause.messageWithContext}"))
+end BaseTransducer
 object BaseTransducer:
   val headerSize = fileHeaderCodec.sizeBound.exact.get / 8
   val sizeSize = entrySizeCodec.sizeBound.exact.get / 8
@@ -198,3 +199,4 @@ object BaseTransducer:
         .make[State](ReadFileHeader(firstIndex, BitVector.empty))
         .map(ref => new BaseTransducer(ref, validateChecksum).apply)
     )
+end BaseTransducer

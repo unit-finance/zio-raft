@@ -67,6 +67,7 @@ object internal:
 
   object CurrentSegment:
     def make[A <: Command](file: ZIO[Scope, Nothing, OpenSegment[A]]) =
-      for {
+      for
         ref <- ScopedRef.fromAcquire(file.asSome)
-      } yield new CurrentSegment(ref)
+      yield new CurrentSegment(ref)
+end internal

@@ -216,6 +216,7 @@ class FileSnapshotStore(
       _ <- updateLatest(snapshot.previousTerm, snapshot.previousIndex, size)
       _ <- deleteOldSnapshots
     yield ()
+end FileSnapshotStore
 
 object FileSnapshotStore:
   def make(directory: Path): ZIO[Environment, Nothing, FileSnapshotStore] =

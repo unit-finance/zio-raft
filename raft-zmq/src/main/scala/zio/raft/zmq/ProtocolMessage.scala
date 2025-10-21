@@ -19,5 +19,3 @@ object ProtocolMessage:
       .typecase(2, RpcMessageCodec.codec[A].as[ProtocolMessage.Rpc[A]])
 
   private def memberIdCodec = utf8_32.xmap(MemberId(_), _.value)
-
-end ProtocolMessage

@@ -105,3 +105,4 @@ class ChecksummedList[A](codec: Codec[A]) extends Codec[List[A]]:
     Attempt.fromErrOption(error, DecodeResult(bldr.result, remaining))
 
   override def toString = s"ChecksummedList($codec)"
+end ChecksummedList

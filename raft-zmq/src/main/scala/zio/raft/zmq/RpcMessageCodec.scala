@@ -107,3 +107,4 @@ object RpcMessageCodec:
     .by(uint8)
     .typecase(0, (memberIdCodec :: termCodec :: indexCodec :: bool(8)).as[InstallSnapshotResult.Success[A]])
     .typecase(1, (memberIdCodec :: termCodec :: indexCodec).as[InstallSnapshotResult.Failure[A]])
+end RpcMessageCodec

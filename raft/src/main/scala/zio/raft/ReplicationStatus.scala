@@ -67,6 +67,7 @@ class ReplicationStatus(val peerStatus: Map[MemberId, PeerReplicationStatus]):
     peerStatus.get(peer) match
       case Some(PeerReplicationStatus.Snapshot(_, _)) => true
       case _                                          => false
+end ReplicationStatus
 
 object ReplicationStatus:
   def apply(peers: Peers) = new ReplicationStatus(

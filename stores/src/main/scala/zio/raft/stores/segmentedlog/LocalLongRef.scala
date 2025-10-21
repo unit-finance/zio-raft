@@ -2,7 +2,8 @@ package zio.raft.stores.segmentedlog
 
 import zio.{UIO, ZIO}
 
-sealed trait LocalLongRef[A] { self =>
+sealed trait LocalLongRef[A]:
+  self =>
   def get: UIO[A]
 
   def set(a: A): UIO[Unit]
@@ -14,11 +15,11 @@ sealed trait LocalLongRef[A] { self =>
   def modify[B](f: A => (B, A)): UIO[B]
 
   def dimap[B](ab: A => B, ba: B => A): LocalLongRef[B]
-}
 object LocalLongRef:
   def make(value: Long): UIO[LocalLongRef[Long]] = ZIO.succeed(new VolatileLongRef(value))
 
-  private class VolatileLongRef(@volatile private var value: Long) extends LocalLongRef[Long] { self =>
+  private class VolatileLongRef(@volatile private var value: Long) extends LocalLongRef[Long]:
+    self =>
     def get = ZIO.succeed(value)
 
     def set(a: Long) = ZIO.succeed(this.value = a)
@@ -46,9 +47,9 @@ object LocalLongRef:
         def longToA(s: S) = ab(s)
 
         def aToLong(a: B) = ba(a)
-  }
 
-  private abstract class Derived[A] extends LocalLongRef[A] { self =>
+  private abstract class Derived[A] extends LocalLongRef[A]:
+    self =>
     val value: VolatileLongRef
 
     def longToA(s: Long): A
@@ -74,4 +75,4 @@ object LocalLongRef:
         def aToLong(b: B): Long =
           self.aToLong(ba(b))
         val value = self.value
-  }
+end LocalLongRef

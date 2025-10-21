@@ -64,6 +64,7 @@ class ReadOnlySegment[A <: Command: Codec](
   def delete = Files.delete(path).orDie
 
   override def toString(): String = s"Segment($firstIndex)"
+end ReadOnlySegment
 object ReadOnlySegment:
   def open[A <: Command: Codec](logDirectory: String, fileName: String, firstIndex: Index, lastIndex: Option[Index]) =
     val path = Path(logDirectory, fileName)

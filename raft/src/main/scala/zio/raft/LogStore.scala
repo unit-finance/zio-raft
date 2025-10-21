@@ -33,8 +33,6 @@ trait LogStore[A <: Command]:
         case Some(ourTerm) if ourTerm <= term => ZIO.succeed((ourTerm, index))
         case Some(ourTerm)                    => findConflictByTerm(term, index.minusOne)
 
-end LogStore
-
 object LogStore:
   def makeInMemory[A <: Command]: ZIO[Any, Nothing, InMemoryLogStore[A]] =
     for logs <- Ref.make(List.empty[LogEntry[A]])

@@ -111,3 +111,5 @@ object State:
     def completeReads(index: Index, readState: S): UIO[Leader[S]] =
       for pendingReads <- pendingReads.resolveReadsForCommand(index, readState)
       yield this.copy(pendingReads = pendingReads)
+  end Leader
+end State

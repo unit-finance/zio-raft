@@ -131,6 +131,7 @@ class BaseTransducer(ref: Ref[BaseTransducer.State], validateChecksum: Boolean):
             ref.set(ReadChecksum(offset, index, bitsVector, chunkBuilder, crcBuilder)).as(results)
           case f: Failure =>
             ZIO.fail(new Throwable(s"Error decoding checksum: ${f.cause.messageWithContext}"))
+end BaseTransducer
 object BaseTransducer:
   val headerSize = fileHeaderCodec.sizeBound.exact.get / 8
   val sizeSize = entrySizeCodec.sizeBound.exact.get / 8
@@ -198,3 +199,4 @@ object BaseTransducer:
         .make[State](ReadFileHeader(firstIndex, BitVector.empty))
         .map(ref => new BaseTransducer(ref, validateChecksum).apply)
     )
+end BaseTransducer

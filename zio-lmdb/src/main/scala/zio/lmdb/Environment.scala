@@ -93,3 +93,4 @@ object Environment:
   final class TransactReadOnlyPartiallyApplied[R](private val dummy: Boolean = true) extends AnyVal:
     def apply[E, A](zio: => ZIO[TransactionScope & R, E, A]): ZIO[Environment & R, E, A] =
       ZIO.service[Environment].flatMap(_.transactReadOnly(zio))
+end Environment

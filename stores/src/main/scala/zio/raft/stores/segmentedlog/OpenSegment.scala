@@ -174,6 +174,7 @@ class OpenSegment[A <: Command: Codec](
     yield ()
 
   def close() = channel.close.orDie
+end OpenSegment
 
 object OpenSegment:
   def createNewSegment[A <: Command: Codec](
@@ -248,3 +249,4 @@ object OpenSegment:
 
       segment = new OpenSegment[A](fullPath, channel, positionRef, firstIndex, previousTerm)
     yield segment
+end OpenSegment

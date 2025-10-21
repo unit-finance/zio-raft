@@ -39,8 +39,6 @@ class Database(dbi: Dbi[Array[Byte]]):
       )
       .map(kv => kv.key() -> kv.`val`())
 
-end Database
-
 object Database:
   def open(name: String, flags: DbiFlags*): ZIO[Environment, Throwable, Database] =
     for

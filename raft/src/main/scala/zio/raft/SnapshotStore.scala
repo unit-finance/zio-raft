@@ -111,3 +111,5 @@ object SnapshotStore:
       yield result
 
     override def latestSnapshot = latest.get
+  end InMemorySnapshotStore
+end SnapshotStore

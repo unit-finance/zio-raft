@@ -70,3 +70,4 @@ object internal:
       for
         ref <- ScopedRef.fromAcquire(file.asSome)
       yield new CurrentSegment(ref)
+end internal

@@ -266,3 +266,4 @@ object SegmentedLog:
       lastIndexRef <- LocalLongRef.make(lastIndex.value).map(_.dimap[Index](Index(_), _.value))
       lastTermRef <- LocalLongRef.make(lastTerm.value).map(_.dimap[Term](Term(_), _.value))
     yield new SegmentedLog[A](logDirectory, maxLogFileSize, currentFile, lastIndexRef, lastTermRef, database)
+end SegmentedLog

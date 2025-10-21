@@ -64,8 +64,6 @@ class SegmentMetadataDatabase(environment: Environment, database: Database):
 
   def discardAll = environment.transact(database.truncate).orDie
 
-end SegmentMetadataDatabase
-
 object SegmentMetadataDatabase:
   case class SegmentMetadata(
     id: Long,
@@ -101,5 +99,3 @@ object SegmentMetadataDatabase:
       environment <- ZIO.service[Environment]
       database <- environment.openDatabase("segment-metadata", DbiFlags.MDB_CREATE).orDie
     yield SegmentMetadataDatabase(environment, database)
-
-end SegmentMetadataDatabase

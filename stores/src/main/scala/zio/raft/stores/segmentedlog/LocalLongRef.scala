@@ -75,3 +75,4 @@ object LocalLongRef:
         def aToLong(b: B): Long =
           self.aToLong(ba(b))
         val value = self.value
+end LocalLongRef

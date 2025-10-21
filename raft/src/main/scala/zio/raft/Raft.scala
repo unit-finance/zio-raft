@@ -776,6 +776,8 @@ class Raft[S, A <: Command](
             )
           yield ()
     yield ()
+    end for
+  end sendAppendEntries
 
   private def sendRequestVoteRule(peer: MemberId) =
     for
@@ -1080,3 +1082,4 @@ object Raft:
       )
       _ <- raft.run.forkScoped
     yield raft
+end Raft

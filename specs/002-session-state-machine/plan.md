@@ -223,10 +223,10 @@ ios/ or android/
 
 **Task Generation Strategy**:
 1. **Data Model Tasks** (from data-model.md):
-   - Create core types (SessionState, ResponseCacheEntry, PendingServerRequest, CombinedState)
-   - Create UserStateMachine trait (simplified - no snapshot methods)
-   - Create SessionCommand ADT (extends Command)
-   - Create codec infrastructure (SessionStateCodec, etc.)
+   - Create core types (SessionMetadata, PendingServerRequest[SR])
+   - Create UserStateMachine[UC <: Command, SR] trait (3 methods - no snapshot methods, no state type param, UC has its own Response)
+   - Create SessionCommand[UC <: Command] ADT (extends Command with dependent type Response)
+   - Create SessionStateMachine[UC <: Command, SR] class (takes UserStateMachine + ONE Codec[(String, Any)])
    - [P] All type definitions can be done in parallel
 
 2. **Contract Test Tasks** (from contracts/):
@@ -388,9 +388,15 @@ The `/plan` command has successfully completed Phases 0-2 (planning phases only)
 
 **Ultra-Simplified Architecture**:
 ```scala
+// User defines their Command type (extends Command with dependent Response)
+sealed trait CounterCmd extends Command
+object CounterCmd:
+  case class Increment(by: Int) extends CounterCmd:
+    type Response = Int
+
 // User implements UserStateMachine (just 3 methods, NO state type param!)
-class CounterSM extends UserStateMachine[CounterCmd, CounterResp]:
-  def apply(cmd: CounterCmd): State[Map[String, Any], (CounterResp, List[ServerReq])] = ???
+class CounterSM extends UserStateMachine[CounterCmd, ServerReq]:
+  def apply(cmd: CounterCmd): State[Map[String, Any], (cmd.Response, List[ServerReq])] = ???
   def onSessionCreated(sid, caps): State[Map[String, Any], List[ServerReq]] = State.succeed(Nil)
   def onSessionExpired(sid): State[Map[String, Any], List[ServerReq]] = State.succeed(Nil)
 
@@ -398,9 +404,9 @@ class CounterSM extends UserStateMachine[CounterCmd, CounterResp]:
 val codec: Codec[(String, Any)] = ???
 
 // Pass UserSM + codec to SessionStateMachine constructor
-val sessionSM = new SessionStateMachine(counterSM, codec)
+val sessionSM = new SessionStateMachine[CounterCmd, ServerReq](counterSM, codec)
 
-// SessionStateMachine extends zio.raft.StateMachine[Map[String, Any], SessionCommand[?, ?]]
+// SessionStateMachine extends zio.raft.StateMachine[Map[String, Any], SessionCommand[CounterCmd]]
 // Handles: idempotency, caching, server requests, snapshots, session lifecycle
 // State is Map[String, Any] - user picks keys, session uses "session/" prefix
 // Works with decoded types - NO serialization in state machine!
@@ -409,13 +415,13 @@ val sessionSM = new SessionStateMachine(counterSM, codec)
 **Architecture Diagram**:
 ```
 ┌───────────────────────────────────────────────────────────────────┐
-│   SessionStateMachine[UserCmd, UserResp]                         │
+│   SessionStateMachine[UC <: Command, SR]                         │
 │                                                                   │
 │  extends zio.raft.StateMachine[Map[String, Any],                 │
-│                                 SessionCommand[?, ?]]             │
+│                                 SessionCommand[UC]]               │
 ├───────────────────────────────────────────────────────────────────┤
 │  Constructor:                                                     │
-│    userSM: UserStateMachine[UserCmd, UserResp]                   │
+│    userSM: UserStateMachine[UC, SR]                             │
 │    stateCodec: Codec[(String, Any)]    ← ONE codec for all!     │
 │                                                                   │
 │  State: Map[String, Any]                                         │
@@ -443,12 +449,14 @@ val sessionSM = new SessionStateMachine(counterSM, codec)
                               │ uses
                               │
 ┌───────────────────────────────────────────────────────────────────┐
-│      UserStateMachine[Command, Response]  ← NO State param!     │
+│  UserStateMachine[UC <: Command, SR] ← NO State param!         │
 ├───────────────────────────────────────────────────────────────────┤
-│  def apply(cmd: C): State[Map[String, Any], (R, List[ServerReq])│
-│  def onSessionCreated(...): State[Map[String, Any], List[...]]  │
-│  def onSessionExpired(...): State[Map[String, Any], List[...]]  │
+│  def apply(cmd: UC): State[Map[String, Any],                    │
+│                              (cmd.Response, List[SR])]          │
+│  def onSessionCreated(...): State[Map[String, Any], List[SR]]  │
+│  def onSessionExpired(...): State[Map[String, Any], List[SR]]  │
 │                                                                   │
+│  UC extends Command - has its own Response type!                │
 │  State always Map[String, Any] - user picks keys!               │
 │  NO codecs, NO emptyState, NO snapshots!                        │
 │  Returns server requests from all methods!                       │

@@ -16,43 +16,52 @@
 
 ## Ultra-Simplified Architecture
 
-### UserStateMachine[C, R] - Just 3 Methods!
+### UserStateMachine[UC <: Command, SR] - Just 3 Methods!
 
 ```scala
-trait UserStateMachine[C, R]:
+import zio.raft.Command
+
+trait UserStateMachine[UC <: Command, SR]:
   
   // Apply command, return (response, server requests)
-  def apply(command: C): State[Map[String, Any], (R, List[ServerInitiatedRequest])]
+  // Response type comes from the command itself (command.Response)
+  def apply(command: UC): State[Map[String, Any], (command.Response, List[SR])]
   
   // Session created, return server requests
-  def onSessionCreated(sessionId: SessionId, capabilities: Map[String, String]): State[Map[String, Any], List[ServerInitiatedRequest]]
+  def onSessionCreated(sessionId: SessionId, capabilities: Map[String, String]): State[Map[String, Any], List[SR]]
   
   // Session expired, return server requests
-  def onSessionExpired(sessionId: SessionId): State[Map[String, Any], List[ServerInitiatedRequest]]
+  def onSessionExpired(sessionId: SessionId): State[Map[String, Any], List[SR]]
 ```
 
 **Key Points**:
 - ❌ No custom state type parameter - always `Map[String, Any]`
 - ❌ No `emptyState` method - SessionStateMachine uses empty Map
 - ❌ No codec methods - SessionStateMachine takes ONE codec
+- ✅ UC (UserCommand) is a Command subtype with its own Response type
+- ✅ Response type comes from the command itself (no separate R parameter)
 - ✅ User manages their own keys in the Map
 - ✅ All methods can return server-initiated requests
 - ✅ Commands and responses already decoded
 
 ---
 
-### SessionStateMachine[UserCommand, UserResponse]
+### SessionStateMachine[UC <: Command, SR]
 
 ```scala
-class SessionStateMachine[UserCommand, UserResponse](
-  userSM: UserStateMachine[UserCommand, UserResponse],
+class SessionStateMachine[UC <: Command, SR](
+  userSM: UserStateMachine[UC, SR],
   stateCodec: Codec[(String, Any)]  // ONE codec for snapshots
-) extends zio.raft.StateMachine[Map[String, Any], SessionCommand[?, ?]]
+) extends zio.raft.StateMachine[Map[String, Any], SessionCommand[UC]]
 ```
 
 **Constructor**:
-- `userSM`: User state machine
+- `userSM`: User state machine (UC is the user's Command subtype)
 - `stateCodec`: Codec for serializing Map entries (user provides)
+
+**Type Parameters**:
+- `UC <: Command`: User command type (extends Command, has its own Response type)
+- `SR`: Server request type (user-defined)
 
 **State**: `Map[String, Any]` with key prefixes:
 - `"session/"` - Session management data (metadata, cache, pending requests)
@@ -65,37 +74,52 @@ class SessionStateMachine[UserCommand, UserResponse](
 ## Complete Example
 
 ```scala
-// 1. User implements UserStateMachine
-class CounterStateMachine extends UserStateMachine[CounterCommand, CounterResponse]:
+import zio.raft.Command
+
+// 1. User defines their Command type (extends Command with dependent Response)
+sealed trait CounterCommand extends Command
+
+object CounterCommand:
+  case class Increment(by: Int) extends CounterCommand:
+    type Response = Int
   
-  def apply(command: CounterCommand): State[Map[String, Any], (CounterResponse, List[ServerInitiatedRequest])] =
+  case object GetValue extends CounterCommand:
+    type Response = Int
+
+// Define server request type (empty for this example)
+sealed trait CounterServerRequest
+
+// 2. User implements UserStateMachine
+class CounterStateMachine extends UserStateMachine[CounterCommand, CounterServerRequest]:
+  
+  def apply(command: CounterCommand): State[Map[String, Any], (command.Response, List[CounterServerRequest])] =
     State.modify { state =>
       val counter = state.getOrElse("counter", 0).asInstanceOf[Int]
       
       command match
-        case CounterCommand.Increment(by) =>
+        case Increment(by) =>
           val newCounter = counter + by
           val newState = state.updated("counter", newCounter)
-          (newState, (CounterResponse.Success(newCounter), Nil))
+          (newState, (newCounter, Nil))  // Response type is Int (from command)
         
-        case CounterCommand.GetValue =>
-          (state, (CounterResponse.Success(counter), Nil))
+        case GetValue =>
+          (state, (counter, Nil))  // Response type is Int (from command)
     }
   
-  def onSessionCreated(sessionId: SessionId, capabilities: Map[String, String]): State[Map[String, Any], List[ServerInitiatedRequest]] =
+  def onSessionCreated(sessionId: SessionId, capabilities: Map[String, String]): State[Map[String, Any], List[CounterServerRequest]] =
     State.succeed(Nil)
   
-  def onSessionExpired(sessionId: SessionId): State[Map[String, Any], List[ServerInitiatedRequest]] =
+  def onSessionExpired(sessionId: SessionId): State[Map[String, Any], List[CounterServerRequest]] =
     State.succeed(Nil)
 
-// 2. User provides codec for Map serialization
+// 3. User provides codec for Map serialization
 val stateCodec: Codec[(String, Any)] = ??? // User implementation
 
-// 3. Create SessionStateMachine
+// 4. Create SessionStateMachine
 val counterSM = new CounterStateMachine()
-val sessionSM = new SessionStateMachine(counterSM, stateCodec)
+val sessionSM = new SessionStateMachine[CounterCommand, CounterServerRequest](counterSM, stateCodec)
 
-// 4. Use with Raft (sessionSM extends zio.raft.StateMachine)
+// 5. Use with Raft (sessionSM extends zio.raft.StateMachine)
 val raftNode = RaftNode(sessionSM, ...)
 ```
 
@@ -111,7 +135,8 @@ val raftNode = RaftNode(sessionSM, ...)
 - Complex serialization logic
 
 ### After (Ultra-Simple):
-- UserStateMachine[C, R] - no state type parameter!
+- UserStateMachine[UC <: Command, SR] - no state type parameter, no response type parameter!
+- UC extends Command, so it has its own Response type
 - State always `Map[String, Any]`
 - No emptyState - just empty Map
 - No codecs in UserStateMachine
@@ -124,23 +149,28 @@ val raftNode = RaftNode(sessionSM, ...)
 ## SessionCommand Types
 
 ```scala
-sealed trait SessionCommand[Request, Response] extends Command
+sealed trait SessionCommand[UC <: Command] extends Command
+  // Response type is defined by each case class
 
 object SessionCommand:
-  case class ClientRequest[UserCommand, UserResponse](
+  case class ClientRequest[UC <: Command](
     sessionId: SessionId,
     requestId: RequestId,
-    command: UserCommand  // Already decoded!
-  ) extends SessionCommand[UserCommand, UserResponse]
+    command: UC  // Already decoded! UC is a Command subtype
+  ) extends SessionCommand[UC]:
+    type Response = command.Response  // Response from the UserCommand itself
   
   case class ServerRequestAck(sessionId: SessionId, requestId: RequestId)
-    extends SessionCommand[Unit, Unit]
+    extends SessionCommand[Nothing]:
+    type Response = Unit
   
   case class SessionCreationConfirmed(sessionId: SessionId, capabilities: Map[String, String])
-    extends SessionCommand[Unit, Unit]
+    extends SessionCommand[Nothing]:
+    type Response = Unit
   
   case class SessionExpired(sessionId: SessionId)
-    extends SessionCommand[Unit, Unit]
+    extends SessionCommand[Nothing]:
+    type Response = Unit
 ```
 
 ---

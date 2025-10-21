@@ -52,7 +52,7 @@ trait StateMachine[S, A <: Command]:
 
 ---
 
-### UserStateMachine[Command, Response, ServerRequest] (New Simplified Trait)
+### UserStateMachine[UC <: Command, ServerRequest] (New Simplified Trait)
 
 **Purpose**: Simplified interface for user-defined business logic (no serialization, no snapshots)
 
@@ -61,20 +61,22 @@ package zio.raft.statemachine
 
 import zio.prelude.State
 import zio.raft.protocol.SessionId
+import zio.raft.Command
 
-trait UserStateMachine[C, R, SR]:
+trait UserStateMachine[UC <: Command, SR]:
   /**
    * Apply a command to the current state.
    * 
    * MUST be pure and deterministic.
    * MUST NOT throw exceptions (return errors in Response).
-   * Command is already deserialized.
+   * Command is already deserialized and is a Command subtype (has its own Response type).
    * State is always Map[String, Any] - user manages their own keys.
    * 
-   * @param command Command to apply (decoded)
+   * @param command Command to apply (decoded, UC is a Command subtype)
    * @return State monad with (response, server-initiated requests)
+   *         Response type comes from the command itself (command.Response)
    */
-  def apply(command: C): State[Map[String, Any], (R, List[SR])]
+  def apply(command: UC): State[Map[String, Any], (command.Response, List[SR])]
   
   /**
    * Handle session creation event.
@@ -110,6 +112,8 @@ trait UserStateMachine[C, R, SR]:
 **Note**: 
 - Just 3 methods - ultra-simple!
 - State always `Map[String, Any]` - no custom state type
+- UC (UserCommand) is a Command subtype, so it has its own Response type
+- Response type comes from the command itself (command.Response)
 - No codec methods - SessionStateMachine takes ONE codec
 - No snapshot methods - SessionStateMachine handles snapshots
 - No emptyState - SessionStateMachine uses empty Map
@@ -128,24 +132,25 @@ package zio.raft.statemachine
 import zio.raft.*
 import zio.prelude.State
 import scodec.Codec
+import java.time.Instant
 
-class SessionStateMachine[UserCommand, UserResponse, ServerRequest](
-  userSM: UserStateMachine[UserCommand, UserResponse, ServerRequest],
+class SessionStateMachine[UC <: Command, ServerRequest](
+  userSM: UserStateMachine[UC, ServerRequest],
   stateCodec: Codec[(String, Any)]  // ONE codec for all state serialization
-) extends StateMachine[Map[String, Any], SessionCommand[?, ?]]:
+) extends StateMachine[Map[String, Any], SessionCommand[UC]]:
   
   def emptyState: Map[String, Any] = Map.empty  // Just empty map!
   
-  def apply(command: SessionCommand[?, ?]): State[Map[String, Any], command.Response] =
+  def apply(command: SessionCommand[UC]): State[Map[String, Any], command.Response] =
     State.modify { state =>
       command match
-        case req: SessionCommand.ClientRequest[UserCommand, UserResponse] @unchecked =>
+        case req: SessionCommand.ClientRequest[UC] @unchecked =>
           // 1. Check idempotency cache
           val cacheKey = s"session/cache/${req.sessionId}/${req.requestId}"
           state.get(cacheKey) match
             case Some(cached) =>
               // Cache hit - return cached response without invoking user SM
-              (state, cached.asInstanceOf[UserResponse])
+              (state, cached.asInstanceOf[req.command.Response])
             
             case None =>
               // 2. Apply to user SM (command already decoded!)
@@ -215,18 +220,40 @@ class SessionStateMachine[UserCommand, UserResponse, ServerRequest](
     commitIndex: Index
   ): Boolean =
     (commitIndex.value - lastSnapshotIndex.value) > 1000
+  
+  /**
+   * Check if there are any pending server requests that need retry.
+   * 
+   * This is a query method that can be called directly on the state
+   * (dirty read - no Raft consensus needed) to determine if the
+   * retry fiber should check for requests that need to be resent.
+   * 
+   * Only returns true if there are requests with lastSentAt before the threshold.
+   * 
+   * @param state The current state map
+   * @param retryIfLastSentBefore Time threshold - only consider requests sent before this time
+   * @return true if there are any pending server requests needing retry
+   */
+  def hasPendingRequests(state: Map[String, Any], retryIfLastSentBefore: Instant): Boolean =
+    state.collect {
+      case (key, value: PendingServerRequest[?]) if key.startsWith("session/serverRequests/") =>
+        value.lastSentAt.isBefore(retryIfLastSentBefore)
+    }.exists(identity)
 ```
 
 **Key Points**:
-- Takes `UserStateMachine` + `Codec[(String, Any)]` in constructor
+- Takes `UserStateMachine[UC, SR]` + `Codec[(String, Any)]` in constructor
+- Type parameters: UC <: Command (user command type), SR (server request type)
 - State is just `Map[String, Any]` - NO CombinedState!
 - Session data uses "session/" key prefix
 - User data uses their own keys (no prefix required)
+- UC is a Command subtype, so it has its own Response type
 - Commands and responses already decoded (no serialization in SM)
 - Handles idempotency checking before delegating to user SM
 - Forwards session lifecycle events to user SM (can produce server requests)
 - Adds server-initiated requests from user SM to pending list
 - Snapshot serialization using provided codec
+- Provides `hasPendingRequests(state, retryIfLastSentBefore)` query method for dirty reads (retry logic optimization)
 
 ---
 
@@ -351,42 +378,51 @@ case class PendingServerRequest[SR](
 
 ## Command Types
 
-### SessionCommand[Request, Response]
+### SessionCommand[UC <: Command]
 
-**Purpose**: Commands for SessionStateMachine (parameterized by request/response types)
+**Purpose**: Commands for SessionStateMachine (using dependent type pattern from Command trait)
 
 ```scala
-sealed trait SessionCommand[Request, Response] extends Command:
-  type Response = Response  // Dependent type
+sealed trait SessionCommand[UC <: Command] extends Command
+  // Response type is defined by each case class
 
 object SessionCommand:
   
-  case class ClientRequest[UserCommand, UserResponse](
+  case class ClientRequest[UC <: Command](
     sessionId: SessionId,
     requestId: RequestId,
-    command: UserCommand  // Already deserialized!
-  ) extends SessionCommand[UserCommand, UserResponse]
+    command: UC  // Already deserialized! UC is a Command subtype
+  ) extends SessionCommand[UC]:
+    type Response = command.Response  // Response from the UserCommand itself
   
   case class ServerRequestAck(
     sessionId: SessionId,
     requestId: RequestId
-  ) extends SessionCommand[Unit, Unit]
+  ) extends SessionCommand[Nothing]:
+    type Response = Unit
   
   case class SessionCreationConfirmed(
     sessionId: SessionId,
     capabilities: Map[String, String]
-  ) extends SessionCommand[Unit, Unit]
+  ) extends SessionCommand[Nothing]:
+    type Response = Unit
   
   case class SessionExpired(
     sessionId: SessionId
-  ) extends SessionCommand[Unit, Unit]
+  ) extends SessionCommand[Nothing]:
+    type Response = Unit
   
   case class GetRequestsForRetry(
     retryIfLastSentBefore: Instant
-  ) extends SessionCommand[Unit, List[PendingServerRequest]]
+  ) extends SessionCommand[Nothing]:
+    type Response = List[PendingServerRequest[?]]
 ```
 
-**Note**: Commands contain decoded types, not ByteVector. Integration layer handles serialization.
+**Note**: 
+- Commands contain decoded types, not ByteVector. Integration layer handles serialization.
+- `UserCommand` (UC) is itself a Command subtype, so it has its own Response type
+- ClientRequest's Response type comes from the UserCommand itself
+- Non-ClientRequest commands use Nothing as the UC type parameter
 
 ---
 
@@ -644,8 +680,8 @@ def serializeState(combined: CombinedState[Int]): Stream[Nothing, Byte] =
 **Ultra-Simplified Data Model**:
 
 **Core Types** (just 4!):
-1. `UserStateMachine[C, R, SR]` - Trait with 3 methods
-2. `SessionStateMachine[C, R, SR]` - Wraps UserStateMachine, extends zio.raft.StateMachine
+1. `UserStateMachine[UC <: Command, SR]` - Trait with 3 methods (UC has its own Response type)
+2. `SessionStateMachine[UC <: Command, SR]` - Wraps UserStateMachine, extends zio.raft.StateMachine
 3. `SessionMetadata` - Per-session info (3 fields)
 4. `PendingServerRequest[SR]` - Awaiting ack (4 fields)
 

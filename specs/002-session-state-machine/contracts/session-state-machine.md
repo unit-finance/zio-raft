@@ -13,7 +13,8 @@ import zio.*
 import zio.raft.*
 import zio.raft.protocol.*
 import zio.prelude.State
-import scodec.bits.ByteVector
+import scodec.Codec
+import java.time.Instant
 
 /**
  * Session state machine handling idempotency, response caching,
@@ -23,54 +24,57 @@ import scodec.bits.ByteVector
  * linearizable semantics per Raft dissertation Chapter 6.3.
  * 
  * Extends zio.raft.StateMachine to integrate with existing Raft infrastructure.
+ * 
+ * State is Map[String, Any] with key prefixes:
+ * - "session/" for session management data
+ * - User keys for business logic data (no prefix required)
+ * 
+ * @tparam UC User command type (extends Command, has its own Response type)
+ * @tparam SR Server request type (user-defined)
  */
-class SessionStateMachine[UserState, UserCommand, UserResponse](
-  userSM: UserStateMachine[UserState, UserCommand, UserResponse]
-) extends StateMachine[CombinedState[UserState], SessionCommand]:
+class SessionStateMachine[UC <: Command, SR](
+  userSM: UserStateMachine[UC, SR],
+  stateCodec: Codec[(String, Any)]  // ONE codec for all state serialization
+) extends StateMachine[Map[String, Any], SessionCommand[UC]]:
   
   /**
-   * Initial state combining empty session state and user's empty state.
+   * Initial state is empty Map.
    */
-  def emptyState: CombinedState[UserState] = 
-    CombinedState(SessionState.empty, userSM.emptyState)
+  def emptyState: Map[String, Any] = Map.empty
   
   /**
-   * Apply SessionCommand to combined state.
+   * Apply SessionCommand to state.
    * 
    * For ClientRequest: checks idempotency, delegates to user SM if needed, caches response.
    * For ServerRequestAck: removes acknowledged requests (cumulative).
-   * For SessionCreationConfirmed: adds new session metadata.
-   * For SessionExpired: removes all session data.
+   * For SessionCreationConfirmed: adds new session metadata, forwards to user SM.
+   * For SessionExpired: forwards to user SM, then removes all session data.
    * 
-   * @param command Session-level command
-   * @return State monad with new combined state and command response
+   * @param command Session-level command (UC is the user command type)
+   * @return State monad with new state and command response
    */
-  def apply(command: SessionCommand): State[CombinedState[UserState], command.Response]
+  def apply(command: SessionCommand[UC]): State[Map[String, Any], command.Response]
   
   /**
-   * Create snapshot of both session state and user state.
+   * Create snapshot of state.
    * 
-   * Serializes to shared dictionary with key prefixes:
-   * - "session/" for session state
-   * - "user/" for user state
+   * Serializes each Map entry using stateCodec.
+   * Both session and user data are in the same Map (differentiated by key prefix).
    * 
-   * Uses userSM.stateCodec to serialize user state.
-   * 
-   * @param state Combined state to snapshot
+   * @param state State to snapshot
    * @return Stream of bytes
    */
-  def takeSnapshot(state: CombinedState[UserState]): Stream[Nothing, Byte]
+  def takeSnapshot(state: Map[String, Any]): Stream[Nothing, Byte]
   
   /**
-   * Restore both state machines from snapshot stream.
+   * Restore state from snapshot stream.
    * 
-   * Deserializes shared dictionary and splits by prefix.
-   * Uses userSM.stateCodec to deserialize user state.
+   * Deserializes Map entries using stateCodec.
    * 
    * @param stream Snapshot byte stream
-   * @return UIO with restored combined state
+   * @return UIO with restored state
    */
-  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[CombinedState[UserState]]
+  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[Map[String, Any]]
   
   /**
    * Determine if snapshot should be taken.
@@ -84,6 +88,21 @@ class SessionStateMachine[UserState, UserCommand, UserResponse](
     lastSnapshotSize: Long,
     commitIndex: Index
   ): Boolean
+  
+  /**
+   * Check if there are any pending server requests that need retry.
+   * 
+   * This is a query method that can be called directly on the state
+   * (dirty read - no Raft consensus needed) to determine if the
+   * retry fiber should check for requests that need to be resent.
+   * 
+   * Only returns true if there are requests with lastSentAt before the threshold.
+   * 
+   * @param state The current state map
+   * @param retryIfLastSentBefore Time threshold - only consider requests sent before this time
+   * @return true if there are any pending server requests needing retry
+   */
+  def hasPendingRequests(state: Map[String, Any], retryIfLastSentBefore: Instant): Boolean
 ```
 
 ---
@@ -94,22 +113,22 @@ class SessionStateMachine[UserState, UserCommand, UserResponse](
 
 #### PC-1: Idempotency (FR-007)
 ```gherkin
-Given combined state with cached response for (sessionId, requestId)
+Given state with cached response at key "session/cache/{sessionId}/{requestId}"
 When SessionCommand.ClientRequest(sessionId, requestId, _) is applied
 Then returns cached response without invoking user state machine
-And both session and user states remain unchanged
+And state remains unchanged
 ```
 
-**Test**: Unit test with SessionStateMachine(mockUserSM) where mockUserSM counts invocations - verify count = 0 for duplicate
+**Test**: Unit test with SessionStateMachine(mockUserSM, codec) where mockUserSM counts invocations - verify count = 0 for duplicate
 
 ---
 
 #### PC-2: Response Caching (FR-008)
 ```gherkin
-Given combined state without cached response for (sessionId, requestId)
-When SessionCommand.ClientRequest(sessionId, requestId, payload) is applied
-Then user SM is invoked via userSM.apply()
-And response is cached with key (sessionId, requestId)
+Given state without cached response at key "session/cache/{sessionId}/{requestId}"
+When SessionCommand.ClientRequest(sessionId, requestId, command) is applied
+Then user SM is invoked via userSM.apply(command)
+And response is cached at key "session/cache/{sessionId}/{requestId}"
 And subsequent requests return cached response without invoking user SM
 ```
 

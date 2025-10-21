@@ -140,7 +140,6 @@ lazy val zio1zmq = project
   .settings(
     name := "zio1-zmq",
     crossScalaVersions := supportedScalaVersions,
-    scalafmtConfig := file(".scalafmt-cross.conf"),
     scalacOptions ++= commonScalacOptions.value,
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio1Version,
@@ -162,7 +161,6 @@ lazy val zio2zmq = project
     name := "zio2-zmq",
     scalaVersion := mainScalaVersion,
     crossScalaVersions := supportedScalaVersions,
-    scalafmtConfig := file(".scalafmt-cross.conf"),
     scalacOptions ++= commonScalacOptions.value,
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,

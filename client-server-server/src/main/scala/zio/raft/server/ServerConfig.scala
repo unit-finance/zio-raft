@@ -10,7 +10,7 @@ case class ServerConfig(
   cleanupInterval: Duration
 )
 
-object ServerConfig {
+object ServerConfig:
 
   val DEFAULT_SESSION_TIMEOUT: Duration = 90.seconds
   val DEFAULT_CLEANUP_INTERVAL: Duration = 1.second
@@ -22,15 +22,12 @@ object ServerConfig {
       cleanupInterval = DEFAULT_CLEANUP_INTERVAL
     )
 
-  def validated(config: ServerConfig): Either[String, ServerConfig] = {
-    if (config.bindAddress.isEmpty) {
+  def validated(config: ServerConfig): Either[String, ServerConfig] =
+    if config.bindAddress.isEmpty then
       Left("bindAddress cannot be empty")
-    } else if (config.sessionTimeout.toSeconds <= 0) {
+    else if config.sessionTimeout.toSeconds <= 0 then
       Left("sessionTimeout must be positive")
-    } else if (config.cleanupInterval.toSeconds <= 0) {
+    else if config.cleanupInterval.toSeconds <= 0 then
       Left("cleanupInterval must be positive")
-    } else {
+    else
       Right(config)
-    }
-  }
-}

@@ -115,14 +115,13 @@ class Raft[S, A <: Command](
       lastTerm <- logStore.lastTerm
       lastIndex <- logStore.lastIndex
       result <-
-        if (
+        if
           currentTerm == m.term && (votedFor.contains(
             m.candidateId
           ) || votedFor.isEmpty) &&
           (m.lastLogTerm > lastTerm ||
             (m.lastLogTerm == lastTerm &&
               m.lastLogIndex >= lastIndex))
-        )
         then
           for
             _ <- stable.voteFor(m.candidateId)

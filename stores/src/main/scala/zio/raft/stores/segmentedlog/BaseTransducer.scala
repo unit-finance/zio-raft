@@ -46,7 +46,7 @@ class BaseTransducer(ref: Ref[BaseTransducer.State], validateChecksum: Boolean):
       case ReadRecordType(offset, index, bits, chunkBuilder, crcBuilder) =>
         isEntryCodec.decode(bits) match
           case Successful(decodeResult) =>
-            if (decodeResult.value)
+            if decodeResult.value then
               process(results, ReadSize(offset, index, decodeResult.remainder, chunkBuilder, crcBuilder))
             else process(results, ReadChecksum(offset, index, decodeResult.remainder, chunkBuilder, crcBuilder))
           case Failure(e: Err.InsufficientBits) =>

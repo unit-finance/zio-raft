@@ -8,7 +8,7 @@ case class InsertSortList[A](list: List[A])(using ordering: Ordering[A]) extends
   override def iterator: Iterator[A] = list.iterator
 
   def withSortedInsert(a: A): InsertSortList[A] =
-    if (list.isEmpty || ordering.gteq(a, list.last)) then InsertSortList(list :+ a)
+    if list.isEmpty || ordering.gteq(a, list.last) then InsertSortList(list :+ a)
     else
       val (before, after) = list.span(ordering.lteq(_, a))
       InsertSortList(before ++ (a :: after))

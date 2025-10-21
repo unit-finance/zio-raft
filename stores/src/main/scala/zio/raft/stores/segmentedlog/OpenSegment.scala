@@ -74,7 +74,7 @@ class OpenSegment[A <: Command: Codec](
     for
       // we need to find the offset of the entry to truncate the file
       offset <-
-        if (minInclusive == firstIndex) ZIO.succeed(BaseTransducer.headerSize)
+        if minInclusive == firstIndex then ZIO.succeed(BaseTransducer.headerSize)
         else
           makeStream(channel)
             .via(recordsOnly)

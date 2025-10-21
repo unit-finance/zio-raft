@@ -22,7 +22,7 @@ class ReadOnlySegment[A <: Command: Codec](
         .flatMap(channel => makeStream(channel))
         .via(recordsOnly)
 
-    if (startInclusive.value > firstIndex.value)
+    if startInclusive.value > firstIndex.value then
       stream.drop((startInclusive.value - firstIndex.value).toInt).takeWhile(_.index <= toInclusive).via(decode)
     else stream.takeWhile(_.index <= toInclusive).via(decode)
 
@@ -33,7 +33,7 @@ class ReadOnlySegment[A <: Command: Codec](
       fromInclusive.value < lastIndexExclusive.value && toInclusive >= firstIndex
 
   def getEntry(index: Index): ZIO[Any, Nothing, Option[LogEntry[A]]] =
-    if (isInSegment(index))
+    if isInSegment(index) then
       ZStream
         .scoped(AsynchronousFileChannel.open(path, StandardOpenOption.READ))
         .flatMap(channel => makeStream(channel))
@@ -48,7 +48,7 @@ class ReadOnlySegment[A <: Command: Codec](
 
   // Checks if the index is in the segment, i.e is the index between firstIndex and lastIndex
   def isInSegment(index: Index) =
-    if (index >= firstIndex)
+    if index >= firstIndex then
       lastIndexExclusive match
         case None => true
         case Some(lastIndexExclusive) =>

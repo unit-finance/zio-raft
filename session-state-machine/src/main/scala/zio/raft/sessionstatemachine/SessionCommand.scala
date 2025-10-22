@@ -27,13 +27,16 @@ object SessionCommand {
    * 
    * @param sessionId The client session ID
    * @param requestId The request ID (for idempotency checking)
+   * @param lowestRequestId The lowest request ID for which client hasn't received response (for cache cleanup)
    * @param command The user's command to execute
    * 
    * @note Response type is the user command's Response type (dependent types)
+   * @note lowestRequestId enables the "Lowest Sequence Number Protocol" from Raft dissertation Ch. 6.3
    */
   case class ClientRequest[UC <: Command](
     sessionId: SessionId,
     requestId: RequestId,
+    lowestRequestId: RequestId,
     command: UC
   ) extends SessionCommand[UC]:
     // Response type matches the user command's Response type
@@ -55,18 +58,17 @@ object SessionCommand {
     type Response = Unit
   
   /**
-   * Confirmation that a session has been created.
+   * Create a new session.
    * 
    * The SessionStateMachine base class:
    * 1. Creates SessionMetadata and stores it
-   * 2. Narrows state to UserSchema
-   * 3. Calls user's handleSessionCreated method
-   * 4. Merges results and returns any server requests
+   * 2. Calls user's handleSessionCreated method
+   * 3. Returns any server requests
    * 
    * @param sessionId The newly created session ID
    * @param capabilities Client capabilities as key-value pairs
    */
-  case class SessionCreationConfirmed(
+  case class CreateSession(
     sessionId: SessionId,
     capabilities: Map[String, String]
   ) extends SessionCommand[Nothing]:
@@ -101,9 +103,11 @@ object SessionCommand {
    * Benefits: Single Raft log entry, atomic operation, responses stay in state (not log)
    * 
    * @param sessionId The session to check for retry-eligible requests
+   * @param currentTime The current time for determining retry eligibility and updating lastSentAt
    */
   case class GetRequestsForRetry(
-    sessionId: SessionId
+    sessionId: SessionId,
+    currentTime: java.time.Instant
   ) extends SessionCommand[Nothing]:
     type Response = List[PendingServerRequest[Any]]
 }

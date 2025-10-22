@@ -58,15 +58,15 @@ object SessionCommandSpec extends ZIOSpecDefault:
       )
     },
     
-    test("SessionCreationConfirmed should contain sessionId and capabilities") {
-      val confirmed = SessionCommand.SessionCreationConfirmed(
+    test("CreateSession should contain sessionId and capabilities") {
+      val createSession = SessionCommand.CreateSession(
         sessionId = SessionId("new-session"),
         capabilities = Map("version" -> "1.0")
       )
       
       assertTrue(
-        confirmed.sessionId == SessionId("new-session") &&
-        confirmed.capabilities == Map("version" -> "1.0")
+        createSession.sessionId == SessionId("new-session") &&
+        createSession.capabilities == Map("version" -> "1.0")
       )
     },
     
@@ -88,17 +88,17 @@ object SessionCommandSpec extends ZIOSpecDefault:
     
     test("should support pattern matching") {
       val commands: List[SessionCommand[TestCommand]] = List(
-        SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), IncrementCounter(1)),
+        SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), RequestId(1), IncrementCounter(1)),
         SessionCommand.ServerRequestAck(SessionId("s1"), RequestId(1)),
-        SessionCommand.SessionCreationConfirmed(SessionId("s2"), Map.empty),
+        SessionCommand.CreateSession(SessionId("s2"), Map.empty),
         SessionCommand.SessionExpired(SessionId("s3")),
-        SessionCommand.GetRequestsForRetry(SessionId("s4"))
+        SessionCommand.GetRequestsForRetry(SessionId("s4"), java.time.Instant.now())
       )
       
       val types = commands.map {
         case _: SessionCommand.ClientRequest[_] => "ClientRequest"
         case _: SessionCommand.ServerRequestAck => "ServerRequestAck"
-        case _: SessionCommand.SessionCreationConfirmed => "SessionCreationConfirmed"
+        case _: SessionCommand.CreateSession => "CreateSession"
         case _: SessionCommand.SessionExpired => "SessionExpired"
         case _: SessionCommand.GetRequestsForRetry => "GetRequestsForRetry"
       }
@@ -106,7 +106,7 @@ object SessionCommandSpec extends ZIOSpecDefault:
       assertTrue(types == List(
         "ClientRequest",
         "ServerRequestAck",
-        "SessionCreationConfirmed",
+        "CreateSession",
         "SessionExpired",
         "GetRequestsForRetry"
       ))
@@ -117,6 +117,7 @@ object SessionCommandSpec extends ZIOSpecDefault:
       val clientRequest = SessionCommand.ClientRequest(
         SessionId("s1"),
         RequestId(1),
+        RequestId(1),  // lowestRequestId
         incrementCmd
       )
       

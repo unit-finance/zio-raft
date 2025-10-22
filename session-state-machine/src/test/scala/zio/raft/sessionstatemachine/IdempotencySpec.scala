@@ -69,14 +69,14 @@ object IdempotencySpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[CounterSchema]]
       
       // First request - should call applyCommand
-      val cmd1 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), Set(42))
+      val cmd1 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), Set(42))
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
       val callsAfterFirst = sm.callCount
       assertTrue(callsAfterFirst == 1)
       
       // Duplicate request - should NOT call applyCommand
-      val cmd2 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), Set(999))
+      val cmd2 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), Set(999))
       val (state2, response2) = sm.apply(cmd2).run(state1)
       
       assertTrue(
@@ -90,10 +90,10 @@ object IdempotencySpec extends ZIOSpecDefault:
       val sm = new CounterStateMachine()
       val state0 = HMap.empty[CombinedSchema[CounterSchema]]
       
-      val cmd1 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), Set(10))
+      val cmd1 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), Set(10))
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
-      val cmd2 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(2), Set(20))
+      val cmd2 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(2), RequestId(2), Set(20))
       val (state2, response2) = sm.apply(cmd2).run(state1)
       
       assertTrue(
@@ -108,10 +108,10 @@ object IdempotencySpec extends ZIOSpecDefault:
       val sm = new CounterStateMachine()
       val state0 = HMap.empty[CombinedSchema[CounterSchema]]
       
-      val cmd1 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), Set(10))
+      val cmd1 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), Set(10))
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
-      val cmd2 = SessionCommand.ClientRequest(SessionId("s2"), RequestId(1), Set(20))
+      val cmd2 = SessionCommand.ClientRequest(SessionId("s2"), RequestId(1), RequestId(1), Set(20))
       val (state2, response2) = sm.apply(cmd2).run(state1)
       
       assertTrue(
@@ -125,13 +125,13 @@ object IdempotencySpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[CounterSchema]]
       
       // First request
-      val cmd1 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), Set(42))
+      val cmd1 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), Set(42))
       val (state1, _) = sm.apply(cmd1).run(state0)
       
       val counterBefore = state1.get["counter"]("value")
       
       // Duplicate request with different value
-      val cmd2 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), Set(999))
+      val cmd2 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), Set(999))
       val (state2, _) = sm.apply(cmd2).run(state1)
       
       val counterAfter = state2.get["counter"]("value")
@@ -147,11 +147,11 @@ object IdempotencySpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[CounterSchema]]
       
       // First: Set command
-      val cmd1 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), Set(42))
+      val cmd1 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), Set(42))
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
       // Duplicate with Get command (different type, same IDs)
-      val cmd2 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), Get())
+      val cmd2 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), Get())
       val (state2, response2) = sm.apply(cmd2).run(state1)
       
       assertTrue(

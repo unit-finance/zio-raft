@@ -10,15 +10,14 @@ import java.time.Instant
  * framework. Created when a session is established and persists until
  * session expiration.
  * 
- * @param sessionId Unique identifier for the session
  * @param capabilities Key-value pairs describing client capabilities
  * @param createdAt Timestamp when the session was created (from ZIO Clock service)
  * 
  * @note Immutable case class - use copy() to create modified versions
  * @note createdAt must come from ZIO Clock service, not Instant.now() (Constitution IV)
+ * @note sessionId is NOT stored here - it's the key in the HMap, storing it would waste memory
  */
 case class SessionMetadata(
-  sessionId: SessionId,
   capabilities: Map[String, String],
   createdAt: Instant
 )

@@ -67,7 +67,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
       
       // Create session
       val sessionId = SessionId("s1")
-      val createCmd = SessionCommand.SessionCreationConfirmed(sessionId, Map.empty)
+      val createCmd = SessionCommand.CreateSession(sessionId, Map.empty)
       val (state1, _) = sm.apply(createCmd).run(state0)
       
       // Execute command that generates server requests
@@ -97,7 +97,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
       val sessionId = SessionId("s1")
       
       // Create session and generate requests
-      val (state1, _) = sm.apply(SessionCommand.SessionCreationConfirmed(sessionId, Map.empty)).run(state0)
+      val (state1, _) = sm.apply(SessionCommand.CreateSession(sessionId, Map.empty)).run(state0)
       val (state2, _) = sm.apply(SessionCommand.ClientRequest(sessionId, RequestId(1), NoOp())).run(state1)
       
       // Ack the highest request ID (3)
@@ -113,7 +113,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
       
       val sessionId = SessionId("s1")
-      val (state1, _) = sm.apply(SessionCommand.SessionCreationConfirmed(sessionId, Map.empty)).run(state0)
+      val (state1, _) = sm.apply(SessionCommand.CreateSession(sessionId, Map.empty)).run(state0)
       val (state2, _) = sm.apply(SessionCommand.ClientRequest(sessionId, RequestId(1), NoOp())).run(state1)
       
       // Ack request 1
@@ -132,7 +132,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
       
       val sessionId = SessionId("s1")
-      val (state1, _) = sm.apply(SessionCommand.SessionCreationConfirmed(sessionId, Map.empty)).run(state0)
+      val (state1, _) = sm.apply(SessionCommand.CreateSession(sessionId, Map.empty)).run(state0)
       val (state2, _) = sm.apply(SessionCommand.ClientRequest(sessionId, RequestId(1), NoOp())).run(state1)
       
       // Ack request 999 (higher than any existing)
@@ -148,7 +148,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
       
       val sessionId = SessionId("s1")
-      val (state1, _) = sm.apply(SessionCommand.SessionCreationConfirmed(sessionId, Map.empty)).run(state0)
+      val (state1, _) = sm.apply(SessionCommand.CreateSession(sessionId, Map.empty)).run(state0)
       val (state2, _) = sm.apply(SessionCommand.ClientRequest(sessionId, RequestId(1), NoOp())).run(state1)
       
       // First ack
@@ -170,7 +170,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
         val sessionId = SessionId("s1")
         
         // Create session with 10 requests
-        val (state1, _) = sm.apply(SessionCommand.SessionCreationConfirmed(sessionId, Map.empty)).run(state0)
+        val (state1, _) = sm.apply(SessionCommand.CreateSession(sessionId, Map.empty)).run(state0)
         
         // Generate multiple commands to create more requests
         val stateWithRequests = (1 to 3).foldLeft(state1) { (state, i) =>

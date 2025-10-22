@@ -1,6 +1,6 @@
 package zio.raft.sessionstatemachine
 
-import zio.{UIO, ZIO, Clock}
+import zio.UIO
 import zio.prelude.State
 import zio.raft.{Command, HMap, StateMachine, Index}
 import zio.raft.protocol.{SessionId, RequestId}
@@ -69,13 +69,14 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    * base class automatically.
    * 
    * @param command The user command to process
+   * @param createdAt The timestamp when the command was created (use this instead of adding to command)
    * @return State transition returning (response, list of server requests to send)
    * 
    * @note Must be pure and deterministic
    * @note Must NOT throw exceptions - return errors in response payload
    * @note Should only modify UserSchema prefixes, not SessionSchema prefixes
    */
-  protected def applyCommand(command: UC): State[HMap[CombinedSchema[UserSchema]], (command.Response, List[SR])]
+  protected def applyCommand(command: UC, createdAt: Instant): State[HMap[CombinedSchema[UserSchema]], (command.Response, List[SR])]
   
   /**
    * Handle session creation event.
@@ -92,7 +93,8 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    */
   protected def handleSessionCreated(
     sessionId: SessionId,
-    capabilities: Map[String, String]
+    capabilities: Map[String, String],
+    createdAt: Instant
   ): State[HMap[CombinedSchema[UserSchema]], List[SR]]
   
   /**
@@ -111,7 +113,8 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    */
   protected def handleSessionExpired(
     sessionId: SessionId, 
-    capabilities: Map[String, String]
+    capabilities: Map[String, String],
+    createdAt: Instant
   ): State[HMap[CombinedSchema[UserSchema]], List[SR]]
   
   // ====================================================================================
@@ -147,19 +150,19 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    */
   final def apply(command: SessionCommand[UC, SR]): State[HMap[CombinedSchema[UserSchema]], command.Response] =
     command match
-      case cmd: SessionCommand.ClientRequest[UC, SR] =>
+      case cmd: SessionCommand.ClientRequest[UC, SR] @unchecked =>
         handleClientRequest(cmd).asInstanceOf[State[HMap[CombinedSchema[UserSchema]], command.Response]]
       
-      case cmd: SessionCommand.ServerRequestAck[SR] =>
+      case cmd: SessionCommand.ServerRequestAck[SR] @unchecked =>
         handleServerRequestAck(cmd).asInstanceOf[State[HMap[CombinedSchema[UserSchema]], command.Response]]
       
-      case cmd: SessionCommand.CreateSession[SR] =>
+      case cmd: SessionCommand.CreateSession[SR] @unchecked =>
         handleCreateSession(cmd).asInstanceOf[State[HMap[CombinedSchema[UserSchema]], command.Response]]
       
-      case cmd: SessionCommand.SessionExpired[SR] =>
+      case cmd: SessionCommand.SessionExpired[SR] @unchecked =>
         handleSessionExpired_internal(cmd).asInstanceOf[State[HMap[CombinedSchema[UserSchema]], command.Response]]
       
-      case cmd: SessionCommand.GetRequestsForRetry[SR] =>
+      case cmd: SessionCommand.GetRequestsForRetry[SR] @unchecked =>
         handleGetRequestsForRetry(cmd).asInstanceOf[State[HMap[CombinedSchema[UserSchema]], command.Response]]
   
   /**
@@ -195,9 +198,9 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
   /**
    * Handle ClientRequest command with idempotency checking.
    */
-  private def handleClientRequest(cmd: SessionCommand.ClientRequest[UC, SR]): State[HMap[CombinedSchema[UserSchema]], (cmd.command.Response, List[SR])] =
+  private def handleClientRequest(cmd: SessionCommand.ClientRequest[UC, SR]): State[HMap[CombinedSchema[UserSchema]], (cmd.command.Response, List[ServerRequestWithContext[SR]])] =
     State.modify { state =>
-      val cacheKey = makeCacheKey(cmd.sessionId, cmd.requestId)
+      val cacheKey = CacheKey(cmd.sessionId, cmd.requestId)
       
       // Clean up cache based on lowestRequestId (Lowest Sequence Number Protocol)
       val stateAfterCleanup = cleanupCache(state, cmd.sessionId, cmd.lowestRequestId)
@@ -207,11 +210,11 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
         case Some(cachedResponse) =>
           // Cache hit - return cached response without calling user method
           // We don't cache server requests, so return empty list
-          (stateAfterCleanup, (cachedResponse.asInstanceOf[cmd.command.Response], Nil))
+          ((cachedResponse.asInstanceOf[cmd.command.Response], Nil), stateAfterCleanup)
         
         case None =>
-          // Cache miss - execute command
-          val (newState, (response, serverRequests)) = applyCommand(cmd.command).run(stateAfterCleanup)
+          // Cache miss - execute command (pass createdAt to avoid storing twice)
+          val (newState, (response, serverRequests)) = applyCommand(cmd.command, cmd.createdAt).run(stateAfterCleanup)
           
           // Add server requests and assign IDs
           val (stateWithRequests, assignedRequests) = addServerRequests(
@@ -222,9 +225,9 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
           )
           
           // Cache only the response (not server requests)
-          val finalState = stateWithRequests.updated["cache"](cacheKey, response)
+          val finalState = stateWithRequests.updated["cache"](cacheKey, response.asInstanceOf[Matchable])
           
-          (finalState, (response, assignedRequests))
+          ((response, assignedRequests), finalState)
     }
   
   /**
@@ -240,29 +243,27 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
   /**
    * Handle CreateSession command.
    */
-  private def handleCreateSession(cmd: SessionCommand.CreateSession[SR]): State[HMap[CombinedSchema[UserSchema]], List[SR]] =
+  private def handleCreateSession(cmd: SessionCommand.CreateSession[SR]): State[HMap[CombinedSchema[UserSchema]], List[ServerRequestWithContext[SR]]] =
     State.modify { state =>
-      // Create session metadata
-      // Note: timestamp must come from ZIO Clock service in real usage
-      // For state machine (pure function), we use a placeholder
+      // Create session metadata using createdAt from command
       val metadata = SessionMetadata(
         capabilities = cmd.capabilities,
-        createdAt = Instant.EPOCH  // Placeholder - will be set properly in integration
+        createdAt = cmd.createdAt
       )
       
       val stateWithMetadata = state.updated["metadata"](
-        SessionId.unwrap(cmd.sessionId),
+        cmd.sessionId,
         metadata
       )
       
       // Initialize lastServerRequestId for this session
       val stateWithRequestId = stateWithMetadata.updated["lastServerRequestId"](
-        SessionId.unwrap(cmd.sessionId),
+        cmd.sessionId,
         RequestId(0)
       )
       
-      // Call user's session created handler (passing capabilities)
-      val (newState, serverRequests) = handleSessionCreated(cmd.sessionId, cmd.capabilities).run(stateWithRequestId)
+      // Call user's session created handler (passing capabilities and createdAt)
+      val (newState, serverRequests) = handleSessionCreated(cmd.sessionId, cmd.capabilities, cmd.createdAt).run(stateWithRequestId)
       
       // Add any server requests
       val (finalState, assignedRequests) = addServerRequests(
@@ -272,27 +273,28 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
         serverRequests
       )
       
-      (finalState, assignedRequests)
+      (assignedRequests, finalState)
     }
   
   /**
    * Handle SessionExpired command (internal name to avoid conflict with abstract method).
    */
-  private def handleSessionExpired_internal(cmd: SessionCommand.SessionExpired[SR]): State[HMap[CombinedSchema[UserSchema]], List[SR]] =
+  private def handleSessionExpired_internal(cmd: SessionCommand.SessionExpired[SR]): State[HMap[CombinedSchema[UserSchema]], List[ServerRequestWithContext[SR]]] =
     State.modify { state =>
       // Get capabilities from metadata before expiring
-      val capabilities = state.get["metadata"](SessionId.unwrap(cmd.sessionId))
+      val capabilities = state.get["metadata"](cmd.sessionId)
         .map(_.capabilities)
         .getOrElse(Map.empty[String, String])
       
-      // Call user's session expired handler with capabilities
-      val (newState, serverRequests) = handleSessionExpired(cmd.sessionId, capabilities).run(state)
+      // Call user's session expired handler with capabilities and createdAt
+      val (newState, serverRequests) = handleSessionExpired(cmd.sessionId, capabilities, cmd.createdAt).run(state)
       
       // Remove all session data
       val finalState = expireSession(newState, cmd.sessionId)
       
       // Return any final server requests (but don't add them to pending - session is expired)
-      (finalState, serverRequests)
+      // Note: Session is expired so we don't return server requests with context
+      (Nil, finalState)
     }
   
   /**
@@ -304,27 +306,36 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    */
   /**
    * Handle GetRequestsForRetry - atomically get eligible requests and update lastSentAt.
+   * Works on ALL sessions, not just one.
    */
   private def handleGetRequestsForRetry(cmd: SessionCommand.GetRequestsForRetry[SR]): State[HMap[CombinedSchema[UserSchema]], List[PendingServerRequest[SR]]] =
     State.modify { state =>
-      // Get pending requests for this session
-      val pending = state.get["serverRequests"](SessionId.unwrap(cmd.sessionId))
-        .getOrElse(List.empty[PendingServerRequest[SR]])
+      // Iterate through all server request entries in the HMap
+      // Collect all pending requests across all sessions
+      var allUpdated = List.empty[PendingServerRequest[SR]]
+      var newState = state
       
-      // Filter requests eligible for retry (lastSentAt < lastSentBefore)
-      val eligible = pending.filter(req => req.lastSentAt.isBefore(cmd.lastSentBefore))
+      // Use the iterator to go through all sessions' server requests
+      state.iterator["serverRequests"].foreach { pair =>
+        val (sessionKey, pendingAny) = pair
+        val pending = pendingAny.asInstanceOf[List[PendingServerRequest[SR]]]
+        
+        // Map over all pending requests, updating lastSentAt if eligible
+        val updated = pending.map { req =>
+          if (req.lastSentAt.isBefore(cmd.lastSentBefore)) {
+            val updatedReq = req.copy(lastSentAt = cmd.createdAt)
+            allUpdated = updatedReq :: allUpdated
+            updatedReq
+          } else {
+            req
+          }
+        }
+        
+        // Update state with modified list for this session
+        newState = newState.updated["serverRequests"](sessionKey, updated)
+      }
       
-      // Update lastSentAt to createdAt (current time) for eligible requests
-      val updated = eligible.map(_.copy(lastSentAt = cmd.createdAt))
-      
-      // Replace eligible requests with updated versions in the list
-      val remaining = pending.filterNot(req => eligible.exists(_.id == req.id))
-      val newList = remaining ++ updated
-      
-      // Update state with new list
-      val newState = state.updated["serverRequests"](SessionId.unwrap(cmd.sessionId), newList)
-      
-      (newState, updated)
+      (allUpdated.reverse, newState)
     }
   
   // ====================================================================================
@@ -350,12 +361,12 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
     state: HMap[CombinedSchema[UserSchema]],
     sessionId: SessionId,
     serverRequests: List[SR]
-  ): (HMap[CombinedSchema[UserSchema]], List[SR]) =
+  ): (HMap[CombinedSchema[UserSchema]], List[ServerRequestWithContext[SR]]) =
     if serverRequests.isEmpty then
       (state, Nil)
     else
       // Get last assigned ID for this session
-      val lastId = state.get["lastServerRequestId"](SessionId.unwrap(sessionId))
+      val lastId = state.get["lastServerRequestId"](sessionId)
         .getOrElse(RequestId(0))
       
       // Assign IDs starting from lastId + 1
@@ -372,12 +383,12 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
       // Update lastServerRequestId
       val newLastId = requestsWithIds.last.id
       val stateWithNewId = state.updated["lastServerRequestId"](
-        SessionId.unwrap(sessionId),
+        sessionId,
         newLastId
       )
       
       // Get existing pending requests for this session
-      val existingRequests = state.get["serverRequests"](SessionId.unwrap(sessionId))
+      val existingRequests = state.get["serverRequests"](sessionId)
         .getOrElse(List.empty[PendingServerRequest[SR]])
       
       // Append new requests to the list
@@ -385,11 +396,20 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
       
       // Update with the complete list
       val stateWithRequests = stateWithNewId.updated["serverRequests"](
-        SessionId.unwrap(sessionId),
+        sessionId,
         allRequests
       )
       
-      (stateWithRequests, serverRequests)
+      // Return requests with context (session ID and request ID)
+      val requestsWithContext = requestsWithIds.map { pending =>
+        ServerRequestWithContext(
+          sessionId = pending.sessionId,
+          requestId = pending.id,
+          payload = pending.payload
+        )
+      }
+      
+      (stateWithRequests, requestsWithContext)
   
   /**
    * Acknowledge server requests with cumulative acknowledgment.
@@ -402,14 +422,14 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
     ackRequestId: RequestId
   ): HMap[CombinedSchema[UserSchema]] =
     // Get pending requests list for this session
-    val pending = state.get["serverRequests"](SessionId.unwrap(sessionId))
+    val pending = state.get["serverRequests"](sessionId)
       .getOrElse(List.empty[PendingServerRequest[SR]])
     
     // Keep only requests with ID > ackRequestId (cumulative acknowledgment)
     val remaining = pending.filter(req => RequestId.unwrap(req.id) > RequestId.unwrap(ackRequestId))
     
     // Update the list
-    state.updated["serverRequests"](SessionId.unwrap(sessionId), remaining)
+    state.updated["serverRequests"](sessionId, remaining)
   
   /**
    * Get all pending server requests for a session.
@@ -418,8 +438,9 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
     state: HMap[CombinedSchema[UserSchema]],
     sessionId: SessionId
   ): List[PendingServerRequest[SR]] =
-    state.get["serverRequests"](SessionId.unwrap(sessionId))
+    state.get["serverRequests"](sessionId)
       .getOrElse(List.empty[PendingServerRequest[SR]])
+      .asInstanceOf[List[PendingServerRequest[SR]]]
   
   /**
    * Remove all session data when session expires.
@@ -428,13 +449,11 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
     state: HMap[CombinedSchema[UserSchema]],
     sessionId: SessionId
   ): HMap[CombinedSchema[UserSchema]] =
-    val sessionKey = SessionId.unwrap(sessionId)
-    
     // Remove all session data
     state
-      .removed["metadata"](sessionKey)
-      .removed["lastServerRequestId"](sessionKey)
-      .removed["serverRequests"](sessionKey)  // Remove the entire list for this session
+      .removed["metadata"](sessionId)
+      .removed["lastServerRequestId"](sessionId)
+      .removed["serverRequests"](sessionId)  // Remove the entire list for this session
     
     // Note: Cache entries for this session would need to be removed too,
     // but this requires iterating cache keys (not currently supported by HMap)
@@ -445,25 +464,11 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
   // ====================================================================================
   
   /**
-   * Create cache key for (sessionId, requestId) pair.
-   */
-  private def makeCacheKey(sessionId: SessionId, requestId: RequestId): String =
-    s"${SessionId.unwrap(sessionId)}-${RequestId.unwrap(requestId)}"
-  
-  /**
    * Clean up cached responses based on lowestRequestId (Lowest Sequence Number Protocol).
    * 
    * Removes all cached responses for the session with requestId < lowestRequestId.
    * This allows the client to control cache cleanup by telling the server which
    * responses it no longer needs (Chapter 6.3 of Raft dissertation).
-   * 
-   * NOTE: This is inefficient without HMap iteration support. In production, we would
-   * need either:
-   * 1. Access to HMap's internal map for iteration
-   * 2. A separate index tracking cache keys per session
-   * 3. A keys() method on HMap
-   * 
-   * For now, this is a placeholder that does nothing.
    */
   private def cleanupCache(
     state: HMap[CombinedSchema[UserSchema]],
@@ -473,7 +478,7 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
     // Remove all cache entries for requestIds < lowestRequestId
     // Iterate through the range [0, lowestRequestId) and remove those keys
     (0L until RequestId.unwrap(lowestRequestId)).foldLeft(state) { (s, reqId) =>
-      val cacheKey = makeCacheKey(sessionId, RequestId(reqId))
+      val cacheKey = CacheKey(sessionId, RequestId(reqId))
       s.removed["cache"](cacheKey)
     }
   

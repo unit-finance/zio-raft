@@ -1,6 +1,7 @@
 package zio.raft
 
-import zio.raft.protocol.{SessionId, RequestId}
+import zio.raft.protocol.{RequestId, SessionId}
+import zio.prelude.Newtype
 
 /**
  * Session State Machine Framework package.
@@ -14,27 +15,44 @@ import zio.raft.protocol.{SessionId, RequestId}
  * - SessionSchema: Fixed 4-prefix schema for session management
  * - CombinedSchema: Type-level concatenation of SessionSchema + UserSchema
  * - SessionCommand: ADT of commands the session state machine accepts
+ * - CacheKey: Newtype for cache keys (composite of sessionId-requestId)
  */
 package object sessionstatemachine {
   
   /**
-   * Fixed schema for session management state.
+   * Type-safe cache key for idempotency checking.
    * 
-   * This schema defines 4 prefixes with their value types:
-   * - "metadata": SessionMetadata - session information (key = sessionId)
-   * - "cache": Any - cached responses for idempotency (key = "sessionId-requestId")
-   * - "serverRequests": List[PendingServerRequest[?]] - pending requests per session (key = sessionId)
-   * - "lastServerRequestId": RequestId - last assigned server request ID per session (key = sessionId)
+   * Internally stores "sessionId-requestId" as a string but provides type safety.
+   */
+  object CacheKey extends Newtype[String]:
+    /**
+     * Create a cache key from sessionId and requestId.
+     */
+    def apply(sessionId: SessionId, requestId: RequestId): CacheKey =
+      CacheKey(s"${SessionId.unwrap(sessionId)}-${RequestId.unwrap(requestId)}")
+  
+  type CacheKey = CacheKey.Type
+  
+  /**
+   * Fixed schema for session management state with typed keys.
+   * 
+   * This schema defines 4 prefixes with their key and value types:
+   * - "metadata": (SessionId, SessionMetadata) - session information
+   * - "cache": (CacheKey, Any) - cached responses for idempotency
+   * - "serverRequests": (SessionId, List[PendingServerRequest[?]]) - pending requests per session
+   * - "lastServerRequestId": (SessionId, RequestId) - last assigned server request ID per session
+   * 
+   * All keys use newtypes for type safety.
    * 
    * The SessionStateMachine base class uses this schema to manage session state
    * automatically. Users don't interact with this schema directly - it's an
    * implementation detail of the template pattern.
    */
   type SessionSchema = 
-    ("metadata", SessionMetadata) *:
-    ("cache", Any) *:
-    ("serverRequests", List[PendingServerRequest[?]]) *:
-    ("lastServerRequestId", RequestId) *:
+    ("metadata", SessionId, SessionMetadata) *:
+    ("cache", CacheKey, Any) *:
+    ("serverRequests", SessionId, List[PendingServerRequest[?]]) *:
+    ("lastServerRequestId", SessionId, RequestId) *:
     EmptyTuple
   
   /**
@@ -44,14 +62,20 @@ package object sessionstatemachine {
    * with the user-defined schema at the type level. The result is a schema with
    * both session prefixes and user prefixes, all with compile-time type safety.
    * 
-   * @tparam UserSchema The user-defined schema (tuple of prefix-type pairs)
+   * @tparam UserSchema The user-defined schema (tuple of (Prefix, KeyType, ValueType) triples)
    * 
    * Example:
    * {{{
-   * type MyUserSchema = ("counter", Int) *: ("name", String) *: EmptyTuple
+   * type MyUserSchema = ("counter", CounterId, Int) *: ("name", NameId, String) *: EmptyTuple
    * type MyCombined = CombinedSchema[MyUserSchema]
    * // MyCombined has all 4 SessionSchema prefixes plus "counter" and "name"
    * }}}
    */
   type CombinedSchema[UserSchema <: Tuple] = Tuple.Concat[SessionSchema, UserSchema]
+  
+  /**
+   * KeyLike instances for session management keys.
+   */
+  given HMap.KeyLike[SessionId] = HMap.KeyLike.forNewtype(SessionId)
+  given HMap.KeyLike[CacheKey] = HMap.KeyLike.forNewtype(CacheKey)
 }

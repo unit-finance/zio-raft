@@ -78,12 +78,13 @@ object ResponseCachingSpec extends ZIOSpecDefault:
       )
     },
     
-    test("Cached response includes server requests") {
+    test("Cached response does NOT include server requests (only response is cached)") {
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
       
       val cmd = SessionCommand.ClientRequest(
         SessionId("s1"),
+        RequestId(1),
         RequestId(1),
         DoWork("test")
       )
@@ -93,8 +94,9 @@ object ResponseCachingSpec extends ZIOSpecDefault:
       val (state2, response2) = sm.apply(cmd).run(state1)
       
       assertTrue(
-        response1._2.nonEmpty &&  // Has server requests
-        response2._2 == response1._2  // Server requests also cached
+        response1._2.nonEmpty &&  // First execution has server requests
+        response2._2.isEmpty &&  // Cached response has empty server requests list
+        response1._1 == response2._1  // But response value is the same
       )
     },
     

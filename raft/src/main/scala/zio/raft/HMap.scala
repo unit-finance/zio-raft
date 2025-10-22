@@ -163,6 +163,34 @@ final case class HMap[M <: Tuple](private val m: Map[String, Any] = Map.empty):
     (using Contains[M, P]): HMap[M] =
     copy(m = m.removed(fullKey[P](key)))
 
+
+  /** 
+   * Returns an iterator over (key, value) pairs for the specified prefix.
+   * Only entries belonging to prefix P are included; key is the logical key (without prefix).
+   * 
+   * @tparam P The prefix (must be present in the schema)
+   * @return Iterator of (key, value) pairs for the prefix P
+   * 
+   * @example
+   * {{{
+   * type Schema = ("users", String) *: ("orders", Int) *: EmptyTuple
+   * val hmap = HMap.empty[Schema]
+   *   .updated["users"]("u1", "alice")
+   *   .updated["users"]("u2", "bob")
+   * 
+   * hmap.prefixIterator["users"].toList // List(("u1", "alice"), ("u2", "bob"))
+   * }}}
+   */
+  def iterator[P <: String & Singleton : ValueOf](using Contains[M, P]): Iterator[(String, ValueAt[M, P])] = {
+    val prefix = valueOf[P] + "\\"
+    m.iterator.collect {
+      case (k, v) if k.startsWith(prefix) =>
+        val logicalKey = k.substring(prefix.length)
+        (logicalKey, v.asInstanceOf[ValueAt[M, P]])
+    }
+  }
+
+
   /** 
    * Explicitly narrow the HMap to a subset schema.
    * 

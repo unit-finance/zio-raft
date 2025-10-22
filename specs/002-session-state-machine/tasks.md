@@ -79,14 +79,16 @@
 - [ ] **T008** [P] Implement SessionMetadata case class
   - **File**: `session-state-machine/src/main/scala/zio/raft/sessionstatemachine/SessionMetadata.scala`
   - **Fields**: `sessionId: SessionId`, `capabilities: Map[String, String]`, `createdAt: Instant`
+  - **Constitution Note**: `createdAt` timestamp must come from ZIO Clock service, not `Instant.now()` (Constitution IV)
   - **Success**: T004 passes
 
 - [ ] **T009** [P] Implement PendingServerRequest[SR] case class
   - **File**: `session-state-machine/src/main/scala/zio/raft/sessionstatemachine/PendingServerRequest.scala`
   - **Fields**: `id: RequestId`, `sessionId: SessionId`, `payload: SR`, `lastSentAt: Instant` (NOT Optional)
+  - **Constitution Note**: `lastSentAt` timestamp must come from ZIO Clock service, not `Instant.now()` (Constitution IV)
   - **Success**: T005 passes
 
-- [ ] **T010** [P] Define SessionSchema type alias
+- [ ] **T010** Define SessionSchema and CombinedSchema type aliases
   - **File**: `session-state-machine/src/main/scala/zio/raft/sessionstatemachine/package.scala`
   - **Content**:
     ```scala
@@ -96,15 +98,13 @@
       ("serverRequests", PendingServerRequest[?]) *:
       ("lastServerRequestId", RequestId) *:
       EmptyTuple
+    
+    type CombinedSchema[UserSchema <: Tuple] = Tuple.Concat[SessionSchema, UserSchema]
     ```
-  - **Success**: Compiles, schema types defined
+  - **Note**: T010 and T011 combined - both modify same file (package.scala)
+  - **Success**: T007 passes, schema types compile
 
-- [ ] **T011** [P] Define CombinedSchema[UserSchema] type alias
-  - **File**: `session-state-machine/src/main/scala/zio/raft/sessionstatemachine/package.scala`
-  - **Content**: `type CombinedSchema[UserSchema <: Tuple] = Tuple.Concat[SessionSchema, UserSchema]`
-  - **Success**: T007 passes
-
-- [ ] **T012** Implement SessionCommand[UC <: Command] ADT
+- [ ] **T011** Implement SessionCommand[UC <: Command] ADT
   - **File**: `session-state-machine/src/main/scala/zio/raft/sessionstatemachine/SessionCommand.scala`
   - **Cases**: ClientRequest, ServerRequestAck, SessionCreationConfirmed, SessionExpired, GetRequestsForRetry
   - **Note**: Each case defines its own Response type (dependent types)
@@ -116,7 +116,7 @@
 
 ### Contract Tests (Write FIRST - Must Fail)
 
-- [ ] **T013** [P] Contract test for template method (apply) behavior
+- [ ] **T012** [P] Contract test for template method (apply) behavior
   - **File**: `session-state-machine/src/test/scala/zio/raft/sessionstatemachine/SessionStateMachineTemplateSpec.scala`
   - **Tests**: Template method is final, calls abstract methods in correct order
   - **Status**: MUST FAIL
@@ -217,11 +217,12 @@
     - `expireSession`: Remove all session data
   - **Success**: Helper methods work correctly
 
-- [ ] **T028** Implement hasPendingRequests query method
+- [ ] **T027** Implement hasPendingRequests query method (dirty read for FR-027)
   - **File**: `session-state-machine/src/main/scala/zio/raft/sessionstatemachine/SessionStateMachine.scala`
   - **Logic**: Check for pending requests with `lastSentAt < threshold`
-  - **Purpose**: Dirty read optimization for retry process
-  - **Success**: Query method works, T013, T018 pass
+  - **Purpose**: **Dirty read optimization** - allows retry process to query state without Raft consensus
+  - **Note**: This enables FR-027 dirty read optimization - external process can check if retries needed before sending GetRequestsForRetry command
+  - **Success**: Query method works, template method tests pass
 
 ---
 
@@ -332,6 +333,12 @@
   - **Cleanup**: Remove unused imports, format code, fix warnings
   - **Success**: Code clean and review-ready
 
+- [ ] **T044** [P] Update design documentation for final architecture
+  - **Files**: spec.md, research.md, contracts/ (verify consistency with implementation)
+  - **Purpose**: Ensure all design documents reflect actual implementation
+  - **Note**: May already be done if implementation matches current docs
+  - **Success**: All docs consistent with code
+
 ---
 
 ## Dependencies
@@ -341,20 +348,22 @@ Setup (T001-T003)
   ↓
 Core Types Tests (T004-T007) [P]
   ↓
-Core Types Implementation (T008-T012) [P]
+Core Types Implementation (T008-T011) [P]
   ↓
-SessionStateMachine Tests (T013-T018) [P]
+SessionStateMachine Tests (T012-T017) [P]
   ↓
-SessionStateMachine Implementation (T019-T028)
+SessionStateMachine Implementation (T018-T027)
   ↓
-KVStore Tests (T029-T030) [P]
+KVStore Tests (T028-T029) [P]
   ↓
-KVStore Implementation (T031-T036)
+KVStore Implementation (T030-T035)
   ↓
-Tests & Polish (T037-T043)
+Tests & Polish (T036-T044)
 ```
 
-**Critical Path**: T001 → T003 → (T004-T007 parallel) → (T008-T012 parallel) → (T013-T018 parallel) → (T019-T028 sequential) → (T029-T030 parallel) → (T031-T036 sequential) → (T037) → (T038-T043 parallel for docs/polish)
+**Critical Path**: T001 → T003 → (T004-T007 parallel) → (T008-T011 parallel) → (T012-T017 parallel) → (T018-T027 sequential) → (T028-T029 parallel) → (T030-T035 sequential) → (T036) → (T037-T044 parallel for docs/polish)
+
+**Note**: Task numbers renumbered after combining T010 and T011 (both modified package.scala). Added T044 for documentation consistency verification.
 
 ---
 
@@ -373,9 +382,8 @@ sbt "testOnly *SchemaSpec"
 Different files, no dependencies:
 - T008: SessionMetadata.scala
 - T009: PendingServerRequest.scala
-- T010: package.scala (SessionSchema)
-- T011: package.scala (CombinedSchema)
-- T012: SessionCommand.scala
+- T010: package.scala (SessionSchema + CombinedSchema - combined task)
+- T011: SessionCommand.scala
 
 ### Phase 3.3 - Contract Tests (All Parallel)
 ```bash
@@ -409,7 +417,7 @@ sbt "testOnly *InvariantSpec"
 | Unit Tests | T037 | 2 hours | N/A |
 | Documentation | T038-T041 | 3 hours | All |
 | Polish | T042-T043 | 2 hours | Sequential |
-| **Total** | **43 tasks** | **38 hours** | **60% parallel** |
+| **Total** | **42 tasks** | **38 hours** | **60% parallel** |
 
 ---
 

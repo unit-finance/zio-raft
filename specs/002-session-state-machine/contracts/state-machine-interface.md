@@ -1,12 +1,14 @@
-# Contract: UserStateMachine Interface
+# Contract: SessionStateMachine Abstract Methods
 
 **Feature**: 002-session-state-machine  
-**Type**: User-Facing Interface Contract  
+**Type**: Abstract Base Class Contract  
 **Status**: Design Complete
+
+**Note**: This contract defines the 3 protected abstract methods users must implement when extending SessionStateMachine
 
 ## Existing Interface (zio.raft.StateMachine)
 
-**Note**: SessionStateMachine extends this existing interface. User state machines use a simplified interface.
+**Note**: SessionStateMachine extends this existing interface.
 
 ```scala
 // From raft/src/main/scala/zio/raft/StateMachine.scala
@@ -29,87 +31,95 @@ trait StateMachine[S, A <: Command]:
   def shouldTakeSnapshot(lastSnaphotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean
 ```
 
-**Note**: SessionStateMachine extends this existing interface. User state machines use a simpler interface below.
-
 ---
 
-## UserStateMachine Interface (New - Simplified)
+## SessionStateMachine Abstract Base Class
 
-**Purpose**: Simplified interface for user-defined business logic. Users implement this trait, NOT the full `zio.raft.StateMachine`.
+**Purpose**: Abstract base class providing session management that users extend to add business logic.
+
+**Package**: `zio.raft.sessionstatemachine`
 
 ```scala
-package zio.raft.statemachine
+package zio.raft.sessionstatemachine
 
 import zio.prelude.State
-import scodec.Codec
+import zio.raft.{Command, HMap, StateMachine}
+import zio.raft.protocol.SessionId
 
 /**
- * Simplified state machine interface for user business logic.
+ * Abstract base class for session-aware state machines (template pattern).
  * 
- * Users implement this trait and pass it to SessionStateMachine constructor.
- * SessionStateMachine handles:
- * - Idempotency checking
- * - Response caching
- * - Server-initiated requests
- * - Snapshots (using codecs provided here)
+ * Users extend this class and implement 3 protected abstract methods for business logic.
+ * The base class handles session management, idempotency, caching automatically.
+ * 
+ * @tparam UC User command type (extends Command)
+ * @tparam SR Server request type (user-defined)
+ * @tparam UserSchema User's schema defining their state prefixes and types
  */
-trait UserStateMachine[C, R]:
+abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
+  extends StateMachine[HMap[CombinedSchema[UserSchema]], SessionCommand[UC]]:
   
   /**
-   * Apply a command to the current state.
+   * Apply a user command to the state.
    * 
    * MUST be pure and deterministic.
    * MUST NOT throw exceptions (return errors in Response).
-   * Command is already deserialized.
-   * State is Map[String, Any] - user manages their own keys.
+   * State is HMap[UserSchema] - only user prefixes are visible (state narrowing).
    * 
-   * @param command Command to apply (decoded)
-   * @return State monad with (Response, List of server-initiated requests)
+   * @param command User command to apply (already decoded)
+   * @return State monad with (response, server-initiated requests list)
    */
-  def apply(command: C): State[Map[String, Any], (R, List[ServerInitiatedRequest])]
+  protected def applyCommand(command: UC): State[HMap[UserSchema], (command.Response, List[SR])]
   
   /**
    * Handle session creation event.
    * 
    * Called when a new client session is created.
-   * State is Map[String, Any] - user can initialize per-session data.
+   * State is HMap[UserSchema] - initialize per-session data.
    * Can return server-initiated requests.
    * 
    * @param sessionId The newly created session ID
-   * @param capabilities Client capabilities from CreateSession
-   * @return State monad with list of server requests to send
+   * @param capabilities Client capabilities
+   * @return State monad with list of server requests
    */
-  def onSessionCreated(
+  protected def handleSessionCreated(
     sessionId: SessionId,
     capabilities: Map[String, String]
-  ): State[Map[String, Any], List[ServerInitiatedRequest]]
+  ): State[HMap[UserSchema], List[SR]]
   
   /**
    * Handle session expiration event.
    * 
    * Called when a client session expires or is closed.
-   * State is Map[String, Any] - user can cleanup per-session data.
+   * State is HMap[UserSchema] - cleanup per-session data.
    * Can return server-initiated requests.
    * 
    * @param sessionId The expired session ID
-   * @return State monad with list of server requests to send
+   * @return State monad with list of server requests
    */
-  def onSessionExpired(
+  protected def handleSessionExpired(
     sessionId: SessionId
-  ): State[Map[String, Any], List[ServerInitiatedRequest]]
+  ): State[HMap[UserSchema], List[SR]]
+  
+  // Template method (FINAL) - orchestrates session management
+  final def apply(command: SessionCommand[UC]): State[HMap[CombinedSchema[UserSchema]], command.Response]
+  
+  // Users must implement serialization
+  def takeSnapshot(state: HMap[CombinedSchema[UserSchema]]): Stream[Nothing, Byte]
+  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[UserSchema]]]
 ```
 
-**Key Differences from zio.raft.StateMachine**:
-- ❌ No `takeSnapshot` method (SessionStateMachine handles it)
-- ❌ No `restoreFromSnapshot` method (SessionStateMachine handles it)
-- ❌ No `shouldTakeSnapshot` method (SessionStateMachine decides)
-- ❌ No codec methods (SessionStateMachine takes ONE codec for snapshot)
-- ❌ No `emptyState` method (SessionStateMachine uses empty Map)
-- ❌ No custom state type - uses `Map[String, Any]`
-- ✅ Session lifecycle methods can return server-initiated requests
-- ✅ `apply` returns (Response, List[ServerInitiatedRequest])
-- ✅ Works with decoded types only (commands and responses)
-- ✅ Ultra-simple - just 3 methods, no type parameters for state!
+**Template Pattern Architecture**:
+- ✅ **Abstract base class** - users extend SessionStateMachine
+- ✅ **3 protected abstract methods** - users implement for their business logic
+- ✅ **Final template method** - base class defines session management flow
+- ✅ **Type-safe state** - HMap[UserSchema] with compile-time schema validation
+- ✅ **State narrowing** - users see only HMap[UserSchema], not session state
+- ✅ **Automatic merging** - user state changes merged back to combined state
+- ✅ **Session lifecycle** - abstract methods called on session creation/expiration
+- ✅ **Returns server requests** - all abstract methods can return List[SR]
+- ✅ **Users implement serialization** - choose their own library (no scodec dependency)
+- ✅ **Extends StateMachine** - base class implements full StateMachine interface
 
 ---
 
@@ -149,137 +159,46 @@ object SessionCommand:
 
 ---
 
-## How They Work Together
+## Usage Pattern (Template Pattern)
 
 ```scala
-// User implements UserStateMachine (just 3 methods!)
-class CounterStateMachine extends UserStateMachine[CounterCommand, CounterResponse]:
-  
-  def apply(command: CounterCommand): State[Map[String, Any], (CounterResponse, List[ServerInitiatedRequest])] =
-    State.modify { state =>
-      // User manages their own keys in the map
-      val counter = state.getOrElse("counter", 0).asInstanceOf[Int]
-      
-      command match
-        case CounterCommand.Increment(by) =>
-          val newCounter = counter + by
-          val newState = state.updated("counter", newCounter)
-          (newState, (CounterResponse.Success(newCounter), Nil))
-        
-        case CounterCommand.Decrement(by) if counter - by < 0 =>
-          (state, (CounterResponse.Error("Cannot go negative"), Nil))
-        
-        case CounterCommand.Decrement(by) =>
-          val newCounter = counter - by
-          val newState = state.updated("counter", newCounter)
-          (newState, (CounterResponse.Success(newCounter), Nil))
-        
-        case CounterCommand.GetValue =>
-          (state, (CounterResponse.Success(counter), Nil))
-    }
-  
-  def onSessionCreated(sessionId: SessionId, capabilities: Map[String, String]): State[Map[String, Any], List[ServerInitiatedRequest]] =
-    State.succeed(Nil)  // No initialization or server requests needed
-  
-  def onSessionExpired(sessionId: SessionId): State[Map[String, Any], List[ServerInitiatedRequest]] =
-    State.succeed(Nil)  // No cleanup or server requests needed
+// Step 1: Define your schema
+type KVSchema = ("kv", Map[String, String]) *: EmptyTuple
 
-// SessionStateMachine takes UserStateMachine + codec in constructor
-class SessionStateMachine[UserCommand, UserResponse](
-  userSM: UserStateMachine[UserCommand, UserResponse],
-  stateCodec: Codec[(String, Any)]  // ONE codec for all state
-) extends zio.raft.StateMachine[Map[String, Any], SessionCommand[?, ?]]:
+// Step 2: Extend SessionStateMachine
+class KVStateMachine extends SessionStateMachine[KVCommand, ServerReq, KVSchema]:
   
-  def emptyState: Map[String, Any] = Map.empty  // Just empty map!
+  // Step 3: Implement 3 protected abstract methods
+  protected def applyCommand(command: KVCommand): State[HMap[KVSchema], (command.Response, List[ServerReq])] = ???
+  protected def handleSessionCreated(...): State[HMap[KVSchema], List[ServerReq]] = State.succeed(Nil)
+  protected def handleSessionExpired(...): State[HMap[KVSchema], List[ServerReq]] = State.succeed(Nil)
   
-  def apply(command: SessionCommand[?, ?]): State[Map[String, Any], command.Response] =
-    State.modify { state =>
-      command match
-        case req: SessionCommand.ClientRequest[UserCommand, UserResponse] @unchecked =>
-          // 1. Check idempotency (state contains session data with "session/" prefix)
-          val cachedKey = s"session/cache/${req.sessionId}/${req.requestId}"
-          state.get(cachedKey) match
-            case Some(cached) =>
-              (state, cached.asInstanceOf[UserResponse])  // Cache hit
-            
-            case None =>
-              // 2. Delegate to user SM (command already decoded!)
-              val (newState, (userResponse, serverReqs)) = userSM.apply(req.command).run(state)
-              
-              // 3. Cache response and add server requests to session state
-              val stateWithCache = newState.updated(cachedKey, userResponse)
-              val stateWithRequests = addServerRequests(stateWithCache, req.sessionId, serverReqs)
-              
-              (stateWithRequests, userResponse)
-        
-        case ack: SessionCommand.ServerRequestAck =>
-          // Cumulative acknowledgment - remove all requests ≤ ack.requestId
-          val newState = acknowledgeRequests(state, ack.sessionId, ack.requestId)
-          (newState, ())
-        
-        case created: SessionCommand.SessionCreationConfirmed =>
-          // Add session metadata and forward to user SM
-          val stateWithSession = state.updated(
-            s"session/metadata/${created.sessionId}",
-            SessionMetadata(created.sessionId, created.capabilities, now, now)
-          )
-          
-          val (newState, serverReqs) = userSM.onSessionCreated(created.sessionId, created.capabilities)
-            .run(stateWithSession)
-          
-          val stateWithRequests = addServerRequests(newState, created.sessionId, serverReqs)
-          (stateWithRequests, ())
-        
-        case expired: SessionCommand.SessionExpired =>
-          // Forward to user SM first (can return server requests)
-          val (stateAfterUser, serverReqs) = userSM.onSessionExpired(expired.sessionId).run(state)
-          
-          // Add any server requests before removing session data
-          val stateWithRequests = addServerRequests(stateAfterUser, expired.sessionId, serverReqs)
-          
-          // Remove all session data (metadata, cache, pending requests)
-          val newState = expireSession(stateWithRequests, expired.sessionId)
-          (newState, ())
-    }
-  
-  def takeSnapshot(state: Map[String, Any]): Stream[Nothing, Byte] =
-    val entries = state.toList
-    val encoded = entries.map { case (k, v) => stateCodec.encode((k, v)).require }
-    Stream.fromIterable(encodeList(encoded).toByteArray)
-  
-  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[Map[String, Any]] =
-    stream.runCollect.map { bytes =>
-      val encodedList = decodeList(ByteVector(bytes.toArray))
-      encodedList.map { bits => stateCodec.decode(bits).require.value }.toMap
-    }
-  
-  def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
-    (commitIndex.value - lastSnapshotIndex.value) > 1000
+  // Step 4: Implement serialization (choose your library)
+  def takeSnapshot(state: HMap[CombinedSchema[KVSchema]]): Stream[Nothing, Byte] = ???
+  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[...]] = ???
 
-// Usage - MUCH simpler!
-val counterSM = new CounterStateMachine()
-val codec: Codec[(String, Any)] = ???  // User provides
-val sessionSM = new SessionStateMachine(counterSM, codec)
+// Step 5: Use it
+val kvSM = new KVStateMachine()  // Extends StateMachine, ready for Raft
 ```
 
-**Architecture Benefits**:
-- ✅ Users implement simple UserStateMachine (just 3 methods!)
-- ✅ No custom state type - uses `Map[String, Any]`
-- ✅ No codecs in UserStateMachine - SessionStateMachine takes ONE codec for snapshots
-- ✅ No emptyState in UserStateMachine - SessionStateMachine uses empty Map
-- ✅ Commands and responses already decoded (no serialization in SM)
-- ✅ Session lifecycle events can produce server-initiated requests
-- ✅ `apply` returns (Response, List[ServerInitiatedRequest])
+**Template Pattern Benefits**:
+- ✅ Extend one class, implement 3 methods + serialization
+- ✅ Type-safe state with HMap[UserSchema] - compile-time checking
+- ✅ No separate trait to implement - just extend base class
+- ✅ Template method is final - framework controls session management
+- ✅ State narrowing: users see only HMap[UserSchema], not session internals
+- ✅ Users choose serialization library (no forced dependency)
+- ✅ Commands already decoded (UC extends Command with dependent Response type)
+- ✅ Session lifecycle coordination automatic
 - ✅ SessionStateMachine extends existing zio.raft.StateMachine (Constitution III)
-- ✅ Ultra-simple: user manages keys in Map, SessionStateMachine handles rest
 
 ---
 
-## UserStateMachine Contract Specification
+## Abstract Methods Contract Specification
 
-### Postconditions for UserStateMachine
+### Postconditions for Abstract Methods
 
-#### PC-1: Determinism
+#### PC-1: Determinism (applyCommand)
 ```gherkin
 Given any state S and command C
 When apply(S, C) is called multiple times
@@ -371,108 +290,129 @@ case class GetValue() extends Command
 
 ## Example Implementation
 
-### Counter State Machine
+### KV Store State Machine (Template Pattern)
 
 ```scala
 import zio.*
+import zio.prelude.State
+import zio.raft.sessionstatemachine.*
+import zio.raft.{Command, HMap}
 import scodec.*
 import scodec.bits.*
 import scodec.codecs.*
 
-class CounterStateMachine extends StateMachine[Int, CounterCommand, CounterResponse]:
-  
-  def apply(state: Int, command: CounterCommand): UIO[(Int, CounterResponse)] =
-    command match
-      case CounterCommand.Increment(by) =>
-        val newState = state + by
-        ZIO.succeed((newState, CounterResponse.Success(newState)))
-      
-      case CounterCommand.Decrement(by) if state - by < 0 =>
-        // Error in response, not exception
-        ZIO.succeed((state, CounterResponse.Error("Cannot go negative")))
-      
-      case CounterCommand.Decrement(by) =>
-        val newState = state - by
-        ZIO.succeed((newState, CounterResponse.Success(newState)))
-      
-      case CounterCommand.GetValue =>
-        ZIO.succeed((state, CounterResponse.Success(state)))
-  
-  def serialize(state: Int): Attempt[ByteVector] =
-    int32.encode(state)
-  
-  def deserialize(bytes: ByteVector): Attempt[Int] =
-    int32.decode(bytes.bits).map(_.value)
+// Define user's schema
+type KVSchema = ("kv", Map[String, String]) *: EmptyTuple
 
-sealed trait CounterCommand
-object CounterCommand:
-  case class Increment(by: Int) extends CounterCommand
-  case class Decrement(by: Int) extends CounterCommand
-  case object GetValue extends CounterCommand
+// Extend SessionStateMachine (template pattern)
+class KVStateMachine extends SessionStateMachine[KVCommand, ServerReq, KVSchema]:
+  
+  // Implement abstract method: applyCommand
+  protected def applyCommand(command: KVCommand): State[HMap[KVSchema], (command.Response, List[ServerReq])] =
+    State.modify { state =>
+      command match
+        case Set(key, value) =>
+          val kvMap = state.get["kv"]("store").getOrElse(Map.empty[String, String])
+          val newMap = kvMap.updated(key, value)
+          val newState = state.updated["kv"]("store", newMap)
+          (newState, ((), Nil))  // Response is Unit, no server requests
+        
+        case Get(key) =>
+          val kvMap = state.get["kv"]("store").getOrElse(Map.empty[String, String])
+          val value = kvMap.getOrElse(key, "")
+          (state, (value, Nil))  // State unchanged for read, no server requests
+    }
+  
+  // Implement abstract method: handleSessionCreated
+  protected def handleSessionCreated(sessionId: SessionId, capabilities: Map[String, String]): State[HMap[KVSchema], List[ServerReq]] =
+    State.succeed(Nil)  // No initialization needed
+  
+  // Implement abstract method: handleSessionExpired
+  protected def handleSessionExpired(sessionId: SessionId): State[HMap[KVSchema], List[ServerReq]] =
+    State.succeed(Nil)  // No cleanup needed
+  
+  // Implement serialization (user chooses library - here using scodec)
+  def takeSnapshot(state: HMap[CombinedSchema[KVSchema]]): Stream[Nothing, Byte] =
+    // Access internal map, serialize based on prefix
+    val entries = state.m.toList
+    // ... user's serialization code using scodec or other library
+    ???
+  
+  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[KVSchema]]] =
+    // ... user's deserialization code
+    ???
 
-sealed trait CounterResponse
-object CounterResponse:
-  case class Success(value: Int) extends CounterResponse
-  case class Error(message: String) extends CounterResponse
+sealed trait KVCommand extends Command
+case class Set(key: String, value: String) extends KVCommand:
+  type Response = Unit
+case class Get(key: String) extends KVCommand:
+  type Response = String
 ```
 
 ---
 
 ## Contract Tests
 
-### Test Suite: StateMachineContract
+### Test Suite: Abstract Methods Contract
 
 ```scala
 import zio.test.*
 import zio.test.Assertion.*
+import zio.raft.sessionstatemachine.*
+import zio.raft.HMap
 
-object CounterStateMachineSpec extends ZIOSpecDefault:
+// Test implementation extending SessionStateMachine
+type TestSchema = ("counter", Int) *: EmptyTuple
+
+class TestCounterSM extends SessionStateMachine[CounterCmd, ServerReq, TestSchema]:
+  protected def applyCommand(cmd: CounterCmd): State[HMap[TestSchema], (cmd.Response, List[ServerReq])] =
+    State.modify { state =>
+      val counter = state.get["counter"]("value").getOrElse(0)
+      cmd match
+        case Increment(by) =>
+          val newState = state.updated["counter"]("value", counter + by)
+          (newState, (counter + by, Nil))
+        case Decrement(by) if counter - by < 0 =>
+          (state, (-1, Nil))  // Error indicator
+        case Decrement(by) =>
+          val newState = state.updated["counter"]("value", counter - by)
+          (newState, (counter - by, Nil))
+    }
   
-  val counter = new CounterStateMachine()
+  protected def handleSessionCreated(...) = State.succeed(Nil)
+  protected def handleSessionExpired(...) = State.succeed(Nil)
+  def takeSnapshot(state) = ???
+  def restoreFromSnapshot(stream) = ???
+
+object TestCounterSMSpec extends ZIOSpecDefault:
+  
+  val counter = new TestCounterSM()
   
   def spec = suiteAll(
     
     test("PC-1: Determinism - same input produces same output"):
-      for
-        result1 <- counter.apply(0, CounterCommand.Increment(5))
-        result2 <- counter.apply(0, CounterCommand.Increment(5))
-      yield assertTrue(result1 == result2)
+      val state0 = HMap.empty[TestSchema]
+      val (state1, result1) = counter.applyCommand(Increment(5)).run(state0)
+      val (state2, result2) = counter.applyCommand(Increment(5)).run(state0)
+      assertTrue(result1 == result2)
     ,
     
     test("PC-2: Purity - original state unchanged"):
-      val originalState = 42
-      for
-        (newState, _) <- counter.apply(originalState, CounterCommand.Increment(1))
-      yield assertTrue(
-        originalState == 42 && // Original unchanged
-        newState == 43         // New state correct
+      val state0 = HMap.empty[TestSchema].updated["counter"]("value", 42)
+      val (newState, _) = counter.applyCommand(Increment(1)).run(state0)
+      assertTrue(
+        state0.get["counter"]("value") == Some(42) && // Original unchanged
+        newState.get["counter"]("value") == Some(43)   // New state correct
       )
-    ,
-    
-    test("PC-3: Serialization round-trip"):
-      check(Gen.int) { state =>
-        val serialized = counter.serialize(state)
-        val deserialized = serialized.flatMap(counter.deserialize)
-        assertTrue(deserialized == Attempt.successful(state))
-      }
     ,
     
     test("PC-4: Error handling - no exceptions"):
-      for
-        (state, response) <- counter.apply(5, CounterCommand.Decrement(10))
-      yield assertTrue(
-        state == 5 && // State unchanged on error
-        response.isInstanceOf[CounterResponse.Error]
+      val state0 = HMap.empty[TestSchema].updated["counter"]("value", 5)
+      val (state1, (result, _)) = counter.applyCommand(Decrement(10)).run(state0)
+      assertTrue(
+        state1.get["counter"]("value") == Some(5) && // State unchanged on error
+        result == -1  // Error indicator
       )
-    ,
-    
-    test("INV-1: State immutability property"):
-      check(Gen.int, Gen.int) { (state, increment) =>
-        val originalState = state
-        counter.apply(state, CounterCommand.Increment(increment)).map { (newState, _) =>
-          assertTrue(state == originalState) // Immutability verified
-        }
-      }
   )
 ```
 
@@ -480,39 +420,39 @@ object CounterStateMachineSpec extends ZIOSpecDefault:
 
 ## Integration Points
 
-### With Session State Machine
+### How Base Class Calls Abstract Methods
 
 ```scala
-class ComposableStateMachine[State, Command, Response](
-  sessionSM: SessionStateMachine,
-  userSM: StateMachine[State, Command, Response]
-):
+// Inside SessionStateMachine (base class implementation)
+abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
+  extends StateMachine[HMap[CombinedSchema[UserSchema]], SessionCommand[UC]]:
   
-  def apply(
-    sessionState: SessionState,
-    userState: State,
-    action: RaftAction.ClientRequest
-  ): UIO[(SessionState, State, Option[Response])] =
-    
-    // 1. Check idempotency
-    sessionState.findCachedResponse(action.sessionId, action.requestId) match
-      case Some(cached) =>
-        // Return cached response, no state change
-        ZIO.succeed((sessionState, userState, Some(deserializeResponse(cached))))
-      
-      case None =>
-        // 2. Apply to user state machine
-        for
-          command <- deserializeCommand(action.payload)
-          (newUserState, response) <- userSM.apply(userState, command)
-          
-          // 3. Cache response
-          newSessionState = sessionState.cacheResponse(
-            action.sessionId,
-            action.requestId,
-            serializeResponse(response)
-          )
-        yield (newSessionState, newUserState, Some(response))
+  // Template method (final) - defines the flow
+  final def apply(command: SessionCommand[UC]): State[HMap[CombinedSchema[UserSchema]], command.Response] =
+    State.modify { state =>
+      command match
+        case req: SessionCommand.ClientRequest[UC] @unchecked =>
+          // 1. Check idempotency (base class logic)
+          val cacheKey = s"${req.sessionId}/${req.requestId}"
+          state.get["cache"](cacheKey) match
+            case Some(cached) =>
+              (state, cached.asInstanceOf[req.command.Response])
+            
+            case None =>
+              // 2. Narrow state and call abstract method
+              val userState: HMap[UserSchema] = state.narrowTo[UserSchema]
+              val (userStateAfter, (response, serverReqs)) = applyCommand(req.command).run(userState)
+              
+              // 3. Merge, cache, and add server requests (base class logic)
+              val stateWithUser = mergeUserState(state, userStateAfter)
+              val stateWithCache = stateWithUser.updated["cache"](cacheKey, response)
+              (addServerRequests(stateWithCache, req.sessionId, serverReqs), response)
+        
+        case created: SessionCommand.SessionCreationConfirmed =>
+          // Narrow and call abstract method
+          val userState: HMap[UserSchema] = state.narrowTo[UserSchema]
+          val (userStateAfter, serverReqs) = handleSessionCreated(created.sessionId, created.capabilities).run(userState)
+          (mergeAndAddRequests(...), ())
 ```
 
 ---

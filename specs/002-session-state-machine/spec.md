@@ -67,27 +67,27 @@ As a developer building a distributed application on top of Raft with the client
 
 ### Acceptance Scenarios
 
-1. **Given** a developer has defined a simple user state machine (e.g., a counter), **When** a client submits a command with a new session ID and request ID, **Then** the client-server layer detects it's not a duplicate, forwards it to the user state machine, processes the command, caches the response, and returns the result to the client.
+1. **Given** a developer has extended SessionStateMachine with their business logic, **When** a client submits a command with a new session ID and request ID, **Then** the base class template method detects it's not a duplicate, narrows state to UserSchema, calls the user's applyCommand method, merges changes, caches the response, and returns the result to the client.
 
-2. **Given** a client submits the same command twice (same session ID and request ID), **When** the second request arrives, **Then** the client-server layer detects the duplicate, retrieves the cached response, and returns it without invoking the user state machine again.
+2. **Given** a client submits the same command twice (same session ID and request ID), **When** the second request arrives, **Then** the base class template method detects the duplicate, retrieves the cached response, and returns it without calling the user's applyCommand method again.
 
-3. **Given** a developer has defined a user state machine, **When** they wire it into their application by routing RaftAction events from the client-server library to the state machine and sending state machine responses back via ServerAction events, **Then** all commands flow through idempotency checking automatically.
+3. **Given** a developer has extended SessionStateMachine, **When** they wire it into their application by converting RaftAction events from the client-server library to SessionCommand and applying to the state machine, and sending state machine responses back via ServerAction events, **Then** all commands flow through the base class template method's idempotency checking automatically.
 
-4. **Given** a user state machine processes a command and returns an error, **When** the client retries with the same request ID, **Then** the cached error response is returned without reprocessing the command.
+4. **Given** a user's applyCommand method processes a command and returns an error, **When** the client retries with the same request ID, **Then** the base class template method returns the cached error response without calling applyCommand again.
 
-5. **Given** multiple clients submit different commands in parallel, **When** Raft applies these commands in consensus order, **Then** each command goes through idempotency checking and is processed exactly once by the user state machine.
+5. **Given** multiple clients submit different commands in parallel, **When** Raft applies these commands in consensus order, **Then** each command goes through the template method's idempotency checking and is processed exactly once by the user's applyCommand method.
 
-6. **Given** a user state machine generates server-initiated requests during command processing, **When** the state machine returns these requests, **Then** the user takes them and sends via ServerAction.SendServerRequest through the client-server library, and the session state machine tracks them as pending until acknowledged.
+6. **Given** a user's applyCommand method generates server-initiated requests during command processing, **When** the method returns these in the (response, List[SR]) tuple, **Then** the base class template method adds them to pending state and returns them, and the user sends them via ServerAction.SendServerRequest through the client-server library.
 
-7. **Given** a user state machine needs to produce side effects (e.g., send a message to a client), **When** processing a command, **Then** the state machine returns both a response and a list of server-initiated requests, which the user must send through the client-server library.
+7. **Given** a user's applyCommand method needs to produce side effects (e.g., send a message to a client), **When** processing a command, **Then** the method returns both a response and a list of server-initiated requests (in the tuple), which the base class returns to the user who must send them through the client-server library.
 
 8. **Given** a client receives a server-initiated request, **When** the client processes it, **Then** the client immediately sends an acknowledgment (ServerRequestAck) back to the server.
 
-9. **Given** the server receives a ServerRequestAck for request ID N, **When** it is committed through Raft, **Then** the session state machine removes all pending server-initiated requests with ID ≤ N from its pending state (cumulative acknowledgment).
+9. **Given** the server receives a ServerRequestAck for request ID N, **When** it is committed through Raft, **Then** the base class template method removes all pending server-initiated requests with ID ≤ N from the session state (cumulative acknowledgment).
 
 10. **Given** an external retry process needs to resend server-initiated requests, **When** it performs a dirty read of the state machine's unacknowledged list and applies retry policy locally, **Then** if the policy indicates requests need retry, it sends a GetRequestsForRetry command and the state machine atomically identifies requests, updates their lastSentAt, and returns the authoritative list. The process discards the dirty read data and uses only the command response. (Optimization: dirty read allows skipping command when nothing needs retry)
 
-11. **Given** a Raft cluster performs a snapshot, **When** capturing state, **Then** both the user state machine state and the client-server session state (including response cache and pending server-initiated requests) are included in the snapshot.
+11. **Given** a Raft cluster performs a snapshot, **When** the user's takeSnapshot method is called, **Then** the user serializes the entire HMap[CombinedSchema[UserSchema]] which contains both session state (SessionSchema prefixes) and user business logic state (UserSchema prefixes), including response cache and pending server-initiated requests.
 
 ### Edge Cases
 
@@ -123,11 +123,11 @@ As a developer building a distributed application on top of Raft with the client
 - **FR-015**: System MUST NOT impose size limits on cached responses (for now)
 
 #### State Machine Interface (Library Provides)
-- **FR-016**: System MUST provide a state machine interface that accepts RaftAction events (ClientRequest, ServerRequestAck, SessionCreationConfirmed, SessionExpired) and returns state transitions
+- **FR-016**: System MUST provide a state machine interface that accepts SessionCommand commands (ClientRequest, ServerRequestAck, SessionCreationConfirmed, SessionExpired, GetRequestsForRetry) and returns state transitions. Note: Users convert RaftAction events from client-server library to SessionCommand at the integration layer.
 - **FR-017**: System MUST return responses that the user can send via ServerAction.SendResponse through the client-server library (library does NOT send responses directly)
 - **FR-018**: System MUST return server-initiated requests that the user can send via ServerAction.SendServerRequest through the client-server library (library does NOT send requests directly)
-- **FR-019**: System MUST process RaftAction.ClientRequest events by performing idempotency checking, invoking user state machine, caching responses, and returning the response
-- **FR-020**: System MUST process RaftAction.ServerRequestAck events to remove acknowledged server-initiated requests from the session state machine; when processing an acknowledgment for request ID N, the system MUST remove all pending requests with ID ≤ N (cumulative acknowledgment)
+- **FR-019**: System MUST process SessionCommand.ClientRequest by performing idempotency checking, calling user's applyCommand method, caching responses, and returning the response
+- **FR-020**: System MUST process SessionCommand.ServerRequestAck to remove acknowledged server-initiated requests from the session state; when processing an acknowledgment for request ID N, the system MUST remove all pending requests with ID ≤ N (cumulative acknowledgment)
 - **FR-021**: System MUST allow user state machines to generate server-initiated requests as part of command processing, which are added to pending state and returned for the user to send
 
 #### Server-Initiated Request Management

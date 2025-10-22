@@ -53,7 +53,7 @@ object IdempotencySpec extends ZIOSpecDefault:
     protected def handleSessionCreated(sid: SessionId, caps: Map[String, String]): State[HMap[CombinedSchema[CounterSchema]], List[String]] =
       State.succeed(Nil)
     
-    protected def handleSessionExpired(sid: SessionId): State[HMap[CombinedSchema[CounterSchema]], List[String]] =
+    protected def handleSessionExpired(sid: SessionId, capabilities: Map[String, String]): State[HMap[CombinedSchema[CounterSchema]], List[String]] =
       State.succeed(Nil)
     
     def takeSnapshot(state: HMap[CombinedSchema[CounterSchema]]): Stream[Nothing, Byte] =
@@ -61,6 +61,9 @@ object IdempotencySpec extends ZIOSpecDefault:
     
     def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[CounterSchema]]] =
       ZIO.succeed(HMap.empty)
+    
+    def shouldTakeSnapshot(lastSnapshotIndex: zio.raft.Index, lastSnapshotSize: Long, commitIndex: zio.raft.Index): Boolean =
+      false
   
   def spec = suite("Idempotency Checking")(
     

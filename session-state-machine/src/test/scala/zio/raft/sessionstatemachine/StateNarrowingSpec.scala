@@ -63,7 +63,7 @@ object StateNarrowingSpec extends ZIOSpecDefault:
         (userState, Nil)
       }
     
-    protected def handleSessionExpired(sid: SessionId): State[HMap[CombinedSchema[TestUserSchema]], List[String]] =
+    protected def handleSessionExpired(sid: SessionId, capabilities: Map[String, String]): State[HMap[CombinedSchema[TestUserSchema]], List[String]] =
       State.modify { userState =>
         receivedStateType = Some("UserSchema")
         (userState, Nil)
@@ -74,6 +74,9 @@ object StateNarrowingSpec extends ZIOSpecDefault:
     
     def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[TestUserSchema]]] =
       ZIO.succeed(HMap.empty)
+    
+    def shouldTakeSnapshot(lastSnapshotIndex: zio.raft.Index, lastSnapshotSize: Long, commitIndex: zio.raft.Index): Boolean =
+      false
   
   def spec = suite("State Narrowing and Merging")(
     

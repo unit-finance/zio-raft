@@ -44,7 +44,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
     protected def handleSessionCreated(sid: SessionId, caps: Map[String, String]): State[HMap[CombinedSchema[TestSchema]], List[ServerReq]] =
       State.succeed(Nil)
     
-    protected def handleSessionExpired(sid: SessionId): State[HMap[CombinedSchema[TestSchema]], List[ServerReq]] =
+    protected def handleSessionExpired(sid: SessionId, capabilities: Map[String, String]): State[HMap[CombinedSchema[TestSchema]], List[ServerReq]] =
       State.succeed(Nil)
     
     def takeSnapshot(state: HMap[CombinedSchema[TestSchema]]): Stream[Nothing, Byte] =
@@ -52,6 +52,9 @@ object CumulativeAckSpec extends ZIOSpecDefault:
     
     def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[TestSchema]]] =
       ZIO.succeed(HMap.empty)
+    
+    def shouldTakeSnapshot(lastSnapshotIndex: zio.raft.Index, lastSnapshotSize: Long, commitIndex: zio.raft.Index): Boolean =
+      false
     
     // Helper to check pending requests
     def getPendingRequests(state: HMap[CombinedSchema[TestSchema]], sid: SessionId): List[PendingServerRequest[ServerReq]] =

@@ -68,6 +68,9 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
     
     def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[TestUserSchema]]] =
       ZIO.succeed(HMap.empty[CombinedSchema[TestUserSchema]])
+    
+    def shouldTakeSnapshot(lastSnapshotIndex: zio.raft.Index, lastSnapshotSize: Long, commitIndex: zio.raft.Index): Boolean =
+      false  // Don't take snapshots in tests
   
   def spec = suite("SessionStateMachine Template Method")(
     

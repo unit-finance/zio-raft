@@ -149,8 +149,8 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
       case cmd: SessionCommand.ServerRequestAck =>
         handleServerRequestAck(cmd).asInstanceOf[State[HMap[CombinedSchema[UserSchema]], command.Response]]
       
-      case cmd: SessionCommand.SessionCreationConfirmed =>
-        handleSessionCreationConfirmed(cmd).asInstanceOf[State[HMap[CombinedSchema[UserSchema]], command.Response]]
+      case cmd: SessionCommand.CreateSession =>
+        handleCreateSession(cmd).asInstanceOf[State[HMap[CombinedSchema[UserSchema]], command.Response]]
       
       case cmd: SessionCommand.SessionExpired =>
         handleSessionExpired_internal(cmd).asInstanceOf[State[HMap[CombinedSchema[UserSchema]], command.Response]]
@@ -225,15 +225,14 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
     }
   
   /**
-   * Handle SessionCreationConfirmed command.
+   * Handle CreateSession command.
    */
-  private def handleSessionCreationConfirmed(cmd: SessionCommand.SessionCreationConfirmed): State[HMap[CombinedSchema[UserSchema]], List[SR]] =
+  private def handleCreateSession(cmd: SessionCommand.CreateSession): State[HMap[CombinedSchema[UserSchema]], List[SR]] =
     State.modify { state =>
       // Create session metadata
       // Note: timestamp must come from ZIO Clock service in real usage
       // For state machine (pure function), we use a placeholder
       val metadata = SessionMetadata(
-        sessionId = cmd.sessionId,
         capabilities = cmd.capabilities,
         createdAt = Instant.EPOCH  // Placeholder - will be set properly in integration
       )
@@ -280,14 +279,24 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
   /**
    * Handle GetRequestsForRetry command.
    * 
-   * Returns pending server requests that need to be resent.
-   * (Note: Actual retry policy logic is in external process via dirty reads)
+   * Returns pending server requests that need to be resent, and updates their lastSentAt.
+   * Uses the provided currentTime for retry eligibility and updating timestamps.
    */
   private def handleGetRequestsForRetry(cmd: SessionCommand.GetRequestsForRetry): State[HMap[CombinedSchema[UserSchema]], List[PendingServerRequest[Any]]] =
-    State.get.map { state =>
+    State.modify { state =>
       // Get all pending requests for this session
       val pending = getPendingServerRequests(state, cmd.sessionId)
-      pending.asInstanceOf[List[PendingServerRequest[Any]]]
+      
+      // Update lastSentAt for all pending requests
+      val updatedState = pending.foldLeft(state) { (s, req) =>
+        val updated = req.copy(lastSentAt = cmd.currentTime)
+        s.updated["serverRequests"](
+          s"${SessionId.unwrap(cmd.sessionId)}-${RequestId.unwrap(req.id)}",
+          updated
+        )
+      }
+      
+      (updatedState, pending.asInstanceOf[List[PendingServerRequest[Any]]])
     }
   
   // ====================================================================================

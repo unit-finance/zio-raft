@@ -20,18 +20,15 @@ object SessionMetadataSpec extends ZIOSpecDefault:
   def spec = suite("SessionMetadata")(
     
     test("should create SessionMetadata with all fields") {
-      val sessionId = SessionId("test-session-123")
       val capabilities = Map("version" -> "1.0", "feature" -> "enabled")
       val createdAt = Instant.parse("2025-10-22T10:00:00Z")
       
       val metadata = SessionMetadata(
-        sessionId = sessionId,
         capabilities = capabilities,
         createdAt = createdAt
       )
       
       assertTrue(
-        metadata.sessionId == sessionId &&
         metadata.capabilities == capabilities &&
         metadata.createdAt == createdAt
       )
@@ -39,17 +36,16 @@ object SessionMetadataSpec extends ZIOSpecDefault:
     
     test("should be immutable (case class)") {
       val metadata1 = SessionMetadata(
-        sessionId = SessionId("session-1"),
         capabilities = Map.empty,
         createdAt = Instant.now()
       )
       
       // Creating a copy should not modify the original
-      val metadata2 = metadata1.copy(sessionId = SessionId("session-2"))
+      val metadata2 = metadata1.copy(capabilities = Map("updated" -> "true"))
       
       assertTrue(
-        metadata1.sessionId == SessionId("session-1") &&
-        metadata2.sessionId == SessionId("session-2") &&
+        metadata1.capabilities.isEmpty &&
+        metadata2.capabilities.nonEmpty &&
         metadata1 != metadata2
       )
     },
@@ -57,13 +53,11 @@ object SessionMetadataSpec extends ZIOSpecDefault:
     test("should have proper equality semantics") {
       val timestamp = Instant.parse("2025-10-22T10:00:00Z")
       val metadata1 = SessionMetadata(
-        sessionId = SessionId("session-1"),
         capabilities = Map("key" -> "value"),
         createdAt = timestamp
       )
       
       val metadata2 = SessionMetadata(
-        sessionId = SessionId("session-1"),
         capabilities = Map("key" -> "value"),
         createdAt = timestamp
       )

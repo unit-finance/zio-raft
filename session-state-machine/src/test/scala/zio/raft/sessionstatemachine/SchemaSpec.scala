@@ -38,7 +38,7 @@ object SchemaSpec extends ZIOSpecDefault:
       // These should compile with correct types
       val withMetadata = state.updated["metadata"](
         "session-1",
-        SessionMetadata(SessionId("s1"), Map.empty, java.time.Instant.now())
+        SessionMetadata(Map.empty, java.time.Instant.now())
       )
       
       val withCache = withMetadata.updated["cache"](
@@ -81,7 +81,7 @@ object SchemaSpec extends ZIOSpecDefault:
       val withSession = state
         .updated["metadata"](
           "s1",
-          SessionMetadata(SessionId("s1"), Map.empty, java.time.Instant.now())
+          SessionMetadata(Map.empty, java.time.Instant.now())
         )
         .updated["cache"]("key1", "value1")
       
@@ -135,7 +135,7 @@ object SchemaSpec extends ZIOSpecDefault:
       // Verify SessionSchema is a type alias to a tuple type
       // This is a compile-time check
       val schema: SessionSchema = (
-        ("metadata", SessionMetadata(SessionId("s1"), Map.empty, java.time.Instant.now())),
+        ("metadata", SessionMetadata(Map.empty, java.time.Instant.now())),
         ("cache", "test"),
         ("serverRequests", PendingServerRequest(RequestId(1), SessionId("s1"), "payload", java.time.Instant.now())),
         ("lastServerRequestId", RequestId(1)),

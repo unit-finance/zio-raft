@@ -109,7 +109,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
       
-      val cmd = SessionCommand.SessionCreationConfirmed(
+      val cmd = SessionCommand.CreateSession(
         SessionId("s1"),
         Map("version" -> "1.0")
       )
@@ -126,7 +126,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       
       // First create a session
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
-      val createCmd = SessionCommand.SessionCreationConfirmed(
+      val createCmd = SessionCommand.CreateSession(
         SessionId("s1"),
         Map.empty
       )

@@ -86,7 +86,7 @@ object InvariantSpec extends ZIOSpecDefault:
       
       // Create session
       val (state1, _) = sm.apply(
-        SessionCommand.SessionCreationConfirmed(sessionId, Map.empty)
+        SessionCommand.CreateSession(sessionId, Map.empty)
       ).run(state0)
       
       // Generate multiple requests - each should produce server requests with increasing IDs
@@ -125,7 +125,7 @@ object InvariantSpec extends ZIOSpecDefault:
       // Create session (adds metadata prefix)
       val sessionId = SessionId("s1")
       val (state1, _) = sm.apply(
-        SessionCommand.SessionCreationConfirmed(sessionId, Map("key1" -> "value1"))
+        SessionCommand.CreateSession(sessionId, Map("key1" -> "value1"))
       ).run(state0)
       
       // Add user data (counter prefix)
@@ -155,7 +155,7 @@ object InvariantSpec extends ZIOSpecDefault:
             
             // Create session
             val (state1, _) = sm.apply(
-              SessionCommand.SessionCreationConfirmed(sessionId, Map.empty)
+              SessionCommand.CreateSession(sessionId, Map.empty)
             ).run(state)
             
             // Execute command

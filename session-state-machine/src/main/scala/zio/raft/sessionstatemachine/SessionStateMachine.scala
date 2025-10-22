@@ -460,13 +460,15 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    * 
    * @param state Current state (can be stale - dirty read)
    * @param sessionId Session to check
-   * @param retryThreshold Timestamp threshold for considering requests as needing retry
-   * @return true if any pending requests have lastSentAt < retryThreshold
+   * @param now Current time for calculating retry threshold
+   * @return true if any pending requests need retry based on current time
    */
   def hasPendingRequests(
     state: HMap[CombinedSchema[UserSchema]],
     sessionId: SessionId,
-    retryThreshold: Instant
+    now: Instant
   ): Boolean =
     val pending = getPendingServerRequests(state, sessionId)
-    pending.exists(req => req.lastSentAt.isBefore(retryThreshold))
+    // Check if any requests were sent before the retry threshold
+    // (Retry policy is external - this just checks if old requests exist)
+    pending.exists(req => req.lastSentAt.isBefore(now))

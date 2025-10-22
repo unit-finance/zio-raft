@@ -21,10 +21,10 @@ package object sessionstatemachine {
    * Fixed schema for session management state.
    * 
    * This schema defines 4 prefixes with their value types:
-   * - "metadata": SessionMetadata - session information
-   * - "cache": Any - cached responses for idempotency
-   * - "serverRequests": PendingServerRequest[?] - pending server-initiated requests
-   * - "lastServerRequestId": RequestId - last assigned server request ID per session
+   * - "metadata": SessionMetadata - session information (key = sessionId)
+   * - "cache": Any - cached responses for idempotency (key = "sessionId-requestId")
+   * - "serverRequests": List[PendingServerRequest[?]] - pending requests per session (key = sessionId)
+   * - "lastServerRequestId": RequestId - last assigned server request ID per session (key = sessionId)
    * 
    * The SessionStateMachine base class uses this schema to manage session state
    * automatically. Users don't interact with this schema directly - it's an
@@ -33,7 +33,7 @@ package object sessionstatemachine {
   type SessionSchema = 
     ("metadata", SessionMetadata) *:
     ("cache", Any) *:
-    ("serverRequests", PendingServerRequest[?]) *:
+    ("serverRequests", List[PendingServerRequest[?]]) *:
     ("lastServerRequestId", RequestId) *:
     EmptyTuple
   

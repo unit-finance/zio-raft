@@ -103,10 +103,12 @@ object SessionCommand {
    * Benefits: Single Raft log entry, atomic operation, responses stay in state (not log)
    * 
    * @param sessionId The session to check for retry-eligible requests
-   * @param currentTime The current time for determining retry eligibility and updating lastSentAt
+   * @param lastSentBefore Only return requests where lastSentAt is before this time (retry threshold)
+   * @param currentTime The current time for updating lastSentAt on returned requests
    */
   case class GetRequestsForRetry(
     sessionId: SessionId,
+    lastSentBefore: java.time.Instant,
     currentTime: java.time.Instant
   ) extends SessionCommand[Nothing]:
     type Response = List[PendingServerRequest[Any]]

@@ -78,12 +78,21 @@ object SessionCommandSpec extends ZIOSpecDefault:
       assertTrue(expired.sessionId == SessionId("expired-session"))
     },
     
-    test("GetRequestsForRetry should contain sessionId") {
+    test("GetRequestsForRetry should contain sessionId, lastSentBefore, and currentTime") {
+      val threshold = java.time.Instant.parse("2025-10-22T10:00:00Z")
+      val now = java.time.Instant.parse("2025-10-22T11:00:00Z")
+      
       val retry = SessionCommand.GetRequestsForRetry(
-        sessionId = SessionId("retry-session")
+        sessionId = SessionId("retry-session"),
+        lastSentBefore = threshold,
+        currentTime = now
       )
       
-      assertTrue(retry.sessionId == SessionId("retry-session"))
+      assertTrue(
+        retry.sessionId == SessionId("retry-session") &&
+        retry.lastSentBefore == threshold &&
+        retry.currentTime == now
+      )
     },
     
     test("should support pattern matching") {
@@ -92,7 +101,7 @@ object SessionCommandSpec extends ZIOSpecDefault:
         SessionCommand.ServerRequestAck(SessionId("s1"), RequestId(1)),
         SessionCommand.CreateSession(SessionId("s2"), Map.empty),
         SessionCommand.SessionExpired(SessionId("s3")),
-        SessionCommand.GetRequestsForRetry(SessionId("s4"), java.time.Instant.now())
+        SessionCommand.GetRequestsForRetry(SessionId("s4"), java.time.Instant.now(), java.time.Instant.now())
       )
       
       val types = commands.map {

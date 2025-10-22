@@ -102,13 +102,17 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    * per-session state in the user schema.
    * 
    * @param sessionId The expired session ID
+   * @param capabilities The session capabilities (retrieved from metadata)
    * @return State transition returning list of final server requests
    * 
    * @note Receives full combined state - modify only UserSchema prefixes
    * @note Session metadata and cache are automatically removed by base class
    * @note Must be pure and deterministic
    */
-  protected def handleSessionExpired(sessionId: SessionId): State[HMap[CombinedSchema[UserSchema]], List[SR]]
+  protected def handleSessionExpired(
+    sessionId: SessionId, 
+    capabilities: Map[String, String]
+  ): State[HMap[CombinedSchema[UserSchema]], List[SR]]
   
   // ====================================================================================
   // StateMachine INTERFACE - Implemented by base class
@@ -173,10 +177,16 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
   def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[UserSchema]]]
   
   /**
-   * Default snapshot policy - take snapshot every 1000 entries.
+   * Snapshot policy - determines when to take snapshots.
+   * 
+   * Users must implement this to define their snapshot strategy.
+   * 
+   * @param lastSnapshotIndex Index of the last snapshot
+   * @param lastSnapshotSize Size of the last snapshot in bytes
+   * @param commitIndex Current commit index
+   * @return true if a snapshot should be taken
    */
-  def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
-    (commitIndex.value - lastSnapshotIndex.value) >= 1000
+  def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean
   
   // ====================================================================================
   // INTERNAL COMMAND HANDLERS
@@ -270,8 +280,13 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    */
   private def handleSessionExpired_internal(cmd: SessionCommand.SessionExpired): State[HMap[CombinedSchema[UserSchema]], List[SR]] =
     State.modify { state =>
-      // Call user's session expired handler first
-      val (newState, serverRequests) = handleSessionExpired(cmd.sessionId).run(state)
+      // Get capabilities from metadata before expiring
+      val capabilities = state.get["metadata"](SessionId.unwrap(cmd.sessionId))
+        .map(_.capabilities)
+        .getOrElse(Map.empty[String, String])
+      
+      // Call user's session expired handler with capabilities
+      val (newState, serverRequests) = handleSessionExpired(cmd.sessionId, capabilities).run(state)
       
       // Remove all session data
       val finalState = expireSession(newState, cmd.sessionId)
@@ -339,13 +354,18 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
         newLastId
       )
       
-      // Add requests to pending list
-      val stateWithRequests = requestsWithIds.foldLeft(stateWithNewId) { (s, req) =>
-        s.updated["serverRequests"](
-          s"${SessionId.unwrap(sessionId)}-${RequestId.unwrap(req.id)}",
-          req
-        )
-      }
+      // Get existing pending requests for this session
+      val existingRequests = state.get["serverRequests"](SessionId.unwrap(sessionId))
+        .getOrElse(List.empty[PendingServerRequest[SR]])
+      
+      // Append new requests to the list
+      val allRequests = existingRequests ++ requestsWithIds
+      
+      // Update with the complete list
+      val stateWithRequests = stateWithNewId.updated["serverRequests"](
+        SessionId.unwrap(sessionId),
+        allRequests
+      )
       
       (stateWithRequests, serverRequests)
   
@@ -359,35 +379,25 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
     sessionId: SessionId,
     ackRequestId: RequestId
   ): HMap[CombinedSchema[UserSchema]] =
-    // Get all pending requests for this session
-    val pending = getPendingServerRequests(state, sessionId)
+    // Get pending requests list for this session
+    val pending = state.get["serverRequests"](SessionId.unwrap(sessionId))
+      .getOrElse(List.empty[PendingServerRequest[SR]])
     
-    // Remove all with ID ≤ ackRequestId (cumulative)
-    val toRemove = pending.filter(req => RequestId.unwrap(req.id) <= RequestId.unwrap(ackRequestId))
+    // Keep only requests with ID > ackRequestId (cumulative acknowledgment)
+    val remaining = pending.filter(req => RequestId.unwrap(req.id) > RequestId.unwrap(ackRequestId))
     
-    // Remove from state using HMap.removed
-    toRemove.foldLeft(state) { (s, req) =>
-      s.removed["serverRequests"](s"${SessionId.unwrap(sessionId)}-${RequestId.unwrap(req.id)}")
-    }
+    // Update the list
+    state.updated["serverRequests"](SessionId.unwrap(sessionId), remaining)
   
   /**
    * Get all pending server requests for a session.
-   * 
-   * Note: This is inefficient as it requires checking all possible keys.
-   * A better implementation would iterate the internal map.
-   * For now, we return empty list as a placeholder.
    */
   private def getPendingServerRequests(
     state: HMap[CombinedSchema[UserSchema]],
     sessionId: SessionId
   ): List[PendingServerRequest[SR]] =
-    // TODO: Need to iterate internal map or maintain separate index
-    // For now, return empty list
-    // In a real implementation, we'd need either:
-    // 1. Access to HMap's internal map for iteration
-    // 2. A separate index of request IDs per session
-    // 3. A keys() method on HMap
-    List.empty
+    state.get["serverRequests"](SessionId.unwrap(sessionId))
+      .getOrElse(List.empty[PendingServerRequest[SR]])
   
   /**
    * Remove all session data when session expires.
@@ -398,22 +408,15 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
   ): HMap[CombinedSchema[UserSchema]] =
     val sessionKey = SessionId.unwrap(sessionId)
     
-    // Remove metadata and lastServerRequestId
-    val state1 = state
+    // Remove all session data
+    state
       .removed["metadata"](sessionKey)
       .removed["lastServerRequestId"](sessionKey)
+      .removed["serverRequests"](sessionKey)  // Remove the entire list for this session
     
-    // Remove all pending server requests for this session
-    val pending = getPendingServerRequests(state1, sessionId)
-    val state2 = pending.foldLeft(state1) { (s, req) =>
-      s.removed["serverRequests"](s"$sessionKey-${RequestId.unwrap(req.id)}")
-    }
-    
-    // Remove cache entries for this session
-    // Note: This is inefficient - ideally we'd iterate all cache keys
-    // For now, we can't efficiently remove all cache entries without
-    // access to internal map or a keys() method
-    state2
+    // Note: Cache entries for this session would need to be removed too,
+    // but this requires iterating cache keys (not currently supported by HMap)
+    // TODO: Implement cache cleanup when HMap supports iteration
   
   // ====================================================================================
   // HELPER METHODS

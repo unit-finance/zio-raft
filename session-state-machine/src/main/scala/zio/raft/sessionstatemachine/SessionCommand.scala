@@ -1,8 +1,21 @@
 package zio.raft.sessionstatemachine
 
-import zio.raft.{Command, HMap}
+import zio.raft.Command
 import zio.raft.protocol.{SessionId, RequestId}
 import java.time.Instant
+
+/**
+ * Wrapper for server-initiated requests with full context.
+ * 
+ * @param sessionId The session this request belongs to
+ * @param requestId The unique request ID
+ * @param payload The actual server request payload
+ */
+case class ServerRequestWithContext[SR](
+  sessionId: SessionId,
+  requestId: RequestId,
+  payload: SR
+)
 
 /**
  * Sealed trait representing all commands that the SessionStateMachine accepts.
@@ -43,7 +56,7 @@ object SessionCommand {
     command: UC
   ) extends SessionCommand[UC, SR]:
     // Response type matches the user command's Response type
-    type Response = (command.Response, List[SR])  // (response, server requests)
+    type Response = (command.Response, List[ServerRequestWithContext[SR]])  // (response, server requests with context)
   
   /**
    * Acknowledgment from a client for a server-initiated request.
@@ -77,7 +90,7 @@ object SessionCommand {
     sessionId: SessionId,
     capabilities: Map[String, String]
   ) extends SessionCommand[Nothing, SR]:
-    type Response = List[SR]  // server requests
+    type Response = List[ServerRequestWithContext[SR]]  // server requests with context
   
   /**
    * Notification that a session has expired.
@@ -94,7 +107,7 @@ object SessionCommand {
     createdAt: Instant,
     sessionId: SessionId
   ) extends SessionCommand[Nothing, SR]:
-    type Response = List[SR]  // server requests
+    type Response = List[ServerRequestWithContext[SR]]  // server requests with context
   
   /**
    * Command to atomically retrieve requests needing retry and update lastSentAt.
@@ -108,13 +121,10 @@ object SessionCommand {
    * 
    * Benefits: Single Raft log entry, atomic operation, responses stay in state (not log)
    * 
-   * @param sessionId The session to check for retry-eligible requests
    * @param lastSentBefore Only return requests where lastSentAt is before this time (retry threshold)
-   * @param currentTime The current time for updating lastSentAt on returned requests
    */
   case class GetRequestsForRetry[SR](
     createdAt: Instant,
-    sessionId: SessionId,
     lastSentBefore: Instant
   ) extends SessionCommand[Nothing, SR]:
     type Response = List[PendingServerRequest[SR]]

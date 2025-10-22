@@ -1,6 +1,5 @@
 package zio.raft.sessionstatemachine
 
-import zio.raft.protocol.SessionId
 import java.time.Instant
 
 /**

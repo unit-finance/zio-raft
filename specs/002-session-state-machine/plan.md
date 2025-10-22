@@ -33,45 +33,51 @@
 
 ## Summary
 
-This feature implements a session state machine framework for ZIO Raft that provides linearizable semantics and exactly-once command execution. Based on Chapter 6.3 of the Raft dissertation, the SessionStateMachine wraps user-defined business logic state machines and automatically handles: idempotency checking, response caching, server-initiated request management, and session lifecycle event forwarding. 
+This feature implements a session state machine framework for ZIO Raft that provides linearizable semantics and exactly-once command execution. Based on Chapter 6.3 of the Raft dissertation, the SessionStateMachine is an abstract base class that users extend to add session management to their business logic. The framework uses the template pattern - the base class defines the session management skeleton, users implement 3 abstract methods for their specific logic.
 
-**Core Capability**: Developers define custom state machines that process commands deterministically while the framework automatically handles:
+**Core Capability**: Developers extend SessionStateMachine and implement 3 protected methods (`applyCommand`, `handleSessionCreated`, `handleSessionExpired`) while the base class automatically handles:
 - Idempotency checking via (sessionId, requestId) pairs
 - Response caching for duplicate detection
 - Server-initiated request tracking with cumulative acknowledgments
-- State snapshotting using shared dictionary with key prefixes
+- State type safety via HMap with compile-time schema validation
 
-**Architectural Approach**: The library provides state machine logic only (pure functions accepting RaftAction events and returning state transitions). Users are responsible for integration glue: wiring events from client-server library to state machine, sending responses via ServerAction events, and implementing retry processes with dirty reads for optimization.
+**Architectural Approach (Template Pattern)**: The library provides an abstract base class with session management logic. Users extend this class and:
+1. Define their schema (prefixes and types)
+2. Implement 3 abstract methods for business logic
+3. Implement serialization methods (choose their own library)
+The base class provides the session management skeleton, users fill in specifics. No serialization dependencies in the library.
 
 ## Technical Context
 **Language/Version**: Scala 3.3+  
-**Primary Dependencies**: ZIO 2.1+, scodec (for serialization), existing client-server-server library  
-**Storage**: State maintained in Raft log + snapshots; uses shared Map[String, ByteVector] dictionary with key prefixes  
+**Primary Dependencies**: ZIO 2.1+ (no scodec - serialization is user's responsibility)  
+**Storage**: State maintained in Raft log + snapshots; uses HMap with type-safe prefixes  
 **Testing**: ZIO Test with `suiteAll` macro, property-based tests for state machine transitions  
 **Target Platform**: JVM (cross-platform via Scala)  
 **Project Type**: Single library module (`state-machine` or similar) integrated into existing ZIO Raft project  
 **Performance Goals**: Deterministic O(1) idempotency checks; no size limits on response cache (for now); dirty reads for retry optimization  
-**Constraints**: Must not modify client-server library interfaces; user state machines MUST NOT throw exceptions (errors in response payload); cumulative acknowledgment for efficiency  
-**Scale/Scope**: Single state machine module (~1500-2000 LOC); integrates with existing 6-module project structure
+**Constraints**: Must not modify client-server library interfaces; user state machines MUST NOT throw exceptions (errors in response payload); cumulative acknowledgment for efficiency; library is serialization-agnostic (users provide their own)  
+**Scale/Scope**: Single state machine module (~1200-1500 LOC); integrates with existing 6-module project structure
 
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
 ### I. Functional Purity & Type Safety
 - [x] All new code uses immutable data structures and ZIO effect types
-  - State machine state stored in immutable case classes
+  - State stored in immutable HMap with type-safe schema
   - All operations return ZIO effects, no direct side effects
 - [x] No unsafe operations (casting, reflection) introduced
-  - Using scodec for type-safe serialization
+  - HMap provides compile-time type safety for state access
   - Pattern matching for type-safe command routing
+  - Serialization delegated to user (library has no unsafe serialization code)
 - [x] Type safety preserved throughout implementation
   - Sealed traits for command types
+  - Compile-time schema validation via HMap
   - Compile-time guarantees for state transitions
 
 ### II. Explicit Error Handling
 - [x] All external interactions have explicit error handling
   - User state machines return results in response payload (no exceptions per FR-014)
-  - Serialization errors explicitly handled via scodec Attempt types
+  - Serialization errors handled by user (library has no serialization code)
 - [x] Business logic errors use ZIO.fail or Either types, not exceptions
   - Errors modeled in response payload, cached for idempotency
   - State machine failures return UIO (cannot fail)
@@ -81,16 +87,17 @@ This feature implements a session state machine framework for ZIO Raft that prov
 
 ### III. Existing Code Preservation (NON-NEGOTIABLE)
 - [x] Core interfaces (StateMachine, RPC, LogStore) not modified without architectural review
-  - **EXTENDS existing zio.raft.StateMachine trait**, doesn't create new interface
-  - SessionStateMachine implements StateMachine[SessionState, SessionCommand]
-  - User state machines also implement StateMachine[UserState, UserCommand]
+  - **SessionStateMachine extends existing zio.raft.StateMachine trait**, doesn't create new interface
+  - SessionStateMachine is abstract base class extending StateMachine[HMap[CombinedSchema], SessionCommand]
+  - Users extend SessionStateMachine and implement 3 abstract methods
   - Integrates via existing RaftAction and ServerAction events
 - [x] Backward compatibility maintained for public APIs
   - Purely additive: new module, no changes to existing modules
   - Uses ZIO Prelude State monad as per existing interface
-  - Users wire state machine to existing events
+  - Users extend base class and wire to existing events
 - [x] No performance degradation without measurement and justification
-  - O(1) idempotency checks via Map lookups
+  - O(1) idempotency checks via HMap/Map lookups
+  - HMap has zero runtime overhead vs Map[String, Any]
   - Dirty reads optimize retry process to avoid unnecessary Raft log entries
 
 ### IV. ZIO Ecosystem Consistency
@@ -224,27 +231,33 @@ ios/ or android/
 **Task Generation Strategy**:
 1. **Data Model Tasks** (from data-model.md):
    - Create core types (SessionMetadata, PendingServerRequest[SR])
-   - Create UserStateMachine[UC <: Command, SR] trait (3 methods - no snapshot methods, no state type param, UC has its own Response)
+   - Define SessionSchema type alias (4 prefixes with their value types)
+   - Define CombinedSchema[UserSchema] type alias (concatenates SessionSchema and UserSchema)
    - Create SessionCommand[UC <: Command] ADT (extends Command with dependent type Response)
-   - Create SessionStateMachine[UC <: Command, SR] class (takes UserStateMachine + ONE Codec[(String, Any)])
+   - Create abstract SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple] class with:
+     * 3 protected abstract methods (applyCommand, handleSessionCreated, handleSessionExpired)
+     * Final template method (apply) that calls abstract methods
+     * Abstract snapshot methods (takeSnapshot, restoreFromSnapshot)
    - [P] All type definitions can be done in parallel
 
 2. **Contract Test Tasks** (from contracts/):
-   - UserStateMachine interface contract tests
-   - SessionStateMachine contract tests (composition + idempotency + cumulative ack)
+   - SessionStateMachine abstract method contracts (applyCommand, handleSessionCreated, handleSessionExpired)
+   - SessionStateMachine template method tests (idempotency + cumulative ack + caching)
    - Property-based tests for invariants (idempotency, cumulative ack, snapshot)
+   - HMap schema type safety tests
    - [P] Test files independent, can be written in parallel
 
 3. **Implementation Tasks** (TDD - make tests pass):
-   - Implement SessionStateMachine (takes UserStateMachine in constructor)
-   - Implement idempotency checking logic
+   - Implement SessionStateMachine abstract base class with template method
+   - Implement idempotency checking logic in template method
    - Implement cumulative acknowledgment logic
-   - Implement snapshot serialization/deserialization (both session + user state)
+   - Implement state narrowing and merging helpers
    - Sequential (tests must exist first)
 
 4. **Integration Tasks** (from quickstart.md):
-   - Create CounterStateMachine example (implements UserStateMachine)
-   - Instantiate SessionStateMachine with CounterStateMachine
+   - Create CounterStateMachine example (extends SessionStateMachine)
+   - Implement CounterSchema and 3 abstract methods
+   - Implement serialization (takeSnapshot/restoreFromSnapshot) using scodec
    - Wire to RaftServer event stream
    - Integration tests with full flow
    - Sequential (depends on core implementation)
@@ -256,9 +269,9 @@ ios/ or android/
 
 **Ordering Strategy**:
 - TDD order: Tests before implementation 
-- Dependency order: Types → Codecs → SessionSM (with UserSM in constructor) → Integration
+- Dependency order: Types → SessionSM (abstract base class) → Integration (user extends base)
 - Mark [P] for parallel execution (independent files)
-- Estimated: 24-28 numbered tasks (simplified from 28-32 due to architecture simplification)
+- Estimated: 22-26 numbered tasks (simplified due to template pattern + no library serialization)
 
 **Task Breakdown from Acceptance Scenarios**:
 - Scenario 1-2: Idempotency checking (Tasks 10-12)
@@ -305,22 +318,26 @@ ios/ or android/
 - [x] Complexity deviations documented (none - no violations)
 
 **Artifacts Generated**:
-- ✅ /specs/002-session-state-machine/plan.md (this file)
+- ✅ /specs/002-session-state-machine/plan.md (this file - updated with HMap + template pattern)
 - ✅ /specs/002-session-state-machine/research.md (9 key decisions + module structure)
-- ✅ /specs/002-session-state-machine/data-model.md (Map[String, Any] based state system)
-- ✅ /specs/002-session-state-machine/contracts/state-machine-interface.md (UserStateMachine trait - 3 methods)
+- ✅ /specs/002-session-state-machine/data-model.md (HMap-based type-safe template pattern)
+- ✅ /specs/002-session-state-machine/contracts/state-machine-interface.md (abstract methods contract)
 - ✅ /specs/002-session-state-machine/contracts/session-state-machine.md (SessionStateMachine + idempotency)
 - ✅ /specs/002-session-state-machine/quickstart.md (complete counter example)
-- ✅ /specs/002-session-state-machine/ARCHITECTURE_FINAL.md (ultra-simplified architecture)
+- ✅ /specs/002-session-state-machine/ARCHITECTURE_FINAL.md (template pattern architecture)
 - ✅ /.cursor/rules/specify-rules.mdc (updated with new tech stack info)
+- ✅ /raft/src/main/scala/zio/raft/HMap.scala (type-safe heterogeneous map - already implemented)
 
-**Contract Test Count**: 11 postconditions + 6 invariants = 17 test specifications ready for implementation
+**Contract Test Count**: 11 postconditions + 6 invariants + 1 schema safety = 18 test specifications ready for implementation
 
-**Ultra-Simplification**: 
-- UserStateMachine = just 3 methods, no state type param, no codecs
-- State always Map[String, Any]
-- SessionStateMachine takes userSM + ONE codec
-- No CombinedState, no separate classes
+**Type-Safe Template Pattern with HMap**: 
+- SessionStateMachine[UC, SR, UserSchema] = abstract base class with 3 protected abstract methods
+- Users extend SessionStateMachine and implement methods for their business logic
+- SessionSchema = fixed 4-prefix schema for session management
+- CombinedSchema[U] = type-level concatenation of SessionSchema and UserSchema
+- Compile-time type checking for all state access
+- Zero runtime overhead vs Map[String, Any]
+- No serialization dependencies in library
 
 ---
 
@@ -354,12 +371,16 @@ The `/plan` command has successfully completed Phases 0-2 (planning phases only)
 
 ### 📋 Design Highlights
 
-**State Machine Architecture**:
+**State Machine Architecture (Template Pattern)**:
 - Pure functional design (no side effects)
-- **SessionStateMachine** takes **UserStateMachine** in constructor (composition via dependency injection)
+- **Type-safe state with HMap** - compile-time checking for all state access
+- **SessionStateMachine** is abstract base class that users extend (template pattern)
 - SessionStateMachine extends existing `zio.raft.StateMachine` trait
-- UserStateMachine = simplified trait (no snapshot methods - SessionSM handles snapshots)
-- Shared dictionary snapshots with key prefixes ("session/", "user/")
+- Users implement 3 protected abstract methods for their business logic
+- Users implement serialization methods (library has no serialization dependencies)
+- **Schema-driven design**: SessionSchema + UserSchema → CombinedSchema (type-level concatenation)
+- State narrowing: pass HMap[UserSchema] to user methods, automatically merged back
+- Template method `apply` is final - defines session management flow
 - Cumulative acknowledgments for efficiency
 
 **Key Optimizations**:
@@ -367,10 +388,11 @@ The `/plan` command has successfully completed Phases 0-2 (planning phases only)
 - Dirty reads to skip unnecessary Raft log entries
 - Single command for retry (GetRequestsForRetry) atomically retrieves + updates
 
-**Integration Model**:
-- Library provides state machine logic only (pure functions)
+**Integration Model (Template Pattern)**:
+- Library provides abstract base class with session management skeleton
+- User extends base class and implements 3 abstract methods + serialization
 - User responsible for wiring to client-server library
-- Clear separation of concerns (state vs transport)
+- Clear separation of concerns (session management vs business logic vs serialization)
 
 ### 🚀 Next Steps
 
@@ -386,7 +408,7 @@ The `/plan` command has successfully completed Phases 0-2 (planning phases only)
 - 17 test specifications
 - Integration examples
 
-**Ultra-Simplified Architecture**:
+**Type-Safe Template Pattern with HMap**:
 ```scala
 // User defines their Command type (extends Command with dependent Response)
 sealed trait CounterCmd extends Command
@@ -394,84 +416,108 @@ object CounterCmd:
   case class Increment(by: Int) extends CounterCmd:
     type Response = Int
 
-// User implements UserStateMachine (just 3 methods, NO state type param!)
-class CounterSM extends UserStateMachine[CounterCmd, ServerReq]:
-  def apply(cmd: CounterCmd): State[Map[String, Any], (cmd.Response, List[ServerReq])] = ???
-  def onSessionCreated(sid, caps): State[Map[String, Any], List[ServerReq]] = State.succeed(Nil)
-  def onSessionExpired(sid): State[Map[String, Any], List[ServerReq]] = State.succeed(Nil)
+// User defines their schema (prefixes and types)
+type CounterSchema = 
+  ("counter", Int) *:
+  EmptyTuple
 
-// User provides ONE codec for state serialization
-val codec: Codec[(String, Any)] = ???
+// User extends SessionStateMachine (template pattern!)
+class CounterSM extends SessionStateMachine[CounterCmd, ServerReq, CounterSchema]:
+  
+  // Implement 3 abstract methods
+  protected def applyCommand(cmd: CounterCmd): State[HMap[CounterSchema], (cmd.Response, List[ServerReq])] = 
+    State.modify { state =>
+      cmd match
+        case Increment(by) =>
+          val current = state.get["counter"]("value").getOrElse(0)  // Type: Option[Int]
+          val newState = state.updated["counter"]("value", current + by)  // Type-checked!
+          (newState, (current + by, Nil))
+    }
+  
+  protected def handleSessionCreated(sid, caps): State[HMap[CounterSchema], List[ServerReq]] = 
+    State.succeed(Nil)
+  
+  protected def handleSessionExpired(sid): State[HMap[CounterSchema], List[ServerReq]] = 
+    State.succeed(Nil)
+  
+  // Implement serialization (user chooses library - example uses scodec)
+  def takeSnapshot(state: HMap[CombinedSchema[CounterSchema]]): Stream[Nothing, Byte] = ???
+  
+  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[CounterSchema]]] = ???
 
-// Pass UserSM + codec to SessionStateMachine constructor
-val sessionSM = new SessionStateMachine[CounterCmd, ServerReq](counterSM, codec)
+// Use the state machine
+val counterSM = new CounterSM()
 
-// SessionStateMachine extends zio.raft.StateMachine[Map[String, Any], SessionCommand[CounterCmd]]
-// Handles: idempotency, caching, server requests, snapshots, session lifecycle
-// State is Map[String, Any] - user picks keys, session uses "session/" prefix
-// Works with decoded types - NO serialization in state machine!
+// counterSM extends zio.raft.StateMachine[HMap[CombinedSchema[CounterSchema]], SessionCommand[CounterCmd]]
+// CombinedSchema = SessionSchema ++ CounterSchema (type-level concatenation)
+// Base class handles: idempotency, caching, server requests, session lifecycle
+// User implements: business logic + serialization
+// Compile-time type safety for all state access!
 ```
 
-**Architecture Diagram**:
+**Architecture Diagram (Template Pattern)**:
 ```
-┌───────────────────────────────────────────────────────────────────┐
-│   SessionStateMachine[UC <: Command, SR]                         │
-│                                                                   │
-│  extends zio.raft.StateMachine[Map[String, Any],                 │
-│                                 SessionCommand[UC]]               │
-├───────────────────────────────────────────────────────────────────┤
-│  Constructor:                                                     │
-│    userSM: UserStateMachine[UC, SR]                             │
-│    stateCodec: Codec[(String, Any)]    ← ONE codec for all!     │
-│                                                                   │
-│  State: Map[String, Any]                                         │
-│    Keys with "session/" prefix - session management             │
-│    Keys without prefix - user data                              │
-│                                                                   │
-│  Command Flow:                                                    │
-│    ClientRequest(sid, rid, cmd) ──┐   cmd already decoded!      │
-│                                    ├→ Check cache ──┐            │
-│                                    │              Hit│Miss        │
-│                                    │                 ↓            │
-│                                    │         userSM.apply(cmd)   │
-│                                    │                 ↓            │
-│                                    └← Cache (resp, serverReqs)   │
-│                                                                   │
-│    SessionCreated → userSM.onSessionCreated() → serverReqs       │
-│    SessionExpired → userSM.onSessionExpired() → serverReqs       │
-│    ServerRequestAck → Remove ≤ N (cumulative)                    │
-│                                                                   │
-│  Snapshot:                                                        │
-│    Uses stateCodec.encode((k, v)) for each Map entry            │
-│    NO separation - user and session share same Map              │
-└───────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│   SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]         │
+│   (ABSTRACT BASE CLASS)                                                │
+│                                                                        │
+│  extends zio.raft.StateMachine[HMap[CombinedSchema[UserSchema]],      │
+│                                 SessionCommand[UC]]                    │
+├────────────────────────────────────────────────────────────────────────┤
+│  Schema (Type Level):                                                  │
+│    SessionSchema = ("metadata", SessionMetadata) *:                   │
+│                    ("cache", Any) *:                                  │
+│                    ("serverRequests", PendingServerRequest[?]) *:     │
+│                    ("lastServerRequestId", RequestId) *: EmptyTuple   │
+│    CombinedSchema[U] = Tuple.Concat[SessionSchema, U]                │
+│                                                                        │
+│  State: HMap[CombinedSchema[UserSchema]]   ← Type-safe!               │
+│    Access: state.get["metadata"](key) → Option[SessionMetadata]      │
+│    Update: state.updated["cache"](key, resp) → HMap (type-checked!)  │
+│                                                                        │
+│  Template Method (FINAL):                                             │
+│    final def apply(command: SessionCommand[UC]) =                     │
+│      ClientRequest(sid, rid, cmd) ──┐   cmd already decoded!         │
+│                                      ├→ Check cache ──┐               │
+│                                      │              Hit│Miss           │
+│                                      │                 ↓               │
+│                                      │    state.narrowTo[UserSchema]  │
+│                                      │    applyCommand(cmd) ← ABSTRACT│
+│                                      │    mergeUserState(...)         │
+│                                      │                 ↓               │
+│                                      └← Cache (resp, serverReqs)      │
+│                                                                        │
+│      SessionCreated → narrow → handleSessionCreated() ← ABSTRACT     │
+│      SessionExpired → narrow → handleSessionExpired() ← ABSTRACT     │
+│      ServerRequestAck → Remove ≤ N (cumulative)                       │
+│                                                                        │
+│  Abstract Methods (USER IMPLEMENTS):                                   │
+│    protected def applyCommand(cmd: UC): State[HMap[UserSchema], ...] │
+│    protected def handleSessionCreated(...): State[HMap[UserSchema],...│
+│    protected def handleSessionExpired(...): State[HMap[UserSchema],...│
+│    def takeSnapshot(state): Stream[Nothing, Byte]  ← USER SERIALIZES │
+│    def restoreFromSnapshot(stream): UIO[HMap[...]] ← USER DESERIALIZES│
+└────────────────────────────────────────────────────────────────────────┘
                               ▲
-                              │ uses
+                              │ extends (template pattern)
                               │
-┌───────────────────────────────────────────────────────────────────┐
-│  UserStateMachine[UC <: Command, SR] ← NO State param!         │
-├───────────────────────────────────────────────────────────────────┤
-│  def apply(cmd: UC): State[Map[String, Any],                    │
-│                              (cmd.Response, List[SR])]          │
-│  def onSessionCreated(...): State[Map[String, Any], List[SR]]  │
-│  def onSessionExpired(...): State[Map[String, Any], List[SR]]  │
-│                                                                   │
-│  UC extends Command - has its own Response type!                │
-│  State always Map[String, Any] - user picks keys!               │
-│  NO codecs, NO emptyState, NO snapshots!                        │
-│  Returns server requests from all methods!                       │
-└───────────────────────────────────────────────────────────────────┘
-                              ▲
-                              │ implements
-                              │
-                    ┌─────────────────────┐
-                    │ CounterStateMachine │
-                    │                     │
-                    │ Command: CounterCmd │
-                    │ Response: CounterRsp│
-                    │                     │
-                    │ Uses key: "counter" │
-                    └─────────────────────┘
+                    ┌──────────────────────────┐
+                    │  CounterStateMachine     │
+                    │  (USER'S CONCRETE CLASS) │
+                    ├──────────────────────────┤
+                    │  Command: CounterCmd     │
+                    │  Response: Int           │
+                    │  Schema: CounterSchema   │
+                    │    = ("counter", Int) *: │
+                    │      EmptyTuple          │
+                    │                          │
+                    │  Implements 3 methods:   │
+                    │   - applyCommand         │
+                    │   - handleSessionCreated │
+                    │   - handleSessionExpired │
+                    │   - takeSnapshot (scodec)│
+                    │   - restoreFromSnapshot  │
+                    └──────────────────────────┘
 ```
 
 ### 📚 Reference Documents

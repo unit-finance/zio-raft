@@ -320,12 +320,14 @@
 - [ ] **T042** Constitution compliance verification
   - **Checklist**: Review all constitution points from plan.md
   - **Verify**:
-    - No unsafe operations
-    - HMap provides type safety
-    - No exceptions in business logic
-    - Extends existing StateMachine trait
-    - Pure functions only
-    - No serialization library dependency
+    - No unsafe operations (Principle I)
+    - HMap provides type safety (Principle I)
+    - No exceptions in business logic (Principle II)
+    - Extends existing StateMachine trait (Principle III)
+    - Pure functions only (Principle I)
+    - No serialization library dependency (clean architecture)
+    - **ZIO Clock service used for all time operations** - verify Instant values come from ZIO Clock, not Instant.now() or System.currentTimeMillis() (Principle IV)
+    - **No java.util.Random or UUID.randomUUID()** - only ZIO Random service if needed (Principle IV)
   - **Success**: All constitutional requirements met
 
 - [ ] **T043** Code review and cleanup
@@ -387,6 +389,7 @@ Different files, no dependencies:
 
 ### Phase 3.3 - Contract Tests (All Parallel)
 ```bash
+# T012-T017 can run simultaneously
 sbt "testOnly *SessionStateMachineTemplateSpec"
 sbt "testOnly *IdempotencySpec"
 sbt "testOnly *ResponseCachingSpec"
@@ -396,10 +399,8 @@ sbt "testOnly *InvariantSpec"
 ```
 
 ### Phase 3.5 - Documentation (All Parallel)
-- T039: SessionStateMachine scaladoc
-- T040: Core types scaladoc
-- T041: Module README
-- T042: Migration guide
+- T037-T041: Documentation tasks can run in parallel
+- T042-T043: Constitution compliance and code review
 
 ---
 

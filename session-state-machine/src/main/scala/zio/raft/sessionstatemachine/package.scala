@@ -1,7 +1,8 @@
 package zio.raft
 
 import zio.raft.protocol.{RequestId, SessionId}
-import zio.prelude.Newtype
+import zio.prelude.fx.ZPure
+import zio.Chunk
 
 /**
  * Session State Machine Framework package.
@@ -15,34 +16,73 @@ import zio.prelude.Newtype
  * - SessionSchema: Fixed 4-prefix schema for session management
  * - CombinedSchema: Type-level concatenation of SessionSchema + UserSchema
  * - SessionCommand: ADT of commands the session state machine accepts
- * - CacheKey: Newtype for cache keys (composite of sessionId-requestId)
  */
 package object sessionstatemachine {
   
   /**
-   * Type-safe cache key for idempotency checking.
+   * Type alias combining State monad with Writer monad for server requests.
    * 
-   * Internally stores "sessionId-requestId" as a string but provides type safety.
+   * StateWriter allows state machine implementations to:
+   * - Modify state using ZPure's state operations
+   * - Emit server requests using `.log(serverRequest)`
+   * - Compose operations in for-comprehensions
+   * 
+   * The log channel (W) accumulates server requests which are automatically
+   * collected and processed by the SessionStateMachine base class.
+   * 
+   * @tparam S The state type
+   * @tparam W The log type (server request type)
+   * @tparam A The return value type
+   * 
+   * @example
+   * {{{
+   * def myCommand(cmd: MyCmd): StateWriter[MyState, ServerRequest, Response] =
+   *   for {
+   *     state <- ZPure.get[MyState]
+   *     newState = state.updated["counter"](key, value)
+   *     _ <- ZPure.set(newState)
+   *     _ <- ZPure.log(ServerRequest(...))  // Emit server request
+   *   } yield CommandResponse(...)
+   * }}}
    */
-  object CacheKey extends Newtype[String]:
-    /**
-     * Create a cache key from sessionId and requestId.
-     */
-    def apply(sessionId: SessionId, requestId: RequestId): CacheKey =
-      CacheKey(s"${SessionId.unwrap(sessionId)}-${RequestId.unwrap(requestId)}")
+  type StateWriter[S, W, A] = ZPure[W, S, S, Any, Nothing, A]
+  val StateWriter: zio.prelude.fx.ZPure.type = zio.prelude.fx.ZPure
+
   
-  type CacheKey = CacheKey.Type
+  /**
+   * Extension methods for ZPure to simplify working with state + log.
+   */
+  extension [W, S1, S2, A](zpure: ZPure[W, S1, S2, Any, Nothing, A])
+    /**
+     * Run ZPure and extract (log, state, value) as a clean tuple.
+     * 
+     * This is a convenience method for the common case where:
+     * - R is Any (no environment)
+     * - E is Nothing (no errors)
+     * - We want both the accumulated log and final state
+     * 
+     * @param s Initial state
+     * @return (log, finalState, value)
+     */
+    def runStateLog(s: S1): (Chunk[W], S2, A) =
+      val (log, Right((state, value))) = zpure.runAll(s): @unchecked
+      (log, state, value)
   
   /**
    * Fixed schema for session management state with typed keys.
    * 
    * This schema defines 4 prefixes with their key and value types:
    * - "metadata": (SessionId, SessionMetadata) - session information
-   * - "cache": (CacheKey, Any) - cached responses for idempotency
+   * - "cache": (SessionId, Map[RequestId, Any]) - cached responses per session for idempotency
    * - "serverRequests": (SessionId, List[PendingServerRequest[?]]) - pending requests per session
    * - "lastServerRequestId": (SessionId, RequestId) - last assigned server request ID per session
    * 
-   * All keys use newtypes for type safety.
+   * All keys use SessionId for type safety and efficiency.
+   * 
+   * The cache design groups responses by session, making cleanup O(1) instead of O(n):
+   * - Cache lookup: get session's map, then lookup requestId
+   * - Cache cleanup: get session's map, filter by lowestRequestId, update once
+   * - Session expiration: remove single cache entry (not iterate all requests)
    * 
    * The SessionStateMachine base class uses this schema to manage session state
    * automatically. Users don't interact with this schema directly - it's an
@@ -50,7 +90,7 @@ package object sessionstatemachine {
    */
   type SessionSchema = 
     ("metadata", SessionId, SessionMetadata) *:
-    ("cache", CacheKey, Any) *:
+    ("cache", SessionId, Map[RequestId, Any]) *:
     ("serverRequests", SessionId, List[PendingServerRequest[?]]) *:
     ("lastServerRequestId", SessionId, RequestId) *:
     EmptyTuple
@@ -74,8 +114,8 @@ package object sessionstatemachine {
   type CombinedSchema[UserSchema <: Tuple] = Tuple.Concat[SessionSchema, UserSchema]
   
   /**
-   * KeyLike instances for session management keys.
+   * KeyLike instance for SessionId keys.
+   * All session management prefixes use SessionId as the key type.
    */
   given HMap.KeyLike[SessionId] = HMap.KeyLike.forNewtype(SessionId)
-  given HMap.KeyLike[CacheKey] = HMap.KeyLike.forNewtype(CacheKey)
 }

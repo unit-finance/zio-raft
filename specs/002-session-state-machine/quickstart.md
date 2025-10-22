@@ -6,11 +6,13 @@
 
 ## Introduction
 
-This guide shows how to create a simple distributed counter using the session state machine framework. You'll learn how to:
-1. Define a custom state machine
-2. Wire it to the client-server library
-3. Handle idempotency automatically
-4. Test the implementation
+This guide shows how to create a simple distributed KV store using the session state machine framework. You'll learn how to:
+1. Extend SessionStateMachine abstract base class (template pattern)
+2. Implement 3 protected abstract methods for business logic
+3. Define type-safe schema with HMap
+4. Implement serialization using your chosen library
+5. Handle idempotency automatically via base class
+6. Test the implementation
 
 **Time to Complete**: 30 minutes
 
@@ -18,337 +20,261 @@ This guide shows how to create a simple distributed counter using the session st
 
 ## Prerequisites
 
-- Existing ZIO Raft project with client-server library integrated
+- Existing ZIO Raft project
 - Scala 3.3+
 - ZIO 2.1+
-- scodec for serialization
+- session-state-machine library
+- Serialization library of your choice (example uses scodec)
 
 ---
 
-## Step 1: Define Your State Machine
+## Step 1: Extend SessionStateMachine
 
-Create a simple counter that supports increment, decrement, and get operations.
+Create a simple KV store by extending the SessionStateMachine base class.
 
-### 1.1 Define Commands and Responses
+### 1.1 Define Commands (see kvstore/App.scala for real example)
 
 ```scala
-// src/main/scala/example/CounterCommand.scala
-package example
+// kvstore/src/main/scala/zio/kvstore/App.scala
+package zio.kvstore
 
-import scodec.*
-import scodec.codecs.*
+import zio.raft.Command
 
-sealed trait CounterCommand
+sealed trait KVCommand extends Command
 
-object CounterCommand:
-  case class Increment(by: Int) extends CounterCommand
-  case class Decrement(by: Int) extends CounterCommand
-  case object GetValue extends CounterCommand
-  
-  // scodec codec for serialization
-  val codec: Codec[CounterCommand] = discriminated[CounterCommand].by(uint8)
-    .typecase(0, int32.as[Increment])
-    .typecase(1, int32.as[Decrement])
-    .typecase(2, provide(GetValue))
+case class Set(key: String, value: String) extends KVCommand:
+  type Response = Unit
 
-sealed trait CounterResponse
-
-object CounterResponse:
-  case class Success(value: Int) extends CounterResponse
-  case class Error(message: String) extends CounterResponse
-  
-  val codec: Codec[CounterResponse] = discriminated[CounterResponse].by(uint8)
-    .typecase(0, int32.as[Success])
-    .typecase(1, utf8.as[Error])
+case class Get(key: String) extends KVCommand:
+  type Response = String
 ```
 
-### 1.2 Implement State Machine
+### 1.2 Define Your Schema
 
 ```scala
-// src/main/scala/example/CounterStateMachine.scala
-package example
+// Type-safe schema with prefixes and their value types
+type KVSchema = 
+  ("kv", Map[String, String]) *:  // "kv" prefix holds Map[String, String]
+  EmptyTuple
+```
 
+### 1.3 Extend SessionStateMachine (Template Pattern)
+
+```scala
 import zio.*
 import zio.prelude.State
-import zio.raft.statemachine.UserStateMachine
-import scodec.*
-import scodec.bits.ByteVector
-import scodec.codecs.*
+import zio.raft.sessionstatemachine.*
+import zio.raft.{Command, HMap}
+import zio.stream.Stream
 
-// Note: ServerRequest type parameter - for counter, we use NotificationRequest
-case class NotificationRequest(message: String)
+// Note: ServerRequest type - for KV, we might not use server requests
+case class NoServerRequest()  // Placeholder
 
-class CounterStateMachine extends UserStateMachine[CounterCommand, CounterResponse, NotificationRequest]:
+class KVStateMachine extends SessionStateMachine[KVCommand, NoServerRequest, KVSchema]:
   
-  // Apply command to state (pure function, no side effects!)
-  // State is Map[String, Any] - we use key "counter"
-  def apply(command: CounterCommand): State[Map[String, Any], (CounterResponse, List[NotificationRequest])] =
+  // Implement abstract method: applyCommand
+  protected def applyCommand(cmd: KVCommand): State[HMap[KVSchema], (cmd.Response, List[NoServerRequest])] =
     State.modify { state =>
-      // Get counter from map (default 0)
-      val counter = state.getOrElse("counter", 0).asInstanceOf[Int]
-      
-      command match
-        case CounterCommand.Increment(by) =>
-          val newCounter = counter + by
-          val newState = state.updated("counter", newCounter)
-          
-          // Example: send notification when counter reaches milestone
-          val notifications = if (newCounter % 10 == 0) 
-            List(NotificationRequest(s"Counter reached $newCounter!"))
-          else Nil
-          
-          (newState, (CounterResponse.Success(newCounter), notifications))
+      cmd match
+        case Set(key, value) =>
+          // Type-safe access: state.get["kv"](...) returns Option[Map[String, String]]
+          val kvMap = state.get["kv"]("store").getOrElse(Map.empty[String, String])
+          val newMap = kvMap.updated(key, value)
+          val newState = state.updated["kv"]("store", newMap)  // Type-checked!
+          (newState, ((), Nil))  // Response is Unit, no server requests
         
-        case CounterCommand.Decrement(by) if counter - by < 0 =>
-          // Error in response, NOT exception; state unchanged
-          (state, (CounterResponse.Error("Cannot go negative"), Nil))
-        
-        case CounterCommand.Decrement(by) =>
-          val newCounter = counter - by
-          val newState = state.updated("counter", newCounter)
-          (newState, (CounterResponse.Success(newCounter), Nil))
-        
-        case CounterCommand.GetValue =>
-          (state, (CounterResponse.Success(counter), Nil))
+        case Get(key) =>
+          val kvMap = state.get["kv"]("store").getOrElse(Map.empty[String, String])
+          val value = kvMap.getOrElse(key, "")
+          (state, (value, Nil))  // State unchanged for read
     }
   
-  // Session lifecycle hooks (can return server-initiated requests!)
-  def onSessionCreated(sessionId: SessionId, capabilities: Map[String, String]): State[Map[String, Any], List[NotificationRequest]] =
-    State.succeed(Nil)  // Counter doesn't need per-session initialization
+  // Implement abstract method: handleSessionCreated
+  protected def handleSessionCreated(
+    sessionId: SessionId, 
+    capabilities: Map[String, String]
+  ): State[HMap[KVSchema], List[NoServerRequest]] =
+    State.succeed(Nil)  // No per-session initialization needed
   
-  def onSessionExpired(sessionId: SessionId): State[Map[String, Any], List[NotificationRequest]] =
+  // Implement abstract method: handleSessionExpired
+  protected def handleSessionExpired(sessionId: SessionId): State[HMap[KVSchema], List[NoServerRequest]] =
     State.succeed(Nil)  // No cleanup needed
+  
+  // Implement serialization (user chooses library - here using scodec)
+  def takeSnapshot(state: HMap[CombinedSchema[KVSchema]]): Stream[Nothing, Byte] = ???  // See Step 1.4
+  
+  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[KVSchema]]] = ???  // See Step 1.4
 ```
 
 **Key Points**:
-- ✅ Pure function - no side effects
-- ✅ Uses ZIO Prelude State monad
+- ✅ Extend SessionStateMachine (template pattern)
+- ✅ Implement 3 protected abstract methods
+- ✅ Type-safe state with HMap[KVSchema] - compiler checks prefix "kv"
+- ✅ State.get["kv"]("store") returns Option[Map[String, String]] (compile-time type)
 - ✅ Errors in response payload, not exceptions
 - ✅ Deterministic - same input always produces same output
-- ✅ State is always `Map[String, Any]` - user picks keys
-- ✅ `apply` returns `(Response, List[ServerInitiatedRequest])`
-- ✅ Session lifecycle hooks return `List[ServerInitiatedRequest]`
-- ✅ NO codecs, NO emptyState, NO custom state type!
-- ✅ Just 3 methods to implement
+- ✅ Users see only HMap[KVSchema] in their methods (state narrowing)
+- ✅ Base class handles session management automatically
 
 ---
 
-## Step 2: Integrate with Client-Server Library
+## Step 2: Use Your State Machine
 
-Wire your state machine to the existing RaftServer infrastructure.
+Your state machine is ready to use - it extends StateMachine and can be passed directly to Raft.
 
-### 2.1 Create Session State Machine (with User SM + Codec)
+### 2.1 Instantiate and Use
 
 ```scala
-// src/main/scala/example/CounterApp.scala
-package example
+// kvstore/src/main/scala/zio/kvstore/App.scala (updated)
+package zio.kvstore
 
 import zio.*
-import zio.raft.statemachine.*
-import zio.raft.server.*
-import zio.raft.protocol.*
-import scodec.*
+import zio.raft.{Raft, StateMachine}
 
-class CounterApp(raftServer: RaftServer):
+object KVStoreApp extends ZIOAppDefault:
   
-  // Create user state machine
-  val userSM = new CounterStateMachine()
-  
-  // Provide codec for Map[(String, Any)] serialization
-  val stateCodec: Codec[(String, Any)] = ??? // User implementation
-  
-  // Create session state machine (composition via constructor!)
-  val sessionSM = new SessionStateMachine(userSM, stateCodec)
-  
-  // State reference (just Map[String, Any]!)
-  val stateRef = Ref.make(Map.empty[String, Any])
-  
-  // Wire RaftActions from server to state machine
-  def processSessionCommand(command: SessionCommand): Task[Unit] =
-    for
-      currentState <- stateRef.get
-      
-      // Apply command to session state machine (which delegates to user SM as needed)
-      (newState, response) = sessionSM.apply(command).run(currentState)
-      
-      // Update state
-      _ <- stateRef.set(newState)
-      
-      // Send response based on command type
-      _ <- command match
-        case req: SessionCommand.ClientRequest =>
-          // Send response to client
-          raftServer.sendResponse(
-            ClientResponse(req.sessionId, req.requestId, response, false)
-          )
-        case _ =>
-          ZIO.unit
-    yield ()
+  def run =
+    val program =
+      for
+        // ... setup rpc, stable, logStore, snapshotStore ...
+        
+        // Instantiate your state machine (extends SessionStateMachine)
+        val kvSM = new KVStateMachine()  // No constructor params needed!
+        
+        // Pass to Raft - it's a StateMachine
+        raft <- Raft.make(
+          memberId,
+          peers,
+          stable,
+          logStore,
+          snapshotStore,
+          rpc,
+          kvSM  // SessionStateMachine extends StateMachine[HMap[CombinedSchema[KVSchema]], SessionCommand[KVCommand]]
+        )
+        
+        _ <- raft.run.forkScoped
+        _ <- ZIO.never
+      yield ()
+    
+    program.exitCode
 ```
 
-### 2.2 Connect to Raft Server Event Stream
-
-```scala
-  // In your main application setup
-  def run: Task[Unit] =
-    raftServer.raftActionsStream
-      .mapZIO(processRaftAction)
-      .runDrain
-```
+**Key Points**:
+- ✅ No manual wiring needed - extends StateMachine directly
+- ✅ No composition setup - just instantiate your class
+- ✅ State type is HMap[CombinedSchema[KVSchema]] (type-safe)
+- ✅ Base class handles all session management automatically
 
 ---
 
 ## Step 3: Test Your State Machine
 
-### 3.1 Unit Tests (State Machine Logic)
+### 3.1 Unit Tests (Abstract Methods)
 
 ```scala
-// src/test/scala/example/CounterStateMachineSpec.scala
-package example
+// kvstore/src/test/scala/zio/kvstore/KVStateMachineSpec.scala
+package zio.kvstore
 
 import zio.test.*
 import zio.test.Assertion.*
+import zio.raft.HMap
 
-object CounterStateMachineSpec extends ZIOSpecDefault:
+object KVStateMachineSpec extends ZIOSpecDefault:
   
-  val counter = new CounterStateMachine()
+  val kvSM = new KVStateMachine()
   
   def spec = suiteAll(
     
-    test("Increment increases counter"):
-      for
-        (newState, response) <- counter.apply(0, CounterCommand.Increment(5))
-      yield assertTrue(
-        newState == 5 &&
-        response == CounterResponse.Success(5)
+    test("Set stores value"):
+      val state0 = HMap.empty[KVSchema]
+      val (newState, (response, serverReqs)) = kvSM.applyCommand(Set("key1", "value1")).run(state0)
+      assertTrue(
+        newState.get["kv"]("store").flatMap(_.get("key1")) == Some("value1") &&
+        response == () &&
+        serverReqs.isEmpty
       )
     ,
     
-    test("Decrement decreases counter"):
-      for
-        (newState, response) <- counter.apply(10, CounterCommand.Decrement(3))
-      yield assertTrue(
-        newState == 7 &&
-        response == CounterResponse.Success(7)
+    test("Get retrieves value"):
+      val state0 = HMap.empty[KVSchema]
+        .updated["kv"]("store", Map("key1" -> "value1"))
+      val (newState, (value, serverReqs)) = kvSM.applyCommand(Get("key1")).run(state0)
+      assertTrue(
+        newState == state0 && // State unchanged
+        value == "value1" &&
+        serverReqs.isEmpty
       )
     ,
     
-    test("Decrement below zero returns error"):
-      for
-        (newState, response) <- counter.apply(5, CounterCommand.Decrement(10))
-      yield assertTrue(
-        newState == 5 && // State unchanged
-        response.isInstanceOf[CounterResponse.Error]
+    test("Get missing key returns empty string"):
+      val state0 = HMap.empty[KVSchema]
+      val (newState, (value, _)) = kvSM.applyCommand(Get("missing")).run(state0)
+      assertTrue(
+        newState == state0 &&
+        value == ""
       )
     ,
     
-    test("GetValue returns current state"):
-      for
-        (newState, response) <- counter.apply(42, CounterCommand.GetValue)
-      yield assertTrue(
-        newState == 42 && // State unchanged
-        response == CounterResponse.Success(42)
+    test("Session lifecycle methods work"):
+      val state0 = HMap.empty[KVSchema]
+      val (state1, serverReqs1) = kvSM.handleSessionCreated(SessionId("test"), Map.empty).run(state0)
+      val (state2, serverReqs2) = kvSM.handleSessionExpired(SessionId("test")).run(state1)
+      assertTrue(
+        serverReqs1.isEmpty &&
+        serverReqs2.isEmpty
       )
-    ,
-    
-    test("Serialization round-trip"):
-      check(Gen.int) { value =>
-        val serialized = counter.serialize(value)
-        val deserialized = serialized.flatMap(counter.deserialize)
-        assertTrue(deserialized.toOption.contains(value))
-      }
   )
 ```
 
-### 3.2 Integration Tests (With Idempotency)
+### 3.2 Integration Tests (Template Method with Idempotency)
 
 ```scala
-// src/test/scala/example/CounterIntegrationSpec.scala
-package example
+// kvstore/src/test/scala/zio/kvstore/KVIntegrationSpec.scala
+package zio.kvstore
 
 import zio.test.*
 import zio.test.Assertion.*
-import zio.raft.protocol.*
+import zio.raft.sessionstatemachine.*
+import zio.raft.HMap
 
-object CounterIntegrationSpec extends ZIOSpecDefault:
+object KVIntegrationSpec extends ZIOSpecDefault:
   
   def spec = suiteAll(
     
     test("Idempotency - same request returns cached response"):
-      for
-        sessionSM <- ZIO.succeed(new SessionStateMachine())
-        userSM <- ZIO.succeed(new CounterStateMachine())
-        composable <- ZIO.succeed(new ComposableStateMachine(userSM, sessionSM))
-        
-        sessionState0 = SessionState.empty.addSession(
-          SessionMetadata(SessionId("test"), Map.empty, now, now)
-        )
-        counterState0 = 0
-        
-        // First request
-        (sessionState1, counterState1, result1) <- composable.apply(
-          sessionState0,
-          counterState0,
-          RaftAction.ClientRequest(
-            SessionId("test"),
-            RequestId(1),
-            encodeCommand(CounterCommand.Increment(5))
-          )
-        )
-        
-        // Second request (duplicate)
-        (sessionState2, counterState2, result2) <- composable.apply(
-          sessionState1,
-          counterState1,
-          RaftAction.ClientRequest(
-            SessionId("test"),
-            RequestId(1),
-            encodeCommand(CounterCommand.Increment(5))
-          )
-        )
-      yield assertTrue(
-        counterState1 == 5 &&
-        counterState2 == 5 && // Not incremented twice!
-        result1.response == result2.response && // Same response
-        sessionState1 == sessionState2 // Session state unchanged
+      val kvSM = new KVStateMachine()
+      val state0 = HMap.empty[CombinedSchema[KVSchema]]
+      
+      // First request
+      val cmd1 = SessionCommand.ClientRequest(SessionId("test"), RequestId(1), Set("key1", "val1"))
+      val (state1, response1) = kvSM.apply(cmd1).run(state0)
+      
+      // Second request (duplicate - same sessionId and requestId)
+      val cmd2 = SessionCommand.ClientRequest(SessionId("test"), RequestId(1), Set("key1", "OTHER"))
+      val (state2, response2) = kvSM.apply(cmd2).run(state1)
+      
+      assertTrue(
+        response1 == response2 &&  // Same cached response
+        state2 == state1 &&  // State unchanged (applyCommand NOT called again)
+        state2.get["kv"]("store").flatMap(_.get("key1")) == Some("val1")  // Original value, not "OTHER"
       )
     ,
     
     test("Different requests processed independently"):
-      for
-        sessionSM <- ZIO.succeed(new SessionStateMachine())
-        userSM <- ZIO.succeed(new CounterStateMachine())
-        composable <- ZIO.succeed(new ComposableStateMachine(userSM, sessionSM))
-        
-        sessionState0 = SessionState.empty.addSession(
-          SessionMetadata(SessionId("test"), Map.empty, now, now)
-        )
-        counterState0 = 0
-        
-        // Request 1
-        (sessionState1, counterState1, _) <- composable.apply(
-          sessionState0,
-          counterState0,
-          RaftAction.ClientRequest(
-            SessionId("test"),
-            RequestId(1),
-            encodeCommand(CounterCommand.Increment(5))
-          )
-        )
-        
-        // Request 2 (different request ID)
-        (sessionState2, counterState2, _) <- composable.apply(
-          sessionState1,
-          counterState1,
-          RaftAction.ClientRequest(
-            SessionId("test"),
-            RequestId(2),
-            encodeCommand(CounterCommand.Increment(3))
-          )
-        )
-      yield assertTrue(
-        counterState1 == 5 &&
-        counterState2 == 8 // Both increments applied
+      val kvSM = new KVStateMachine()
+      val state0 = HMap.empty[CombinedSchema[KVSchema]]
+      
+      // Request 1
+      val cmd1 = SessionCommand.ClientRequest(SessionId("test"), RequestId(1), Set("k1", "v1"))
+      val (state1, _) = kvSM.apply(cmd1).run(state0)
+      
+      // Request 2 (different request ID)
+      val cmd2 = SessionCommand.ClientRequest(SessionId("test"), RequestId(2), Set("k2", "v2"))
+      val (state2, _) = kvSM.apply(cmd2).run(state1)
+      
+      assertTrue(
+        state2.get["kv"]("store").flatMap(_.get("k1")) == Some("v1") &&
+        state2.get["kv"]("store").flatMap(_.get("k2")) == Some("v2")  // Both applied
       )
   )
 ```
@@ -357,33 +283,35 @@ object CounterIntegrationSpec extends ZIOSpecDefault:
 
 ## Step 4: Deploy and Run
 
-### 4.1 Create Main Application
+See the `kvstore/` project for a complete working example. Your state machine is a StateMachine implementation that can be passed directly to Raft.make().
+
+### 4.1 Using with Raft
 
 ```scala
-// src/main/scala/example/Main.scala
-package example
+// kvstore/src/main/scala/zio/kvstore/App.scala
+package zio.kvstore
 
 import zio.*
-import zio.raft.server.RaftServer
+import zio.raft.Raft
 
-object Main extends ZIOAppDefault:
+object KVStoreApp extends ZIOAppDefault:
   
   def run =
-    ZIO.scoped {
+    val program =
       for
-        // Initialize Raft server (existing client-server infrastructure)
-        raftServer <- RaftServer.make(config)
+        // ... setup dependencies ...
         
-        // Create counter app
-        counterApp <- ZIO.succeed(new CounterApp(raftServer))
+        // Your state machine (extends SessionStateMachine)
+        val kvSM = new KVStateMachine()
         
-        // Start processing events
-        _ <- counterApp.run.fork
+        // Pass directly to Raft
+        raft <- Raft.make(memberId, peers, stable, logStore, snapshotStore, rpc, kvSM)
         
-        // Keep running
+        _ <- raft.run.forkScoped
         _ <- ZIO.never
       yield ()
-    }
+    
+    program.exitCode
 ```
 
 ### 4.2 Run Tests
@@ -515,16 +443,6 @@ test("Serialization consistency"):
 
 ---
 
-## Complete Example
-
-See `examples/counter-state-machine/` for the full working example with:
-- Complete implementation
-- Comprehensive test suite
-- Client integration
-- Deployment scripts
-
----
-
 ## Resources
 
 - **Raft Dissertation Chapter 6**: https://github.com/ongardie/dissertation
@@ -538,19 +456,24 @@ See `examples/counter-state-machine/` for the full working example with:
 
 Use this checklist to verify your implementation:
 
-- [ ] State machine is pure (no side effects)
-- [ ] Returns UIO (cannot fail, errors in response)
-- [ ] Serialization round-trip works
-- [ ] Idempotency test passes
-- [ ] Integration with RaftServer complete
+- [ ] Extended SessionStateMachine successfully
+- [ ] Implemented 3 protected abstract methods
+- [ ] Defined UserSchema with type-safe prefixes
+- [ ] Implemented serialization (takeSnapshot/restoreFromSnapshot)
+- [ ] Abstract methods are pure (no side effects)
+- [ ] Errors in response payload, not exceptions
+- [ ] HMap type safety working (compile-time checks)
+- [ ] Idempotency test passes (template method caching works)
 - [ ] Unit tests pass
 - [ ] Integration tests pass
-- [ ] Client can send commands successfully
-- [ ] Retry safety verified
 - [ ] Snapshot/restore tested
 
 ---
 
-**Status**: ✅ Ready for implementation - This quickstart can be used once Phase 3 (implementation) is complete.
+## Reference
+
+**Complete Example**: See `kvstore/` project for real implementation using template pattern with HMap
+
+**Status**: ✅ Ready for implementation - This quickstart reflects the template pattern architecture
 
 

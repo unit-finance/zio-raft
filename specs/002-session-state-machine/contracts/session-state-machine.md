@@ -1,85 +1,91 @@
-# Contract: Session State Machine
+# Contract: Session State Machine Template Method
 
 **Feature**: 002-session-state-machine  
-**Type**: Core Component Contract  
+**Type**: Core Component Contract (Base Class)  
 **Status**: Design Complete
 
 ## Interface Definition
 
 ```scala
-package zio.raft.statemachine
+package zio.raft.sessionstatemachine
 
 import zio.*
 import zio.raft.*
 import zio.raft.protocol.*
 import zio.prelude.State
-import scodec.Codec
 import java.time.Instant
 
 /**
  * Session state machine handling idempotency, response caching,
- * and server-initiated request management.
+ * and server-initiated request management (template pattern).
  * 
- * Wraps user state machine (passed in constructor) to provide 
- * linearizable semantics per Raft dissertation Chapter 6.3.
+ * Abstract base class that users extend to add session management
+ * to their business logic per Raft dissertation Chapter 6.3.
  * 
  * Extends zio.raft.StateMachine to integrate with existing Raft infrastructure.
  * 
- * State is Map[String, Any] with key prefixes:
- * - "session/" for session management data
- * - User keys for business logic data (no prefix required)
+ * State is HMap[CombinedSchema[UserSchema]] with type-safe prefixes:
+ * - SessionSchema prefixes: "metadata", "cache", "serverRequests", "lastServerRequestId"
+ * - UserSchema prefixes: user-defined with their own types
  * 
  * @tparam UC User command type (extends Command, has its own Response type)
  * @tparam SR Server request type (user-defined)
+ * @tparam UserSchema User's schema (tuple of prefix-type pairs)
  */
-class SessionStateMachine[UC <: Command, SR](
-  userSM: UserStateMachine[UC, SR],
-  stateCodec: Codec[(String, Any)]  // ONE codec for all state serialization
-) extends StateMachine[Map[String, Any], SessionCommand[UC]]:
+abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
+  extends StateMachine[HMap[CombinedSchema[UserSchema]], SessionCommand[UC]]:
   
   /**
-   * Initial state is empty Map.
+   * Initial state is empty HMap.
    */
-  def emptyState: Map[String, Any] = Map.empty
+  def emptyState: HMap[CombinedSchema[UserSchema]] = HMap.empty
   
   /**
-   * Apply SessionCommand to state.
+   * Apply SessionCommand to state (FINAL TEMPLATE METHOD).
    * 
-   * For ClientRequest: checks idempotency, delegates to user SM if needed, caches response.
+   * For ClientRequest: checks idempotency, narrows state, calls applyCommand, caches response.
    * For ServerRequestAck: removes acknowledged requests (cumulative).
-   * For SessionCreationConfirmed: adds new session metadata, forwards to user SM.
-   * For SessionExpired: forwards to user SM, then removes all session data.
+   * For SessionCreationConfirmed: adds session metadata, calls handleSessionCreated.
+   * For SessionExpired: calls handleSessionExpired, then removes all session data.
    * 
    * @param command Session-level command (UC is the user command type)
    * @return State monad with new state and command response
    */
-  def apply(command: SessionCommand[UC]): State[Map[String, Any], command.Response]
+  final def apply(command: SessionCommand[UC]): State[HMap[CombinedSchema[UserSchema]], command.Response]
   
   /**
-   * Create snapshot of state.
+   * Abstract methods - users MUST implement these.
+   */
+  protected def applyCommand(command: UC): State[HMap[UserSchema], (command.Response, List[SR])]
+  protected def handleSessionCreated(sessionId: SessionId, capabilities: Map[String, String]): State[HMap[UserSchema], List[SR]]
+  protected def handleSessionExpired(sessionId: SessionId): State[HMap[UserSchema], List[SR]]
+  
+  /**
+   * Create snapshot of state (users implement with their chosen library).
    * 
-   * Serializes each Map entry using stateCodec.
-   * Both session and user data are in the same Map (differentiated by key prefix).
+   * State contains both session data (SessionSchema prefixes) and user data (UserSchema prefixes).
+   * Users serialize HMap's internal Map[String, Any] using their chosen library.
    * 
    * @param state State to snapshot
    * @return Stream of bytes
    */
-  def takeSnapshot(state: Map[String, Any]): Stream[Nothing, Byte]
+  def takeSnapshot(state: HMap[CombinedSchema[UserSchema]]): Stream[Nothing, Byte]
   
   /**
-   * Restore state from snapshot stream.
+   * Restore state from snapshot stream (users implement).
    * 
-   * Deserializes Map entries using stateCodec.
+   * Users deserialize to Map[String, Any] then wrap in HMap.
    * 
    * @param stream Snapshot byte stream
-   * @return UIO with restored state
+   * @return UIO with restored HMap state
    */
-  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[Map[String, Any]]
+  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[UserSchema]]]
   
   /**
    * Determine if snapshot should be taken.
    * 
-   * Default policy: every 1000 log entries.
+   * Default implementation: every 1000 log entries.
+   * Users can override for custom policy.
    * 
    * @return true if snapshot should be taken
    */
@@ -87,7 +93,7 @@ class SessionStateMachine[UC <: Command, SR](
     lastSnapshotIndex: Index,
     lastSnapshotSize: Long,
     commitIndex: Index
-  ): Boolean
+  ): Boolean = (commitIndex.value - lastSnapshotIndex.value) > 1000
   
   /**
    * Check if there are any pending server requests that need retry.
@@ -98,11 +104,11 @@ class SessionStateMachine[UC <: Command, SR](
    * 
    * Only returns true if there are requests with lastSentAt before the threshold.
    * 
-   * @param state The current state map
+   * @param state The current HMap state
    * @param retryIfLastSentBefore Time threshold - only consider requests sent before this time
    * @return true if there are any pending server requests needing retry
    */
-  def hasPendingRequests(state: Map[String, Any], retryIfLastSentBefore: Instant): Boolean
+  def hasPendingRequests(state: HMap[CombinedSchema[UserSchema]], retryIfLastSentBefore: Instant): Boolean
 ```
 
 ---
@@ -432,53 +438,58 @@ object SessionStateMachineSpec extends ZIOSpecDefault:
 
 ## Integration Examples
 
-### With User State Machine
+### Extending SessionStateMachine (Template Pattern)
 
 ```scala
-// Step 1: User creates their state machine
-class CounterStateMachine extends UserStateMachine[Int, CounterCommand, CounterResponse]:
-  def emptyState: Int = 0
+// Step 1: Define schema
+type KVSchema = ("kv", Map[String, String]) *: EmptyTuple
+
+// Step 2: Extend SessionStateMachine
+class KVStateMachine extends SessionStateMachine[KVCommand, ServerReq, KVSchema]:
   
-  def apply(command: CounterCommand): State[Int, CounterResponse] =
-    State.modify { counter =>
-      command match
-        case CounterCommand.Increment(by) =>
-          (counter + by, CounterResponse.Success(counter + by))
-        case CounterCommand.GetValue =>
-          (counter, CounterResponse.Success(counter))
+  // Step 3: Implement 3 abstract methods
+  protected def applyCommand(cmd: KVCommand): State[HMap[KVSchema], (cmd.Response, List[ServerReq])] =
+    State.modify { state =>
+      cmd match
+        case Set(k, v) =>
+          val kvMap = state.get["kv"]("store").getOrElse(Map.empty)
+          val newState = state.updated["kv"]("store", kvMap.updated(k, v))
+          (newState, ((), Nil))
+        case Get(k) =>
+          val kvMap = state.get["kv"]("store").getOrElse(Map.empty)
+          (state, (kvMap.getOrElse(k, ""), Nil))
     }
   
-  def stateCodec: Codec[Int] = int32
-  def commandCodec: Codec[CounterCommand] = CounterCommand.codec
-  def responseCodec: Codec[CounterResponse] = CounterResponse.codec
+  protected def handleSessionCreated(...) = State.succeed(Nil)
+  protected def handleSessionExpired(...) = State.succeed(Nil)
+  
+  // Step 4: Implement serialization
+  def takeSnapshot(state: HMap[CombinedSchema[KVSchema]]): Stream[Nothing, Byte] = ???
+  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[...]] = ???
 
-// Step 2: Pass to SessionStateMachine constructor
-val counterSM = new CounterStateMachine()
-val sessionSM = new SessionStateMachine(counterSM)
+// Step 5: Use it
+val kvSM = new KVStateMachine()  // Ready for Raft
 
-// sessionSM now extends zio.raft.StateMachine and can be used with Raft
-
-// Step 3: Use in application
+// Step 6: Use in application
 for
   currentState <- stateRef.get
   
-  // Apply session command
-  (newState, response) = sessionSM.apply(
-    SessionCommand.ClientRequest(sessionId, requestId, payload)
+  // Apply session command (template method handles everything)
+  (newState, response) = kvSM.apply(
+    SessionCommand.ClientRequest(sessionId, requestId, command)
   ).run(currentState)
   
   _ <- stateRef.set(newState)
-  
-  // Send response to client
   _ <- sendToClient(response)
 yield ()
 ```
 
 **Key Points**:
-- ✅ SessionStateMachine takes userSM in constructor
-- ✅ Manages CombinedState[UserState] internally
-- ✅ Handles idempotency, caching, snapshots automatically
-- ✅ User just implements simple UserStateMachine trait
+- ✅ Users extend SessionStateMachine (template pattern)
+- ✅ Implement 3 methods + serialization
+- ✅ Base class manages HMap[CombinedSchema[UserSchema]] internally
+- ✅ Handles idempotency, caching, state narrowing/merging automatically
+- ✅ Type-safe state access with compile-time checking
 
 ---
 

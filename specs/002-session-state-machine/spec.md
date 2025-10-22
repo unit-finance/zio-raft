@@ -63,7 +63,7 @@ When creating this spec from a user prompt:
 ## User Scenarios & Testing
 
 ### Primary User Story
-As a developer building a distributed application on top of Raft with the client-server library, I want to define a custom state machine that processes my business logic while a session state machine framework handles session management, idempotency, and exactly-once semantics. The framework provides the session state machine that wraps my user state machine and automatically manages: (1) idempotency checking via (sessionId, requestId) pairs, (2) response caching for linearizable semantics per Chapter 6.3 of the Raft dissertation, (3) server-initiated request tracking with cumulative acknowledgments, and (4) session lifecycle event forwarding. I provide the state machine logic only - integration with the client-server library is my responsibility (wiring RaftAction events, deserializing commands, serializing responses, providing a snapshot codec).
+As a developer building a distributed application on top of Raft with the client-server library, I want to extend the SessionStateMachine abstract base class to define my business logic while the framework automatically handles session management, idempotency, and exactly-once semantics. I extend SessionStateMachine and implement 3 protected abstract methods (applyCommand, handleSessionCreated, handleSessionExpired) plus serialization methods. The base class automatically manages: (1) idempotency checking via (sessionId, requestId) pairs, (2) response caching for linearizable semantics per Chapter 6.3 of the Raft dissertation, (3) server-initiated request tracking with cumulative acknowledgments, (4) session lifecycle event coordination, and (5) type-safe state access via HMap with compile-time schema validation. I implement business logic and choose my own serialization library - integration with the client-server library is my responsibility (wiring events, encoding/decoding).
 
 ### Acceptance Scenarios
 
@@ -117,8 +117,8 @@ As a developer building a distributed application on top of Raft with the client
 - **FR-011**: Session state MUST be replicated through the Raft log to ensure all servers agree on which commands are duplicates
 
 #### Snapshot and State Management
-- **FR-012**: System MUST support state snapshots using a single shared dictionary where session state and user state machine state use different key prefixes (e.g., "session/" and "user/")
-- **FR-013**: Snapshot restoration MUST restore both the client-server session state and user state machine state from the shared dictionary
+- **FR-012**: System MUST support state snapshots using a type-safe HMap (heterogeneous map) where session state and user state use different schema-defined prefixes with compile-time type checking. SessionSchema defines 4 prefixes ("metadata", "cache", "serverRequests", "lastServerRequestId"), UserSchema is user-defined, and CombinedSchema concatenates both at the type level. Users implement serialization using their chosen library.
+- **FR-013**: Snapshot restoration MUST restore both the session state and user state from the serialized HMap representation
 - **FR-014**: User state machines MUST NOT throw exceptions; errors must be modeled within the response payload that is returned to the client and cached for idempotency
 - **FR-015**: System MUST NOT impose size limits on cached responses (for now)
 
@@ -140,18 +140,22 @@ As a developer building a distributed application on top of Raft with the client
 
 ### Key Entities
 
-- **User State Machine**: Developer-defined business logic that processes commands. Contains:
-  - State: The application-specific data it maintains
-  - Command handler: Pure function that accepts (state, command) and returns (new state, response, optional server requests)
+- **SessionStateMachine (Abstract Base Class)**: Framework-provided abstract base class that developers extend to add session management to their business logic (Chapter 6.3 architecture). Users extend this class and implement 3 protected abstract methods:
+  - `applyCommand(command)`: Business logic for processing commands
+  - `handleSessionCreated(sessionId, capabilities)`: Session initialization logic
+  - `handleSessionExpired(sessionId)`: Session cleanup logic
   
-- **Session State Machine**: The client-server layer that wraps user state machines (Chapter 6.3 architecture). Contains:
+  The base class automatically provides:
   - Session tracking: Maps session ID to session metadata
   - Response cache: Maps (session ID, request ID) pairs to cached responses for idempotency (no size limit for now)
   - Sequence number tracking: Latest and set of pending sequence numbers per session
   - Pending server-initiated requests: Ordered list of server requests sent to each client, waiting for acknowledgment
   - Request ID assignment: Tracks last assigned server-initiated request ID per session (starts at 1, increments monotonically)
-  - Request removal: When RaftAction.ServerRequestAck(sessionId, requestId) is processed, removes **all pending requests with ID ≤ requestId** (cumulative acknowledgment)
+  - Request removal: When ServerRequestAck(sessionId, requestId) is processed, removes **all pending requests with ID ≤ requestId** (cumulative acknowledgment)
   - Session cleanup: Drops all pending server-initiated requests when session expires or closes
+  - Template method: Final `apply` method that orchestrates idempotency checking and calls user's abstract methods
+  
+  State representation: Uses type-safe HMap with schema-defined prefixes. Users provide their own serialization implementation.
   
 - **Client Session**: State maintained per connected client for linearizable semantics. Contains:
   - Session ID: Unique identifier assigned during RegisterClient
@@ -169,11 +173,12 @@ As a developer building a distributed application on top of Raft with the client
   - Response payload: The result returned by the user state machine
   - Success/error indicator: Whether the command succeeded or failed
   
-- **State Snapshot**: Point-in-time capture of entire replicated state for log compaction. Uses a single shared dictionary with key prefixes:
-  - Session state (prefix "session/"): All client sessions, response cache, sequence numbers, last assigned server-initiated request IDs, and pending server-initiated requests
-  - User state machine state (prefix "user/"): State data for the user state machine
+- **State Snapshot**: Point-in-time capture of entire replicated state for log compaction. Uses type-safe HMap with schema-defined prefixes:
+  - SessionSchema prefixes ("metadata", "cache", "serverRequests", "lastServerRequestId"): All session management state with compile-time type checking
+  - UserSchema prefixes (user-defined): State data for user's business logic with their own type-safe prefixes
+  - CombinedSchema: Type-level concatenation of SessionSchema and UserSchema
   - Snapshot metadata: Log index, term, and configuration when snapshot was taken
-  - Design rationale: Shared dictionary allows both state machines to contribute to same snapshot atomically
+  - Design rationale: HMap provides compile-time type safety while maintaining same internal storage as Map[String, Any]. Users implement serialization using their chosen library (library has no serialization dependencies).
   
 - **Server-Initiated Request Lifecycle** (State Machine + User Integration):
   1. User state machine returns server requests as part of command processing (library logic)
@@ -312,25 +317,26 @@ This specification is based on **Chapter 6 (Client interaction), Section 6.3 (Im
 
 ### Key Design Decisions (Resolved)
 
-1. **Composition Strategy**: Sequential execution - session state machine runs BEFORE user state machine for idempotency checking, AFTER for response caching
+1. **Architecture Pattern**: Template pattern - SessionStateMachine is abstract base class that users extend. Base class defines final template method `apply` that orchestrates session management, calls 3 protected abstract methods for user business logic (applyCommand, handleSessionCreated, handleSessionExpired).
 
 2. **Error Handling**: User state machines MUST NOT throw exceptions. Errors are modeled within the response payload, which is cached for idempotency like any other response
 
-3. **Atomicity**: Each command is atomic - the entire operation (idempotency check, user state machine execution, response caching) is atomic per Raft log entry
+3. **Atomicity**: Each command is atomic - the entire operation (idempotency check, user business logic execution via abstract methods, response caching) is atomic per Raft log entry
 
 4. **Server-Initiated Request Management**: 
-   - User state machines generate server requests during command processing
-   - Session state machine assigns monotonically increasing IDs per session (starting at 1)
+   - User methods return server requests during command processing (from abstract methods)
+   - Base class assigns monotonically increasing IDs per session (starting at 1)
    - Tracks last assigned ID even when unacked list is empty
    - Uses cumulative acknowledgment: ack for ID N removes all ≤ N
    - Drops all pending requests when session expires/closes
    - Retry handled by external process via "GetRequestsForRetry" command that atomically retrieves + updates lastSentAt (efficient: single log entry, responses stay out of log)
    - Optimization: External process performs dirty read of unacked list + applies policy locally; only sends command if policy indicates retries needed (safe: dirty read is just hint, command response is authoritative; discards dirty data after decision)
 
-5. **Snapshot Architecture**: Single shared dictionary with key prefixes:
-   - Session state uses "session/" prefix
-   - User state machine uses "user/" prefix  
-   - Allows atomic snapshot capture of both state machines
+5. **State Architecture**: Type-safe HMap with schema-defined prefixes:
+   - SessionSchema: 4 fixed prefixes with compile-time type checking ("metadata" → SessionMetadata, "cache" → Any, "serverRequests" → PendingServerRequest[?], "lastServerRequestId" → RequestId)
+   - UserSchema: User-defined prefixes with their own types
+   - CombinedSchema: Type-level concatenation via Tuple.Concat
+   - Users implement serialization (library has no serialization dependencies)
    - No size limits on cached responses (for now)
 
 6. **Out of Scope**: Commands during state machine initialization/shutdown are not addressed in this feature
@@ -341,38 +347,44 @@ This specification is based on **Chapter 6 (Client interaction), Section 6.3 (Im
 
 ### What This Library Provides (In Scope)
 
-This library provides **state machine logic only**:
+This library provides **abstract base class with session management logic**:
 
-1. ✅ **State Machine Interface**: Accepts RaftAction events, returns state transitions and responses
-2. ✅ **Session State Machine**: Idempotency checking, response caching, sequence number tracking
-3. ✅ **User State Machine Composition**: Framework for defining and executing custom business logic
+1. ✅ **SessionStateMachine Abstract Base Class**: Template pattern with final template method and 3 protected abstract methods
+2. ✅ **Automatic Session Management**: Idempotency checking, response caching, sequence number tracking
+3. ✅ **Type-Safe State**: HMap with compile-time schema validation
 4. ✅ **Server-Initiated Request Management**: Tracks pending requests, assigns IDs, handles acknowledgments
-5. ✅ **Snapshot Support**: Serializes/deserializes state to/from shared dictionary
+5. ✅ **State Narrowing/Merging**: Automatically narrows state to UserSchema for user methods, merges changes back
 6. ✅ **Cumulative Acknowledgment Logic**: Removes all requests ≤ acknowledged ID
+7. ✅ **Session Lifecycle Coordination**: Calls user methods on session creation/expiration
 
 ### What the User Must Provide (Integration Glue)
 
 The library user is responsible for:
 
-1. ❌ **Client-Server Integration**: Wiring the state machine to the client-server library
-2. ❌ **Event Routing**: 
-   - Feed RaftAction.ClientRequest → state machine
-   - Feed RaftAction.ServerRequestAck → state machine
-   - Feed RaftAction.SessionCreationConfirmed → state machine
-   - Feed RaftAction.SessionExpired → state machine
-3. ❌ **Response Sending**: Take state machine responses and send via ServerAction.SendResponse
-4. ❌ **Server Request Sending**: Take server-initiated requests and send via ServerAction.SendServerRequest
-5. ❌ **Retry Process**: Implement external process that performs dirty reads and sends GetRequestsForRetry commands
-6. ❌ **Raft Integration**: Connect state machine to Raft log application
-7. ❌ **Transport**: The client-server library handles all ZeroMQ/network communication
+1. ❌ **Extend SessionStateMachine**: Create concrete class extending abstract base class
+2. ❌ **Implement 3 Abstract Methods**: 
+   - `applyCommand(command: UC)`: Business logic for command processing
+   - `handleSessionCreated(sessionId, capabilities)`: Session initialization
+   - `handleSessionExpired(sessionId)`: Session cleanup
+3. ❌ **Define UserSchema**: Type-level schema with prefixes and value types for user state
+4. ❌ **Implement Serialization**: takeSnapshot and restoreFromSnapshot methods using chosen library
+5. ❌ **Client-Server Integration**: Wiring the state machine to the client-server library
+6. ❌ **Event Routing**: Convert RaftAction events to SessionCommand and apply to state machine
+7. ❌ **Response Sending**: Take state machine responses and send via ServerAction.SendResponse
+8. ❌ **Server Request Sending**: Take server-initiated requests and send via ServerAction.SendServerRequest
+9. ❌ **Retry Process**: Implement external process that performs dirty reads and sends GetRequestsForRetry commands
+10. ❌ **Raft Integration**: Connect state machine to Raft log application
 
 ### Design Rationale
 
-This separation allows:
-- **Flexibility**: Users can customize integration for their specific needs
-- **Reusability**: State machine logic is independent of transport layer
+This template pattern approach allows:
+- **Framework Control**: Base class ensures session management is always correct
+- **User Simplicity**: Users implement only 3 methods for their business logic
+- **Flexibility**: Users choose their own serialization library and integration approach
+- **Type Safety**: HMap provides compile-time guarantees for state access
+- **Reusability**: Session management logic is reused across all user implementations
 - **Testability**: State machine can be tested without network/Raft infrastructure
-- **Clear Boundaries**: State machine focuses on deterministic business logic
+- **Clear Boundaries**: Base class handles infrastructure, users handle business logic
 
 ---
 

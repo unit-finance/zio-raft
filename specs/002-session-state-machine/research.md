@@ -97,106 +97,107 @@ if (mayNeedRetry) {
 
 ---
 
-### 5. Key Prefix Strategy
+### 5. HMap Schema Strategy
 
-**Decision**: Use simple string prefixes for dictionary keys
+**Decision**: Use type-safe HMap with schema-defined prefixes instead of string prefixes
 
 **Rationale**:
-- "session/" for all session state machine keys
-- "user/" for all user state machine keys
-- Simple to implement and debug
-- Clear separation of concerns
-- No risk of key collisions
+- **Compile-time safety**: Invalid prefixes or type mismatches caught at compile time
+- **Type inference**: state.get["metadata"](key) automatically returns Option[SessionMetadata]
+- **Zero runtime overhead**: HMap uses same Map[String, Any] internally with "prefix\key" format
+- **Schema composition**: CombinedSchema = Tuple.Concat[SessionSchema, UserSchema] at type level
+- **Refactoring safety**: Prefix changes caught by compiler
 
-**Key Format Examples**:
-```
-session/sessions/{sessionId}
-session/responses/{sessionId}/{requestId}
-session/serverRequests/{sessionId}/{requestId}
-session/lastServerRequestId/{sessionId}
-user/{custom-key-from-user-sm}
+**Schema Definition**:
+```scala
+// Session management prefixes (library-defined)
+type SessionSchema = 
+  ("metadata", SessionMetadata) *:
+  ("cache", Any) *:
+  ("serverRequests", PendingServerRequest[?]) *:
+  ("lastServerRequestId", RequestId) *:
+  EmptyTuple
+
+// User defines their schema
+type KVSchema = ("kv", Map[String, String]) *: EmptyTuple
+
+// Combined at type level
+type CombinedSchema[U <: Tuple] = Tuple.Concat[SessionSchema, U]
 ```
 
 **Alternatives Considered**:
-- Binary prefixes: Rejected - harder to debug, minimal space savings
-- No prefixes with namespaced types: Rejected - requires complex type system
+- String prefixes with Map[String, Any]: Rejected - no compile-time safety
+- Separate state objects: Rejected - harder to snapshot atomically
 
 ---
 
-### 6. SessionStateMachine Composition via Constructor
+### 6. Template Pattern with Abstract Base Class
 
-**Decision**: SessionStateMachine takes UserStateMachine in constructor and extends `zio.raft.StateMachine`
+**Decision**: SessionStateMachine is abstract base class that users extend (template pattern), not composition via constructor
 
 **Rationale**:
-- **Simpler**: No separate ComposableStateMachine class needed
+- **Simpler API**: No separate UserStateMachine trait - just extend one class
 - **Constitution III**: Extends existing `zio.raft.StateMachine` trait
-- **Composition**: Via constructor dependency injection
-- **Encapsulation**: SessionStateMachine handles all composition logic internally
-- **User-Friendly**: Users just pass their SM to SessionStateMachine constructor
+- **Framework Control**: Base class ensures session management is always correct
+- **User Focus**: Users implement only 3 protected methods for business logic
+- **Type Safety**: HMap with compile-time schema validation
+- **No Serialization Dependency**: Users implement serialization, library stays agnostic
 
 **Architecture**:
 ```scala
-// Simplified UserStateMachine trait (no snapshot methods, NO codecs!)
-trait UserStateMachine[S, C, R]:
-  def apply(command: C): State[S, R]
-  def emptyState: S
-  def onSessionCreated(sessionId: SessionId, capabilities: Map[String, String]): State[S, Unit]
-  def onSessionExpired(sessionId: SessionId): State[S, Unit]
-
-// SessionCommand parameterized with decoded types
-sealed trait SessionCommand[Request, Response] extends Command
-
-object SessionCommand:
-  case class ClientRequest[UserCommand, UserResponse](
-    sessionId: SessionId,
-    requestId: RequestId,
-    command: UserCommand  // Already deserialized!
-  ) extends SessionCommand[UserCommand, UserResponse]
-
-// SessionStateMachine composes via constructor
-class SessionStateMachine[UserState, UserCommand, UserResponse](
-  userSM: UserStateMachine[UserState, UserCommand, UserResponse]
-) extends StateMachine[CombinedState[UserState], SessionCommand[?, ?]]:
+// SessionStateMachine is abstract base class
+abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
+  extends StateMachine[HMap[CombinedSchema[UserSchema]], SessionCommand[UC]]:
   
-  def apply(command: SessionCommand[?, ?]): State[CombinedState[UserState], command.Response] =
-    State.modify { combined =>
+  // Final template method - orchestrates session management
+  final def apply(command: SessionCommand[UC]): State[HMap[CombinedSchema[UserSchema]], command.Response] =
+    State.modify { state =>
       command match
-        case req: SessionCommand.ClientRequest[UserCommand, UserResponse] @unchecked =>
-          // Check cache first (no deserialization needed!)
-          combined.session.findCachedResponse(req.sessionId, req.requestId) match
-            case Some(cached) => (combined, cached.response.asInstanceOf[UserResponse])
+        case req: SessionCommand.ClientRequest[UC] @unchecked =>
+          // Check cache with type-safe prefix
+          state.get["cache"](s"${req.sessionId}/${req.requestId}") match
+            case Some(cached) => (state, cached.asInstanceOf[req.command.Response])
             case None =>
-              // Command already decoded - just apply!
-              val (newUser, resp) = userSM.apply(req.command).run(combined.user)
-              val newSession = combined.session.cacheResponse(req.sessionId, req.requestId, resp)
-              (CombinedState(newSession, newUser), resp)
+              // Narrow to UserSchema and call abstract method
+              val userState: HMap[UserSchema] = state.narrowTo[UserSchema]
+              val (userStateAfter, (response, serverReqs)) = applyCommand(req.command).run(userState)
+              
+              // Merge back and cache
+              val stateWithUser = mergeUserState(state, userStateAfter)
+              val stateWithCache = stateWithUser.updated["cache"](cacheKey, response)
+              (addServerRequests(stateWithCache, req.sessionId, serverReqs), response)
         
         case created: SessionCommand.SessionCreationConfirmed =>
-          // Forward to both
-          val newSession = combined.session.addSession(...)
-          val newUser = userSM.onSessionCreated(created.sessionId, created.capabilities).run(combined.user)._1
-          (CombinedState(newSession, newUser), ())
+          // Add metadata, narrow state, call abstract method
+          val userState: HMap[UserSchema] = state.narrowTo[UserSchema]
+          val (userStateAfter, serverReqs) = handleSessionCreated(created.sessionId, created.capabilities).run(userState)
+          (mergeAndAddRequests(...), ())
         
         case expired: SessionCommand.SessionExpired =>
-          // Forward to both
-          val newSession = combined.session.expireSession(expired.sessionId)
-          val newUser = userSM.onSessionExpired(expired.sessionId).run(combined.user)._1
-          (CombinedState(newSession, newUser), ())
+          // Call abstract method, then cleanup session data
+          val userState: HMap[UserSchema] = state.narrowTo[UserSchema]
+          val (userStateAfter, serverReqs) = handleSessionExpired(expired.sessionId).run(userState)
+          (cleanupSession(...), ())
     }
   
-  def takeSnapshot(state: CombinedState[UserState]): Stream[Nothing, Byte] =
-    // User provides serialization in integration layer
-    ???
+  // Abstract methods - users implement
+  protected def applyCommand(command: UC): State[HMap[UserSchema], (command.Response, List[SR])]
+  protected def handleSessionCreated(sessionId: SessionId, capabilities: Map[String, String]): State[HMap[UserSchema], List[SR]]
+  protected def handleSessionExpired(sessionId: SessionId): State[HMap[UserSchema], List[SR]]
+  
+  // Users implement serialization
+  def takeSnapshot(state: HMap[CombinedSchema[UserSchema]]): Stream[Nothing, Byte]
+  def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[UserSchema]]]
 ```
 
 **Benefits**:
-- User doesn't implement snapshot methods OR codec methods
-- Commands already decoded when reaching state machine
-- Responses cached as-is (decoded, not ByteVector)
-- Session lifecycle events forwarded to user SM
-- SessionStateMachine handles all infrastructure
-- Clear separation: UserStateMachine = business logic only
-- Serialization completely outside state machine (integration layer)
+- User extends one class, implements 3 methods + serialization
+- Template method is final - framework controls session management flow
+- Type-safe state via HMap with compile-time checking
+- State narrowing: users see only HMap[UserSchema], not session state
+- No serialization library dependency - users choose their own
+- Clear separation: base class = session management, user methods = business logic
+- Serialization responsibility clear (user implements, not library)
 
 ---
 
@@ -275,21 +276,27 @@ def assignRequest(req: ServerRequest, sessionId: SessionId): SessionState = {
 
 ## Serialization Strategy
 
-**Decision**: Use scodec for type-safe binary serialization
+**Decision**: Library has NO serialization dependencies - users implement their own
 
 **Rationale**:
-- Already used in client-server-protocol module
-- Provides compile-time schema checking
-- Efficient binary format
-- Explicit error handling via `Attempt[A]`
+- **Simpler Library**: Fewer dependencies, focused on session management logic only
+- **User Flexibility**: Users choose best serialization for their needs (scodec, protobuf, JSON, etc.)
+- **No Coupling**: Library doesn't force specific serialization approach
+- **Clear Responsibility**: Users implement takeSnapshot/restoreFromSnapshot methods
 
-**Key Codecs Needed**:
-- `SessionId`, `RequestId` (already exist in protocol)
-- `SessionState` (sessions, response cache, pending server requests)
-- `ResponseCacheEntry` (sessionId, requestId, response payload)
-- `ServerRequest` with ID and lastSentAt
+**User Implementation Approach**:
+Users extend SessionStateMachine and implement serialization methods:
+- Access HMap's internal Map[String, Any] via `.m` property
+- Serialize each entry based on its prefix (schema-aware)
+- Can use any serialization library (scodec recommended for type safety)
 
-**Alternative**: Protocol Buffers - Rejected for consistency with existing codebase
+**Example Libraries Users Might Choose**:
+- scodec: Type-safe binary (recommended, already in project)
+- Protocol Buffers: Cross-language compatibility
+- JSON: Human-readable, debugging
+- Custom binary: Performance-optimized
+
+**No Library Dependency**: Library code has NO imports of serialization frameworks
 
 ---
 
@@ -318,31 +325,28 @@ def assignRequest(req: ServerRequest, sessionId: SessionId): SessionState = {
 ## Module Structure
 
 ```
-state-machine/
+session-state-machine/
 ├── src/
 │   ├── main/
 │   │   └── scala/
 │   │       └── zio/
 │   │           └── raft/
-│   │               └── statemachine/
-│   │                   ├── StateMachine.scala         # Core trait
-│   │                   ├── ComposableStateMachine.scala # Session + User composition
-│   │                   ├── SessionStateMachine.scala   # Idempotency logic
-│   │                   ├── model/
-│   │                   │   ├── SessionState.scala
-│   │                   │   ├── ResponseCache.scala
-│   │                   │   └── ServerRequest.scala
-│   │                   └── codec/
-│   │                       └── StateCodecs.scala
+│   │               └── sessionstatemachine/
+│   │                   ├── SessionStateMachine.scala     # Abstract base class (template pattern)
+│   │                   ├── SessionCommand.scala          # Command ADT
+│   │                   ├── SessionMetadata.scala         # Session info
+│   │                   ├── PendingServerRequest.scala    # Server request tracking
+│   │                   └── package.scala                 # SessionSchema, CombinedSchema types
 │   └── test/
 │       └── scala/
 │           └── zio/
 │               └── raft/
-│                   └── statemachine/
-│                       ├── StateMachineSpec.scala
+│                   └── sessionstatemachine/
+│                       ├── SessionStateMachineTemplateSpec.scala
 │                       ├── IdempotencySpec.scala
 │                       ├── CumulativeAckSpec.scala
-│                       └── SnapshotSpec.scala
+│                       ├── StateNarrowingSpec.scala
+│                       └── InvariantSpec.scala
 ```
 
 ---
@@ -351,10 +355,10 @@ state-machine/
 
 **Required**:
 - ZIO 2.1+ (already in project)
-- scodec-core (already in project via client-server-protocol)
-- client-server-protocol (for SessionId, RequestId types)
+- ZIO Prelude (already in project - for State monad)
+- Core raft module (for HMap, Command, StateMachine trait)
 
-**No New Dependencies Needed**
+**No New Dependencies Needed** - Library is serialization-agnostic (no scodec dependency)
 
 ---
 
@@ -418,23 +422,25 @@ state-machine/
 ## Summary of Research
 
 **9 Key Architectural Decisions Made**:
-1. Shared Dictionary for Snapshots (with key prefixes)
+1. Type-Safe HMap for State (with schema-defined prefixes)
 2. State Machine Purity (no side effects)
 3. Cumulative Acknowledgment for Server-Initiated Requests
 4. Dirty Read Optimization for Retries
-5. Key Prefix Strategy ("session/", "user/")
-6. **SessionStateMachine Composition via Constructor** (takes UserStateMachine parameter; extends zio.raft.StateMachine)
+5. HMap Schema Strategy (SessionSchema + UserSchema → CombinedSchema)
+6. **Template Pattern with Abstract Base Class** (users extend SessionStateMachine; implement 3 abstract methods)
 7. No Modifications to Client-Server Library (clean boundaries)
 8. Idempotency Cache Management (unbounded initially, future eviction)
 9. Server-Initiated Request ID Assignment (monotonic, persisted)
 
-**Architecture Simplification**:
-- NO separate ComposableStateMachine class
-- SessionStateMachine takes UserStateMachine in constructor
-- UserStateMachine trait is simplified (no snapshot methods)
-- SessionStateMachine handles all: idempotency, caching, server requests, snapshots
+**Architecture (Template Pattern)**:
+- SessionStateMachine is abstract base class
+- Users extend and implement 3 protected methods + serialization
+- NO separate UserStateMachine trait
+- Base class provides final template method for session management
+- Users see only HMap[UserSchema] in their methods (state narrowing)
+- Library handles idempotency, caching, server requests automatically
 
-**No New External Dependencies**: All required libraries (ZIO, scodec) already in project
+**No New External Dependencies**: Only ZIO 2.1+ and core raft (for HMap). No serialization dependencies.
 
 ## Next Steps (Phase 1)
 

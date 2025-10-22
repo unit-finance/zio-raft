@@ -148,29 +148,40 @@ val raftNode = RaftNode(sessionSM, ...)
 
 ## SessionCommand Types
 
+**Note**: Following the core `zio.raft.Command` trait pattern where `Response` is a type member (not a type parameter).
+
 ```scala
+// From raft/src/main/scala/zio/raft/Types.scala
+trait Command:
+  type Response  // Type member, not type parameter
+
 sealed trait SessionCommand[UC <: Command] extends Command
-  // Response type is defined by each case class
+  // Response type is defined by each case class using type members
 
 object SessionCommand:
   case class ClientRequest[UC <: Command](
     sessionId: SessionId,
     requestId: RequestId,
+    lowestRequestId: RequestId,  // For cache cleanup (Lowest Sequence Number Protocol)
     command: UC  // Already decoded! UC is a Command subtype
   ) extends SessionCommand[UC]:
-    type Response = command.Response  // Response from the UserCommand itself
+    type Response = (command.Response, List[Any])  // (user response, server requests)
   
   case class ServerRequestAck(sessionId: SessionId, requestId: RequestId)
     extends SessionCommand[Nothing]:
     type Response = Unit
   
-  case class SessionCreationConfirmed(sessionId: SessionId, capabilities: Map[String, String])
+  case class CreateSession(sessionId: SessionId, capabilities: Map[String, String])
     extends SessionCommand[Nothing]:
-    type Response = Unit
+    type Response = List[Any]  // server requests
   
   case class SessionExpired(sessionId: SessionId)
     extends SessionCommand[Nothing]:
-    type Response = Unit
+    type Response = List[Any]  // final server requests
+  
+  case class GetRequestsForRetry(sessionId: SessionId, currentTime: java.time.Instant)
+    extends SessionCommand[Nothing]:
+    type Response = List[PendingServerRequest[Any]]
 ```
 
 ---

@@ -132,44 +132,32 @@ specs/[###-feature]/
 └── tasks.md             # Phase 2 output (/tasks command - NOT created by /plan)
 ```
 
-### Source Code (repository root)
+### Source Code Structure
+
+This feature adds **one new library** to the existing ZIO Raft project:
+
 ```
-# Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
-
-tests/
-├── contract/
-├── integration/
-└── unit/
-
-# Option 2: Web application (when "frontend" + "backend" detected)
-backend/
+session-state-machine/
 ├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
-
-frontend/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
-
-# Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure]
+│   ├── main/scala/zio/raft/sessionstatemachine/
+│   │   ├── SessionStateMachine.scala      # Main abstract base class
+│   │   ├── SessionCommand.scala           # Command ADT
+│   │   ├── SessionMetadata.scala          # Session metadata type
+│   │   ├── PendingServerRequest.scala     # Pending request type
+│   │   └── package.scala                  # Schema type aliases
+│   └── test/scala/zio/raft/sessionstatemachine/
+│       ├── SessionStateMachineTemplateSpec.scala
+│       ├── IdempotencySpec.scala
+│       ├── ResponseCachingSpec.scala
+│       └── [other test files]
 ```
 
-**Structure Decision**: Option 1 (Single project) - This is a library module within the existing ZIO Raft project. Will create a new `state-machine` module following existing project structure.
+**Key Types**:
+- **SessionStateMachine[UC, SR, UserSchema]** - Abstract base class that users extend
+- **SessionCommand[UC]** - Sealed trait for all commands (ClientRequest, CreateSession, etc.)
+- **SessionMetadata** - Session information (capabilities, timestamps)
+- **PendingServerRequest[SR]** - Pending server-initiated requests
+- **SessionSchema** & **CombinedSchema** - Type aliases for HMap schemas
 
 ## Phase 0: Outline & Research
 1. **Extract unknowns from Technical Context** above:

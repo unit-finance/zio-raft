@@ -2,6 +2,7 @@ package zio.raft.sessionstatemachine
 
 import zio.raft.{Command, HMap}
 import zio.raft.protocol.{SessionId, RequestId}
+import java.time.Instant
 
 /**
  * Sealed trait representing all commands that the SessionStateMachine accepts.
@@ -11,8 +12,9 @@ import zio.raft.protocol.{SessionId, RequestId}
  * SessionCommand instances and apply them to their SessionStateMachine.
  * 
  * @tparam UC The user command type (extends Command with dependent Response type)
+ * @tparam SR Server-initiated request payload type
  */
-sealed trait SessionCommand[UC <: Command] extends Command
+sealed trait SessionCommand[UC <: Command, SR] extends Command
 
 object SessionCommand {
   
@@ -33,14 +35,15 @@ object SessionCommand {
    * @note Response type is the user command's Response type (dependent types)
    * @note lowestRequestId enables the "Lowest Sequence Number Protocol" from Raft dissertation Ch. 6.3
    */
-  case class ClientRequest[UC <: Command](
+  case class ClientRequest[UC <: Command, SR](
+    createdAt: Instant,
     sessionId: SessionId,
     requestId: RequestId,
     lowestRequestId: RequestId,
     command: UC
-  ) extends SessionCommand[UC]:
+  ) extends SessionCommand[UC, SR]:
     // Response type matches the user command's Response type
-    type Response = (command.Response, List[Any])  // (response, server requests)
+    type Response = (command.Response, List[SR])  // (response, server requests)
   
   /**
    * Acknowledgment from a client for a server-initiated request.
@@ -51,10 +54,11 @@ object SessionCommand {
    * @param sessionId The client session ID
    * @param requestId The server request ID being acknowledged
    */
-  case class ServerRequestAck(
+  case class ServerRequestAck[SR](
+    createdAt: Instant,
     sessionId: SessionId,
     requestId: RequestId
-  ) extends SessionCommand[Nothing]:
+  ) extends SessionCommand[Nothing, SR]:
     type Response = Unit
   
   /**
@@ -68,11 +72,12 @@ object SessionCommand {
    * @param sessionId The newly created session ID
    * @param capabilities Client capabilities as key-value pairs
    */
-  case class CreateSession(
+  case class CreateSession[SR](
+    createdAt: Instant,
     sessionId: SessionId,
     capabilities: Map[String, String]
-  ) extends SessionCommand[Nothing]:
-    type Response = List[Any]  // server requests
+  ) extends SessionCommand[Nothing, SR]:
+    type Response = List[SR]  // server requests
   
   /**
    * Notification that a session has expired.
@@ -85,10 +90,11 @@ object SessionCommand {
    * 
    * @param sessionId The expired session ID
    */
-  case class SessionExpired(
+  case class SessionExpired[SR](
+    createdAt: Instant,
     sessionId: SessionId
-  ) extends SessionCommand[Nothing]:
-    type Response = List[Any]  // server requests
+  ) extends SessionCommand[Nothing, SR]:
+    type Response = List[SR]  // server requests
   
   /**
    * Command to atomically retrieve requests needing retry and update lastSentAt.
@@ -106,10 +112,10 @@ object SessionCommand {
    * @param lastSentBefore Only return requests where lastSentAt is before this time (retry threshold)
    * @param currentTime The current time for updating lastSentAt on returned requests
    */
-  case class GetRequestsForRetry(
+  case class GetRequestsForRetry[SR](
+    createdAt: Instant,
     sessionId: SessionId,
-    lastSentBefore: java.time.Instant,
-    currentTime: java.time.Instant
-  ) extends SessionCommand[Nothing]:
-    type Response = List[PendingServerRequest[Any]]
+    lastSentBefore: Instant
+  ) extends SessionCommand[Nothing, SR]:
+    type Response = List[PendingServerRequest[SR]]
 }

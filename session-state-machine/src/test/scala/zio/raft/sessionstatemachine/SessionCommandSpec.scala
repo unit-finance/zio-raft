@@ -33,7 +33,7 @@ object SessionCommandSpec extends ZIOSpecDefault:
       val requestId = RequestId(1)
       val userCommand = IncrementCounter(5)
       
-      val clientRequest = SessionCommand.ClientRequest(
+      val clientRequest = SessionCommand.ClientRequest[IncrementCounter, Nothing](
         sessionId = sessionId,
         requestId = requestId,
         command = userCommand
@@ -47,7 +47,7 @@ object SessionCommandSpec extends ZIOSpecDefault:
     },
     
     test("ServerRequestAck should contain sessionId and requestId") {
-      val ack = SessionCommand.ServerRequestAck(
+      val ack = SessionCommand.ServerRequestAck[Nothing](
         sessionId = SessionId("s1"),
         requestId = RequestId(10)
       )
@@ -59,7 +59,7 @@ object SessionCommandSpec extends ZIOSpecDefault:
     },
     
     test("CreateSession should contain sessionId and capabilities") {
-      val createSession = SessionCommand.CreateSession(
+      val createSession = SessionCommand.CreateSession[Nothing](
         sessionId = SessionId("new-session"),
         capabilities = Map("version" -> "1.0")
       )
@@ -71,7 +71,7 @@ object SessionCommandSpec extends ZIOSpecDefault:
     },
     
     test("SessionExpired should contain sessionId") {
-      val expired = SessionCommand.SessionExpired(
+      val expired = SessionCommand.SessionExpired[Nothing](
         sessionId = SessionId("expired-session")
       )
       
@@ -82,7 +82,7 @@ object SessionCommandSpec extends ZIOSpecDefault:
       val threshold = java.time.Instant.parse("2025-10-22T10:00:00Z")
       val now = java.time.Instant.parse("2025-10-22T11:00:00Z")
       
-      val retry = SessionCommand.GetRequestsForRetry(
+      val retry = SessionCommand.GetRequestsForRetry[Nothing](
         sessionId = SessionId("retry-session"),
         lastSentBefore = threshold,
         currentTime = now
@@ -97,19 +97,19 @@ object SessionCommandSpec extends ZIOSpecDefault:
     
     test("should support pattern matching") {
       val commands: List[SessionCommand[TestCommand]] = List(
-        SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), RequestId(1), IncrementCounter(1)),
-        SessionCommand.ServerRequestAck(SessionId("s1"), RequestId(1)),
-        SessionCommand.CreateSession(SessionId("s2"), Map.empty),
-        SessionCommand.SessionExpired(SessionId("s3")),
-        SessionCommand.GetRequestsForRetry(SessionId("s4"), java.time.Instant.now(), java.time.Instant.now())
+        SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), RequestId(1), IncrementCounter(1)),
+        SessionCommand.ServerRequestAck[Nothing](SessionId("s1"), RequestId(1)),
+        SessionCommand.CreateSession[Nothing](SessionId("s2"), Map.empty),
+        SessionCommand.SessionExpired[Nothing](SessionId("s3")),
+        SessionCommand.GetRequestsForRetry[Nothing](SessionId("s4"), java.time.Instant.now(), java.time.Instant.now())
       )
       
       val types = commands.map {
-        case _: SessionCommand.ClientRequest[_] => "ClientRequest"
-        case _: SessionCommand.ServerRequestAck => "ServerRequestAck"
-        case _: SessionCommand.CreateSession => "CreateSession"
-        case _: SessionCommand.SessionExpired => "SessionExpired"
-        case _: SessionCommand.GetRequestsForRetry => "GetRequestsForRetry"
+        case _: SessionCommand.ClientRequest[_, _] => "ClientRequest"
+        case _: SessionCommand.ServerRequestAck[_] => "ServerRequestAck"
+        case _: SessionCommand.CreateSession[_] => "CreateSession"
+        case _: SessionCommand.SessionExpired[_] => "SessionExpired"
+        case _: SessionCommand.GetRequestsForRetry[_] => "GetRequestsForRetry"
       }
       
       assertTrue(types == List(
@@ -123,7 +123,7 @@ object SessionCommandSpec extends ZIOSpecDefault:
     
     test("ClientRequest should preserve user command's Response type") {
       val incrementCmd = IncrementCounter(5)
-      val clientRequest = SessionCommand.ClientRequest(
+      val clientRequest = SessionCommand.ClientRequest[IncrementCounter, Nothing](
         SessionId("s1"),
         RequestId(1),
         RequestId(1),  // lowestRequestId

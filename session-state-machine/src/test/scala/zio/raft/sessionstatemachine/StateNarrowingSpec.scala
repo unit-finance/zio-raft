@@ -84,7 +84,7 @@ object StateNarrowingSpec extends ZIOSpecDefault:
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
       
-      val cmd = SessionCommand.ClientRequest(
+      val cmd = SessionCommand.ClientRequest[IncrementCounter, Nothing](
         SessionId("s1"),
         RequestId(1),
         SetCounter(42)
@@ -100,7 +100,7 @@ object StateNarrowingSpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
       
       // Set counter
-      val cmd1 = SessionCommand.ClientRequest(
+      val cmd1 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
         SessionId("s1"),
         RequestId(1),
         SetCounter(42)
@@ -118,11 +118,11 @@ object StateNarrowingSpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
       
       // Set counter
-      val cmd1 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), SetCounter(100))
+      val cmd1 = SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), SetCounter(100))
       val (state1, _) = sm.apply(cmd1).run(state0)
       
       // Set name
-      val cmd2 = SessionCommand.ClientRequest(SessionId("s1"), RequestId(2), RequestId(2), SetName("Alice"))
+      val cmd2 = SessionCommand.ClientRequest[SessionId("s1"), RequestId(2), RequestId(2), SetName("Alice"))
       val (state2, _) = sm.apply(cmd2).run(state1)
       
       assertTrue(
@@ -136,14 +136,14 @@ object StateNarrowingSpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
       
       // Create session (adds session metadata)
-      val createCmd = SessionCommand.CreateSession(
+      val createCmd = SessionCommand.CreateSession[Nothing](
         SessionId("s1"),
         Map("version" -> "1.0")
       )
       val (state1, _) = sm.apply(createCmd).run(state0)
       
       // Set user data
-      val clientCmd = SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), SetCounter(42))
+      val clientCmd = SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), SetCounter(42))
       val (state2, _) = sm.apply(clientCmd).run(state1)
       
       // Both session metadata and user data should be accessible
@@ -162,7 +162,7 @@ object StateNarrowingSpec extends ZIOSpecDefault:
       
       sm.receivedStateType = None
       
-      val cmd = SessionCommand.CreateSession(
+      val cmd = SessionCommand.CreateSession[Nothing](
         SessionId("s1"),
         Map.empty
       )
@@ -177,14 +177,14 @@ object StateNarrowingSpec extends ZIOSpecDefault:
       
       // Create session first
       val (state1, _) = sm.apply(
-        SessionCommand.CreateSession(SessionId("s1"), Map.empty)
+        SessionCommand.CreateSession[Nothing](SessionId("s1"), Map.empty)
       ).run(state0)
       
       sm.receivedStateType = None
       
       // Expire session
       val (state2, _) = sm.apply(
-        SessionCommand.SessionExpired(SessionId("s1"))
+        SessionCommand.SessionExpired[Nothing](SessionId("s1"))
       ).run(state1)
       
       assertTrue(sm.receivedStateType.contains("UserSchema"))
@@ -196,15 +196,15 @@ object StateNarrowingSpec extends ZIOSpecDefault:
       
       // Multiple updates
       val (state1, _) = sm.apply(
-        SessionCommand.ClientRequest(SessionId("s1"), RequestId(1), RequestId(1), SetCounter(10))
+        SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), SetCounter(10))
       ).run(state0)
       
       val (state2, _) = sm.apply(
-        SessionCommand.ClientRequest(SessionId("s1"), RequestId(2), RequestId(2), SetCounter(20))
+        SessionCommand.ClientRequest[SessionId("s1"), RequestId(2), RequestId(2), SetCounter(20))
       ).run(state1)
       
       val (state3, _) = sm.apply(
-        SessionCommand.ClientRequest(SessionId("s1"), RequestId(3), RequestId(3), SetCounter(30))
+        SessionCommand.ClientRequest[SessionId("s1"), RequestId(3), RequestId(3), SetCounter(30))
       ).run(state2)
       
       // Final value should be 30

@@ -60,7 +60,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
       
       // First request
-      val cmd1 = SessionCommand.ClientRequest(
+      val cmd1 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
         SessionId("s1"),
         RequestId(1),
         DoWork("result1")
@@ -68,7 +68,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
       // Second request (same IDs)
-      val cmd2 = SessionCommand.ClientRequest(
+      val cmd2 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
         SessionId("s1"),
         RequestId(1),
         DoWork("result2")  // Different command
@@ -85,11 +85,11 @@ object ResponseCachingSpec extends ZIOSpecDefault:
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
       
-      val cmd = SessionCommand.ClientRequest(
+      val cmd = SessionCommand.ClientRequest[IncrementCounter, Nothing](
         SessionId("s1"),
         RequestId(1),
         RequestId(1),
-        DoWork("test")
+        DoWork("test"), TestServerRequest]
       )
       val (state1, response1) = sm.apply(cmd).run(state0)
       
@@ -107,7 +107,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
       
-      val cmd = SessionCommand.ClientRequest(
+      val cmd = SessionCommand.ClientRequest[IncrementCounter, Nothing](
         SessionId("s1"),
         RequestId(1),
         DoWork("original")
@@ -134,7 +134,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
       
       // Session 1, Request 1
-      val cmd1 = SessionCommand.ClientRequest(
+      val cmd1 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
         SessionId("s1"),
         RequestId(1),
         DoWork("session1")
@@ -142,7 +142,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
       // Session 2, Request 1 (same request ID, different session)
-      val cmd2 = SessionCommand.ClientRequest(
+      val cmd2 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
         SessionId("s2"),
         RequestId(1),
         DoWork("session2")
@@ -161,7 +161,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
       
       // Request 1
-      val cmd1 = SessionCommand.ClientRequest(
+      val cmd1 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
         SessionId("s1"),
         RequestId(1),
         DoWork("request1")
@@ -169,7 +169,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
       // Request 2 (same session, different request ID)
-      val cmd2 = SessionCommand.ClientRequest(
+      val cmd2 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
         SessionId("s1"),
         RequestId(2),
         DoWork("request2")

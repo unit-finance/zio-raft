@@ -67,7 +67,7 @@ object InvariantSpec extends ZIOSpecDefault:
         val requestId = RequestId(1)
         
         // First request
-        val cmd = SessionCommand.ClientRequest(sessionId, requestId, Increment(value))
+        val cmd = SessionCommand.ClientRequest[sessionId, requestId, Increment(value))
         val (state1, response1) = sm.apply(cmd).run(state0)
         
         // Multiple duplicates
@@ -89,14 +89,14 @@ object InvariantSpec extends ZIOSpecDefault:
       
       // Create session
       val (state1, _) = sm.apply(
-        SessionCommand.CreateSession(sessionId, Map.empty)
+        SessionCommand.CreateSession[Nothing](sessionId, Map.empty)
       ).run(state0)
       
       // Generate multiple requests - each should produce server requests with increasing IDs
       val (finalState, allServerReqs) = (1 to 5).foldLeft((state1, List.empty[(Int, List[ServerReq])])) { 
         case ((state, accum), i) =>
           val (newState, (_, serverReqs)) = sm.apply(
-            SessionCommand.ClientRequest(sessionId, RequestId(i.toLong), Increment(1))
+            SessionCommand.ClientRequest[sessionId, RequestId(i.toLong), Increment(1))
           ).run(state)
           (newState, (i, serverReqs) :: accum)
       }
@@ -128,12 +128,12 @@ object InvariantSpec extends ZIOSpecDefault:
       // Create session (adds metadata prefix)
       val sessionId = SessionId("s1")
       val (state1, _) = sm.apply(
-        SessionCommand.CreateSession(sessionId, Map("key1" -> "value1"))
+        SessionCommand.CreateSession[Nothing](sessionId, Map("key1" -> "value1"))
       ).run(state0)
       
       // Add user data (counter prefix)
       val (state2, _) = sm.apply(
-        SessionCommand.ClientRequest(sessionId, RequestId(1), Increment(100))
+        SessionCommand.ClientRequest[sessionId, RequestId(1), Increment(100))
       ).run(state1)
       
       // Both prefixes should coexist independently
@@ -158,12 +158,12 @@ object InvariantSpec extends ZIOSpecDefault:
             
             // Create session
             val (state1, _) = sm.apply(
-              SessionCommand.CreateSession(sessionId, Map.empty)
+              SessionCommand.CreateSession[Nothing](sessionId, Map.empty)
             ).run(state)
             
             // Execute command
             val (state2, (response, _)) = sm.apply(
-              SessionCommand.ClientRequest(sessionId, RequestId(1), Increment(value))
+              SessionCommand.ClientRequest[sessionId, RequestId(1), Increment(value))
             ).run(state1)
             
             (state2, (s"session-$index", response) :: accum)
@@ -186,7 +186,7 @@ object InvariantSpec extends ZIOSpecDefault:
         
         // Apply same commands to both state machines
         val commands = increments.zipWithIndex.map { case (value, index) =>
-          SessionCommand.ClientRequest(sessionId, RequestId((index + 1).toLong), Increment(value))
+          SessionCommand.ClientRequest[sessionId, RequestId((index + 1).toLong), Increment(value))
         }
         
         val (finalState1, responses1) = commands.foldLeft((state0_1, List.empty[(Int, List[ServerReq])])) {
@@ -211,7 +211,7 @@ object InvariantSpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
       
       val sessionId = SessionId("s1")
-      val cmd = SessionCommand.ClientRequest(sessionId, RequestId(1), Increment(10))
+      val cmd = SessionCommand.ClientRequest[sessionId, RequestId(1), Increment(10))
       
       // Running the same state transition multiple times should produce the same result
       val (state1_a, response_a) = sm.apply(cmd).run(state0)

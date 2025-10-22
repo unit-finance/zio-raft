@@ -80,7 +80,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       
       // We verify by checking that the method exists on the base class
       val sm = new TestStateMachine()
-      val cmd = SessionCommand.ClientRequest(
+      val cmd = SessionCommand.ClientRequest[DoWork, TestServerRequest](
         SessionId("s1"),
         RequestId(1),
         Increment(5)
@@ -95,7 +95,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
       
-      val cmd = SessionCommand.ClientRequest(
+      val cmd = SessionCommand.ClientRequest[DoWork, TestServerRequest](
         SessionId("s1"),
         RequestId(1),
         Increment(5)
@@ -112,7 +112,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
       
-      val cmd = SessionCommand.CreateSession(
+      val cmd = SessionCommand.CreateSession[TestServerRequest](
         SessionId("s1"),
         Map("version" -> "1.0")
       )
@@ -129,7 +129,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       
       // First create a session
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
-      val createCmd = SessionCommand.CreateSession(
+      val createCmd = SessionCommand.CreateSession[TestServerRequest](
         SessionId("s1"),
         Map.empty
       )
@@ -139,7 +139,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       sm.sessionExpiredCalled = false
       
       // Now expire the session
-      val expireCmd = SessionCommand.SessionExpired(SessionId("s1"))
+      val expireCmd = SessionCommand.SessionExpired[TestServerRequest](SessionId("s1"))
       val (state2, _) = sm.apply(expireCmd).run(state1)
       
       assertTrue(
@@ -152,7 +152,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
       
       // First request
-      val cmd1 = SessionCommand.ClientRequest(
+      val cmd1 = SessionCommand.ClientRequest[DoWork, TestServerRequest](
         SessionId("s1"),
         RequestId(1),
         Increment(5)
@@ -165,7 +165,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       sm.applyCommandCalled = false
       
       // Second request (duplicate - same sessionId and requestId)
-      val cmd2 = SessionCommand.ClientRequest(
+      val cmd2 = SessionCommand.ClientRequest[DoWork, TestServerRequest](
         SessionId("s1"),
         RequestId(1),
         Increment(10)  // Different command, but same IDs

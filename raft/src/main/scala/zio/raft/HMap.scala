@@ -97,7 +97,7 @@ import zio.raft.HMap.{SubSchema, KeyAt, ValueAt, Contains, KeyLike}
  * that access or modify the map verify at compile time that the prefix exists
  * in the schema and enforce the correct key and value types for that prefix.
  */
-final case class HMap[M <: Tuple](private val m: Map[String, Any] = Map.empty):
+final case class HMap[M <: Tuple](m: Map[String, Any] = Map.empty):
   
   /** Constructs the internal key by combining prefix and key with a backslash separator */
   private def fullKey[P <: String & Singleton : ValueOf](key: KeyAt[M, P])

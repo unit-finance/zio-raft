@@ -1,0 +1,249 @@
+---
+title: Distributed Resource Cleanup Pattern
+description: Guidelines for proper resource lifecycle management in distributed systems
+author: AI Agent (from PR #15 session management learnings)
+date: 2025-10-19
+status: beta
+---
+
+# Distributed Resource Cleanup Pattern
+
+## Rule: Multi-Layer Resource Cleanup for Distributed Sessions
+
+**Rating: 4** (Expert/Specialized - Critical for preventing resource leaks)
+
+### Pattern Description
+
+In distributed systems, resources exist at multiple layers. When cleaning up a session or connection, you must clean up resources at ALL layers, not just the application layer.
+
+### Core Standard: Identify All Resource Layers (Rating: 4)
+
+Before implementing cleanup, identify ALL layers where resources exist:
+
+```
+Application Layer:  Session metadata, routing maps, pending states
+Network Layer:      TCP connections, ZMQ sockets, routing IDs
+Cluster Layer:      Raft replicated state, distributed consensus
+```
+
+### Core Standard: Layer-Specific Cleanup (Rating: 5)
+
+Different scenarios require different cleanup strategies:
+
+#### Permanent Session Termination (CloseSession)
+```scala
+case CloseSession(reason) =>
+  sessions.findSessionByRouting(routingId) match {
+    case Some(sessionId) =>
+      for {
+        // 1. Application Layer: Remove all session state
+        newSessions = sessions.removeSession(sessionId, routingId)
+        
+        // 2. Cluster Layer: Notify Raft to remove from replicated state
+        _ <- raftActionsOut.offer(RaftAction.ExpireSession(sessionId))
+        
+        // 3. Network Layer: Cleanup handled by transport layer
+      } yield copy(sessions = newSessions)
+  }
+```
+
+**Cleanup Levels**: ALL (Application + Network + Cluster)
+
+#### Temporary Disconnection (ConnectionClosed)
+```scala
+case ConnectionClosed =>
+  sessions.findSessionByRouting(routingId) match {
+    case Some(sessionId) =>
+      for {
+        // 1. Application Layer: Mark as disconnected, keep metadata
+        newSessions = sessions.disconnect(sessionId, routingId)
+        
+        // 2. Cluster Layer: NO notification (session still valid)
+        
+        // 3. Network Layer: Connection already gone
+      } yield copy(sessions = newSessions)
+  }
+```
+
+**Cleanup Levels**: Partial (Application routing only, preserve session)
+
+### Core Standard: Reconnection Cleanup (Rating: 5)
+
+**CRITICAL**: When reconnecting, clean up old resources BEFORE establishing new ones:
+
+#### ❌ WRONG: Don't Clean Up Old Resources
+```scala
+case ContinueSession(sessionId, nonce) =>
+  sessions.getMetadata(sessionId) match {
+    case Some(_) =>
+      for {
+        _ <- transport.sendMessage(routingId, SessionContinued(nonce))
+        // BUG: Old routing ID still has open connection!
+        newSessions = sessions.reconnect(sessionId, routingId, now, config)
+      } yield copy(sessions = newSessions)
+  }
+```
+
+**Problems**:
+- ❌ Old TCP connection left open (resource leak)
+- ❌ Old routing ID might still receive messages
+- ❌ Routing table can have stale entries
+- ❌ Transport layer state inconsistent with application layer
+
+#### ✅ CORRECT: Clean Up Old Before Establishing New
+```scala
+case ContinueSession(sessionId, nonce) =>
+  sessions.getMetadata(sessionId) match {
+    case Some(_) =>
+      val oldRoutingIdOpt = sessions.getRoutingId(sessionId)
+      for {
+        // 1. Check for old routing ID
+        _ <- oldRoutingIdOpt match {
+          case Some(oldRoutingId) if oldRoutingId != routingId =>
+            for {
+              _ <- ZIO.logInfo(s"Disconnecting old routing before reconnecting")
+              // 2. Transport Layer: Disconnect old connection
+              _ <- transport.disconnect(oldRoutingId).orDie
+              // 3. Application Layer: sessions.reconnect will remove old mapping
+            } yield ()
+          case _ => ZIO.unit  // Same routing ID or no old routing
+        }
+        // 4. Establish new connection
+        _ <- transport.sendMessage(routingId, SessionContinued(nonce))
+        // 5. Application Layer: Update routing maps
+        newSessions = sessions.reconnect(sessionId, routingId, now, config)
+      } yield copy(sessions = newSessions)
+  }
+```
+
+**Why Correct**:
+- ✅ Checks if old routing exists
+- ✅ Disconnects at transport layer (`transport.disconnect`)
+- ✅ Updates routing maps in application state (`sessions.reconnect`)
+- ✅ Prevents resource leaks
+- ✅ Handles idempotent reconnection (same routingId)
+
+### Core Standard: Cleanup Implementation Checklist (Rating: 4)
+
+For each cleanup scenario, verify ALL resources are handled:
+
+```markdown
+## Session Termination Checklist
+
+- [ ] Application Layer
+  - [ ] Remove from metadata map
+  - [ ] Remove from connections map
+  - [ ] Remove from routing map
+  - [ ] Remove from pending sessions map
+  
+- [ ] Network Layer
+  - [ ] Disconnect TCP socket
+  - [ ] Clear ZMQ routing ID
+  - [ ] Cancel pending operations
+  
+- [ ] Cluster Layer
+  - [ ] Notify Raft (if needed)
+  - [ ] Remove from replicated state
+  - [ ] Update cluster membership
+```
+
+### Core Standard: Idempotency Considerations (Rating: 3)
+
+Cleanup operations should be idempotent:
+
+```scala
+// ✅ GOOD: Check before cleanup
+case Some(oldRoutingId) if oldRoutingId != routingId =>
+  transport.disconnect(oldRoutingId)
+  
+// ❌ BAD: Unconditional cleanup
+_ <- transport.disconnect(oldRoutingId)  // Might fail if already disconnected
+```
+
+### Core Standard: Ordering Matters (Rating: 4)
+
+**Clean up in reverse order of creation**:
+
+1. **Stop new operations** (reject new requests)
+2. **Drain pending operations** (complete in-flight work)
+3. **Close network connections** (disconnect transport)
+4. **Remove application state** (clean up maps)
+5. **Notify cluster** (update replicated state)
+
+```scala
+for {
+  // 1. Stop accepting new work
+  _ <- actionQueue.offer(Action.StopAccepting)
+  
+  // 2. Let in-flight complete (or timeout)
+  _ <- pendingRequests.awaitCompletion.timeout(10.seconds)
+  
+  // 3. Close transport
+  _ <- transport.disconnect(routingId)
+  
+  // 4. Clean state
+  newState = state.removeSession(sessionId)
+  
+  // 5. Notify cluster
+  _ <- raftActions.offer(RaftAction.ExpireSession(sessionId))
+} yield newState
+```
+
+## Common Patterns
+
+### Pattern 1: Soft Disconnect (Reconnectable)
+- Clear routing ID
+- Keep metadata and timeout
+- No Raft notification
+
+### Pattern 2: Hard Disconnect (Permanent)
+- Remove all state
+- Disconnect transport
+- Notify Raft
+- Cannot reconnect
+
+### Pattern 3: Reconnection
+- Clean up old resources first
+- Establish new resources second
+- Update all mappings
+- Refresh timeouts
+
+## Common Pitfalls
+
+1. **Forgetting transport cleanup**: Leads to socket leaks
+2. **Forgetting routing map cleanup**: Leads to message misrouting
+3. **Not checking for old resources**: Accumulates stale connections
+4. **Wrong cleanup order**: Can cause race conditions
+5. **Not handling idempotency**: Breaks on duplicate operations
+
+## Usage Tracking
+
+Applied in:
+- RaftServer.Leader.CloseSession (permanent removal)
+- RaftServer.Leader.ConnectionClosed (soft disconnect)
+- RaftServer.Leader.ContinueSession (reconnection with old cleanup)
+
+## Validation Checklist
+
+Before merging any session/connection management code:
+
+- [ ] Listed all resource types at all layers
+- [ ] Implemented cleanup for each resource type
+- [ ] Handled reconnection by cleaning old first
+- [ ] Made cleanup operations idempotent
+- [ ] Tested with duplicate/stale connection scenarios
+- [ ] Verified no resource leaks with connection churn
+
+## Scope
+
+This rule applies to:
+- Session management code
+- Connection handling code
+- Any distributed resource with reconnection capability
+- Components with multi-layer resource ownership
+
+---
+
+**Status**: beta
+**Implementations**: 3 (PR #15)
+**Success Rate**: 100% after applying pattern

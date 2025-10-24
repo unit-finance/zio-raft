@@ -1,0 +1,190 @@
+---
+title: Stream-Based Architecture Pattern
+description: Guidelines for implementing unified event stream architectures in ZIO Raft
+author: AI Agent (from PR #15 learnings)
+date: 2025-10-19
+status: beta
+---
+
+# Stream-Based Architecture Pattern
+
+## Rule: All State Changes Through Unified Stream
+
+**Rating: 4** (Expert/Specialized - Critical for distributed systems)
+
+### Pattern Description
+
+In ZIO Raft, both RaftClient and RaftServer use a **unified event stream architecture** where ALL state changes flow through a single event stream merged from multiple sources.
+
+### Core Standard: Never Bypass the Stream (Rating: 5)
+
+**CRITICAL**: If a component uses a unified stream pattern, ALL state changes MUST go through that stream.
+
+#### ❌ WRONG: Direct State Manipulation
+```scala
+def confirmSessionCreation(sessionId: SessionId): UIO[Unit] = 
+  for {
+    state <- stateRef.get
+    _ <- state match {
+      case leader: Leader =>
+        // Direct state modification - BREAKS THE PATTERN
+        stateRef.set(leader.copy(sessions = newSessions))
+    }
+  } yield ()
+```
+
+**Why Wrong**: 
+- Bypasses the event stream
+- Breaks functional state machine pattern
+- Not testable via event injection
+- Can cause race conditions
+- Violates single source of truth
+
+#### ✅ CORRECT: Queue Action Through Stream
+```scala
+def confirmSessionCreation(sessionId: SessionId): UIO[Unit] = 
+  actionQueue.offer(ServerAction.SessionCreationConfirmed(sessionId)).unit
+
+// In state handler:
+case StreamEvent.Action(ServerAction.SessionCreationConfirmed(sessionId)) =>
+  for {
+    now <- Clock.instant
+    result <- sessions.confirmSession(sessionId, now, config) match {
+      case Some((routingId, nonce, newSessions)) =>
+        for {
+          _ <- transport.sendMessage(routingId, SessionCreated(sessionId, nonce)).orDie
+        } yield copy(sessions = newSessions)
+    }
+  } yield result
+```
+
+**Why Correct**:
+- ✅ All changes flow through unified stream
+- ✅ Serialized event processing
+- ✅ Testable via event injection
+- ✅ Maintains functional state machine pattern
+- ✅ Single source of truth for state
+
+### Core Standard: Stream Structure (Rating: 3)
+
+A unified stream merges multiple event sources:
+
+```scala
+val actionStream = ZStream.fromQueue(actionQueue)
+  .map(StreamEvent.Action(_))
+
+val messageStream = transport.incomingMessages
+  .map(msg => StreamEvent.Message(msg))
+
+val tickStream = ZStream.tick(interval)
+  .map(_ => StreamEvent.Tick)
+
+val unifiedStream = actionStream
+  .merge(messageStream)
+  .merge(tickStream)
+
+unifiedStream.runFoldZIO(initialState) { (state, event) =>
+  state.handle(event, deps...)
+}
+```
+
+### Core Standard: State Handler Pattern (Rating: 3)
+
+Each state implements a handler that processes events and returns new states:
+
+```scala
+sealed trait State {
+  def handle(event: Event, deps: Deps): UIO[State]
+}
+
+case class StateA() extends State {
+  override def handle(event: Event, deps: Deps): UIO[State] = {
+    event match {
+      case Event.Something => 
+        // Process and return new state (possibly StateB)
+        ZIO.succeed(StateB(...))
+    }
+  }
+}
+```
+
+### Core Standard: External API Pattern (Rating: 3)
+
+Public API methods should **queue actions**, not manipulate state directly:
+
+```scala
+class Component(actionQueue: Queue[Action]) {
+  // ✅ CORRECT: Queue action
+  def doSomething(param: Param): UIO[Unit] =
+    actionQueue.offer(Action.DoSomething(param)).unit
+    
+  // ❌ WRONG: Direct state manipulation
+  def doSomethingWrong(param: Param): UIO[Unit] =
+    stateRef.update(state => state.withSomething(param))
+}
+```
+
+### Core Standard: Resource Cleanup Through Stream (Rating: 4)
+
+Even cleanup operations should flow through the stream when possible:
+
+```scala
+// In finalizer:
+ZIO.scoped {
+  // Option 1: Queue shutdown action (if stream still running)
+  actionQueue.offer(Action.Shutdown)
+  
+  // Option 2: Direct cleanup (if stream already stopped)
+  // Only when you KNOW the stream has terminated
+  stateRef.get.flatMap {
+    case leader: Leader => leader.cleanup(transport)
+    case _ => ZIO.unit
+  }
+}
+```
+
+### Exception: When Direct Access Is OK (Rating: 3)
+
+Direct state access is acceptable in these scenarios:
+1. **Read-only queries** (no state mutation)
+2. **Finalizers** when the event loop has already terminated
+3. **Initialization** before the stream starts
+
+```scala
+// ✅ OK: Read-only query
+def getCurrentState: UIO[State] = stateRef.get
+
+// ✅ OK: Finalizer after stream stopped
+def cleanup: UIO[Unit] = 
+  stateRef.get.flatMap(_.shutdown(transport))
+```
+
+## Usage Tracking
+
+This pattern has been successfully applied in:
+- RaftServer (server-side unified stream)
+- RaftClient (client-side unified stream)
+- PR #15: Refactored confirmSessionCreation to use action queue
+
+## Common Pitfalls
+
+1. **Slow finalizers**: Queueing actions in finalizers when stream already stopped
+   - Solution: Direct cleanup in finalizers, actions during normal operation
+
+2. **Race conditions**: Multiple sources modifying state outside stream
+   - Solution: All mutations through stream, reads can be direct
+
+3. **Debugging difficulty**: Hard to trace state changes when bypassing stream
+   - Solution: Consistent pattern makes debugging easier
+
+## Scope
+
+This rule applies to:
+- Any component using ZStream.runFoldZIO with state accumulation
+- Components with unified event stream patterns
+- State machines in ZIO Raft codebase
+
+---
+
+**Status**: beta (validated in PR #15, needs monitoring in future features)
+**Next Review**: After 2-3 more stream-based components implemented

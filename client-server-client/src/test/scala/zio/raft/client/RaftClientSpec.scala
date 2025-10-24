@@ -701,7 +701,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
     suiteAll("Reconnection Scenarios") {
 
-      test("should fail when SessionRejected(SessionNotFound) after SessionClosed") {
+      test("should fail when SessionRejected(SessionExpired) after SessionClosed") {
         val port = findOpenPort
         for {
           mockServer <- ZSocket.server
@@ -737,7 +737,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
             mockServer,
             routingId,
             SessionRejected(
-              RejectionReason.SessionNotFound,
+              RejectionReason.SessionExpired,
               continueMsg.nonce,
               None
             )

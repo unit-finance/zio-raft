@@ -119,7 +119,9 @@ object Codecs {
     discriminated[RejectionReason]
       .by(uint8)
       .subcaseP(1) { case NotLeader => NotLeader }(provide(NotLeader))
-      .subcaseP(2) { case SessionNotFound => SessionNotFound }(provide(SessionNotFound))
+      .subcaseP(2) { case RejectionReason.SessionExpired => RejectionReason.SessionExpired }(provide(
+        RejectionReason.SessionExpired
+      ))
       .subcaseP(3) { case InvalidCapabilities => InvalidCapabilities }(provide(InvalidCapabilities))
   }
 
@@ -132,7 +134,9 @@ object Codecs {
       .subcaseP(2) { case NotLeaderAnymore => NotLeaderAnymore }(provide(NotLeaderAnymore))
       .subcaseP(3) { case SessionError => SessionError }(provide(SessionError))
       .subcaseP(4) { case ConnectionClosed => ConnectionClosed }(provide(ConnectionClosed))
-      .subcaseP(5) { case SessionTimeout => SessionTimeout }(provide(SessionTimeout))
+      .subcaseP(5) { case SessionCloseReason.SessionExpired => SessionCloseReason.SessionExpired }(provide(
+        SessionCloseReason.SessionExpired
+      ))
   }
 
   /** Codec for CloseReason.

@@ -208,7 +208,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
           _ <- sendClientMessage(client, ContinueSession(fakeSessionId, nonce))
 
           rejection <- waitForMessage[SessionRejected](client)
-        } yield assertTrue(rejection.reason == RejectionReason.SessionNotFound) &&
+        } yield assertTrue(rejection.reason == RejectionReason.SessionExpired) &&
           assertTrue(rejection.nonce == nonce)
       }
 
@@ -446,7 +446,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
           _ <- sendClientMessage(client2, ContinueSession(sessionId, nonce2))
 
           rejection <- waitForMessage[SessionRejected](client2)
-        } yield assertTrue(rejection.reason == RejectionReason.SessionNotFound)
+        } yield assertTrue(rejection.reason == RejectionReason.SessionExpired)
 
       }
     }

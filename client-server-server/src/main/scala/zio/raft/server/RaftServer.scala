@@ -5,13 +5,7 @@ import zio.stream.*
 import zio.raft.protocol.*
 import zio.zmq.RoutingId
 import scodec.bits.ByteVector
-import java.time.Instant
-import zio.zmq.ZSocket
-import zio.raft.protocol.Codecs.serverMessageCodec
-import scodec.bits.BitVector
-import zio.raft.protocol.Codecs.clientMessageCodec
 import zio.zmq.ZContext
-import zio.zmq.ignoreHostUnreachable
 
 object RaftServer:
 
@@ -36,42 +30,13 @@ object RaftServer:
     case class ServerRequestAck(sessionId: SessionId, requestId: RequestId) extends RaftAction
     case class ExpireSession(sessionId: SessionId) extends RaftAction
 
-  /** Transport abstraction for ZeroMQ SERVER socket.
-    */
-  trait ZmqServerTransport:
-    def disconnect(routingId: RoutingId): Task[Unit]
-    def sendMessage(routingId: RoutingId, message: ServerMessage): Task[Unit]
-    def incomingMessages: ZStream[Any, Throwable, IncomingMessage]
-
-  case class IncomingMessage(
-    routingId: RoutingId,
-    message: ClientMessage
-  )
-
-  case class SessionConnection(
-    routingId: Option[RoutingId],
-    expiresAt: Instant
-  )
-
-  case class SessionMetadata(
-    capabilities: Map[String, String],
-    createdAt: Instant
-  )
-
-  case class PendingSession(
-    routingId: RoutingId,
-    nonce: Nonce,
-    capabilities: Map[String, String],
-    createdAt: Instant
-  )
-
   /** Simplified RaftServer using pure functional state machine.
     *
     * Similar to RaftClient, the server uses a unified stream that merges all events. Each ServerState knows how to
     * handle events and transition to new states.
     */
   class RaftServer(
-    transport: ZmqServerTransport,
+    transport: ServerTransport,
     config: ServerConfig,
     actionQueue: Queue[ServerAction],
     raftActionsOut: Queue[RaftAction],
@@ -113,7 +78,7 @@ object RaftServer:
     for
       validatedConfig <- ZIO.fromEither(ServerConfig.validated(config).left.map(new IllegalArgumentException(_)))
 
-      transport <- createTransport(validatedConfig)
+      transport <- ServerTransport.make(validatedConfig)
       actionQueue <- Queue.unbounded[ServerAction]
       raftActionsOut <- Queue.unbounded[RaftAction]
 
@@ -138,22 +103,10 @@ object RaftServer:
       )
     yield server
 
-  private def createTransport(config: ServerConfig): ZIO[ZContext & Scope, Throwable, ZmqServerTransport] =
-    for
-      socket <- ZSocket.server
-      _ <- socket.options.setDisconnectMessage(
-        clientMessageCodec.encode(ConnectionClosed).require.toByteArray
-      )
-      _ <- socket.options.setLinger(10000) // Allow ten seconds to process messages from peer before terminating
-      _ <- socket.options.setHighWatermark(200000, 200000)
-      _ <- socket.bind(config.bindAddress)
-      transport = new ZmqServerTransportLive(socket)
-    yield transport
-
   /** Main loop processes unified stream of events.
     */
   private def startMainLoop(
-    transport: ZmqServerTransport,
+    transport: ServerTransport,
     config: ServerConfig,
     actionQueue: Queue[ServerAction],
     raftActionsOut: Queue[RaftAction],
@@ -171,9 +124,7 @@ object RaftServer:
       .tick(config.cleanupInterval)
       .map(_ => StreamEvent.CleanupTick)
 
-    val unifiedStream = actionStream
-      .merge(messageStream)
-      .merge(cleanupStream)
+    val unifiedStream = ZStream.mergeAllUnbounded(1024)(actionStream, messageStream, cleanupStream)
 
     // Pure functional state machine with Ref tracking
     for
@@ -193,7 +144,7 @@ object RaftServer:
     def stateName: String
     def handle(
       event: StreamEvent,
-      transport: ZmqServerTransport,
+      transport: ServerTransport,
       config: ServerConfig,
       raftActionsOut: Queue[RaftAction]
     ): UIO[ServerState]
@@ -207,7 +158,7 @@ object RaftServer:
 
       override def handle(
         event: StreamEvent,
-        transport: ZmqServerTransport,
+        transport: ServerTransport,
         config: ServerConfig,
         raftActionsOut: Queue[RaftAction]
       ): UIO[ServerState] =
@@ -239,7 +190,7 @@ object RaftServer:
       private def handleClientMessage(
         routingId: RoutingId,
         message: ClientMessage,
-        transport: ZmqServerTransport
+        transport: ServerTransport
       ): UIO[ServerState] =
         message match
           case CreateSession(_, nonce) =>
@@ -256,13 +207,13 @@ object RaftServer:
 
           case KeepAlive(timestamp) =>
             for
-              _ <- transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionError, None)).orDie
+              _ <- transport.sendMessage(routingId, SessionClosed(SessionCloseReason.NotLeaderAnymore, leaderId)).orDie
               _ <- transport.disconnect(routingId).orDie
             yield this
 
           case _: ClientRequest =>
             for
-              _ <- transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionError, None)).orDie
+              _ <- transport.sendMessage(routingId, SessionClosed(SessionCloseReason.NotLeaderAnymore, leaderId)).orDie
               _ <- transport.disconnect(routingId).orDie
             yield this
 
@@ -286,7 +237,7 @@ object RaftServer:
 
       override def handle(
         event: StreamEvent,
-        transport: ZmqServerTransport,
+        transport: ServerTransport,
         config: ServerConfig,
         raftActionsOut: Queue[RaftAction]
       ): UIO[ServerState] =
@@ -340,7 +291,7 @@ object RaftServer:
                   routingIdOpt = sessions.getRoutingId(sessionId)
                   _ <- routingIdOpt match
                     case Some(routingId) =>
-                      transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionTimeout, None)).orDie
+                      transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionExpired, None)).orDie
                     case None => ZIO.unit
                 yield ()
               }
@@ -349,7 +300,7 @@ object RaftServer:
       private def handleClientMessage(
         routingId: RoutingId,
         message: ClientMessage,
-        transport: ZmqServerTransport,
+        transport: ServerTransport,
         raftActionsOut: Queue[RaftAction],
         config: ServerConfig
       ): UIO[ServerState] =
@@ -383,7 +334,7 @@ object RaftServer:
               case None =>
                 for
                   _ <- transport
-                    .sendMessage(routingId, SessionRejected(RejectionReason.SessionNotFound, nonce, None))
+                    .sendMessage(routingId, SessionRejected(RejectionReason.SessionExpired, nonce, None))
                     .orDie
                   _ <- transport.disconnect(routingId).orDie
                 yield this
@@ -451,112 +402,6 @@ object RaftServer:
     end Leader
   end ServerState
 
-  /** Immutable sessions management.
-    */
-  case class Sessions(
-    metadata: Map[SessionId, SessionMetadata],
-    connections: Map[SessionId, SessionConnection],
-    routingToSession: Map[RoutingId, SessionId],
-    pendingSessions: Map[SessionId, PendingSession]
-  ):
-    def addPending(
-      sessionId: SessionId,
-      routingId: RoutingId,
-      nonce: Nonce,
-      capabilities: Map[String, String],
-      now: Instant
-    ): Sessions =
-      copy(
-        pendingSessions = pendingSessions.updated(sessionId, PendingSession(routingId, nonce, capabilities, now))
-      )
-
-    def confirmSession(
-      sessionId: SessionId,
-      now: Instant,
-      config: ServerConfig
-    ): Option[(RoutingId, Nonce, Sessions)] =
-      pendingSessions.get(sessionId).map { pending =>
-        val expiresAt = now.plus(config.sessionTimeout)
-        val newSessions = copy(
-          metadata = metadata.updated(sessionId, SessionMetadata(pending.capabilities, pending.createdAt)),
-          connections = connections.updated(sessionId, SessionConnection(Some(pending.routingId), expiresAt)),
-          routingToSession = routingToSession.updated(pending.routingId, sessionId),
-          pendingSessions = pendingSessions.removed(sessionId)
-        )
-        (pending.routingId, pending.nonce, newSessions)
-      }
-
-    def reconnect(sessionId: SessionId, routingId: RoutingId, now: Instant, config: ServerConfig): Sessions =
-      connections.get(sessionId) match
-        case Some(conn) =>
-          val expiresAt = now.plus(config.sessionTimeout)
-          // Remove old routing mapping if it exists
-          val cleanedRouting = conn.routingId.map(old => routingToSession.removed(old)).getOrElse(routingToSession)
-          copy(
-            connections = connections.updated(sessionId, conn.copy(routingId = Some(routingId), expiresAt = expiresAt)),
-            routingToSession = cleanedRouting.updated(routingId, sessionId)
-          )
-        case None => this
-
-    def disconnect(sessionId: SessionId, routingId: RoutingId): Sessions =
-      copy(
-        connections = connections.updatedWith(sessionId)(_.map(_.copy(routingId = None))),
-        routingToSession = routingToSession.removed(routingId)
-      )
-
-    def removeSession(sessionId: SessionId, routingId: RoutingId): Sessions =
-      copy(
-        metadata = metadata.removed(sessionId),
-        connections = connections.removed(sessionId),
-        routingToSession = routingToSession.removed(routingId),
-        pendingSessions = pendingSessions.removed(sessionId)
-      )
-
-    def updateExpiry(sessionId: SessionId, now: Instant, config: ServerConfig): Sessions =
-      connections.get(sessionId) match
-        case Some(conn) =>
-          val expiresAt = now.plus(config.sessionTimeout)
-          copy(connections = connections.updated(sessionId, conn.copy(expiresAt = expiresAt)))
-        case None => this
-
-    def removeExpired(now: Instant): (List[SessionId], Sessions) =
-      val expired = connections.filter { case (_, conn) => conn.expiresAt.isBefore(now) }.keys.toList
-      val newMetadata = metadata -- expired
-      val newConnections = connections -- expired
-      val newRouting = routingToSession.filter { case (_, sid) => !expired.contains(sid) }
-      val newPendingSessions = pendingSessions -- expired
-      (expired, Sessions(newMetadata, newConnections, newRouting, newPendingSessions))
-
-    def getRoutingId(sessionId: SessionId): Option[RoutingId] =
-      connections.get(sessionId).flatMap(_.routingId)
-
-    def getMetadata(sessionId: SessionId): Option[SessionMetadata] =
-      metadata.get(sessionId)
-
-    def findSessionByRouting(routingId: RoutingId): Option[SessionId] =
-      routingToSession.get(routingId)
-
-    def shutdown(transport: ZmqServerTransport): UIO[Unit] =
-      ZIO.foreachDiscard(connections.values.flatMap(_.routingId)) { routingId =>
-        transport.sendMessage(routingId, SessionClosed(SessionCloseReason.Shutdown, None)).orDie
-      }
-
-    def stepDown(transport: ZmqServerTransport, leaderId: Option[MemberId]): UIO[Unit] =
-      ZIO.foreachDiscard(connections.values.flatMap(_.routingId)) { routingId =>
-        transport.sendMessage(routingId, SessionClosed(SessionCloseReason.NotLeaderAnymore, leaderId)).orDie
-      }
-  end Sessions
-
-  object Sessions:
-    def empty: Sessions = Sessions(Map.empty, Map.empty, Map.empty, Map.empty)
-
-    def fromMetadata(metadata: Map[SessionId, SessionMetadata], config: ServerConfig, now: Instant): Sessions =
-      val expiresAt = now.plusSeconds(config.sessionTimeout.toSeconds)
-      val connections = metadata.map { case (sid, _) =>
-        sid -> SessionConnection(None, expiresAt)
-      }
-      Sessions(metadata, connections, Map.empty, Map.empty)
-
   /** Unified stream events.
     */
   sealed trait StreamEvent
@@ -566,22 +411,4 @@ object RaftServer:
     case class IncomingClientMessage(routingId: RoutingId, message: ClientMessage) extends StreamEvent
     case object CleanupTick extends StreamEvent
 
-  private class ZmqServerTransportLive(socket: ZSocket) extends ZmqServerTransport:
-    override def disconnect(routingId: RoutingId): Task[Unit] =
-      for
-        _ <- socket.disconnectPeer(routingId)
-      yield ()
-
-    override def sendMessage(routingId: RoutingId, message: ServerMessage): Task[Unit] =
-      for
-        bytes <- ZIO.attempt(serverMessageCodec.encode(message).require.toByteArray)
-        _ <- socket.sendImmediately(routingId, bytes).unit.ignoreHostUnreachable
-      yield ()
-
-    override def incomingMessages: ZStream[Any, Throwable, IncomingMessage] =
-      socket.stream.mapZIO { msg =>
-        ZIO.attempt(
-          IncomingMessage(RoutingId(msg.getRoutingId), clientMessageCodec.decode(BitVector(msg.data())).require.value)
-        )
-      }
 end RaftServer

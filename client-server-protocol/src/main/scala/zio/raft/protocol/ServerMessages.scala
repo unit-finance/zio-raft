@@ -118,7 +118,7 @@ object RejectionReason {
 
   /** Requested session ID does not exist (expired or never created).
     */
-  case object SessionNotFound extends RejectionReason
+  case object SessionExpired extends RejectionReason
 
   /** Client capabilities are invalid or unsupported.
     */
@@ -149,5 +149,5 @@ object SessionCloseReason {
 
   /** Session expired due to client inactivity (no keep-alive messages).
     */
-  case object SessionTimeout extends SessionCloseReason
+  case object SessionExpired extends SessionCloseReason
 }

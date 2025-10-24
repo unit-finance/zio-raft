@@ -110,11 +110,11 @@ object SessionManagementSpec extends ZIOSpecDefault {
           result <- ZIO
             .attempt {
               val rejection = SessionRejected(
-                reason = SessionNotFound,
+                reason = SessionExpired,
                 nonce = Nonce.fromLong(67890L),
                 leaderId = None
               )
-              rejection.reason == SessionNotFound && rejection.leaderId.isEmpty
+              rejection.reason == SessionExpired && rejection.leaderId.isEmpty
             }
             .catchAll(_ => ZIO.succeed(false))
         } yield assertTrue(result) // Should succeed - codecs are implemented

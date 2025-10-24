@@ -74,6 +74,12 @@ package object protocol {
       /** Get the next request ID by incrementing by one.
         */
       def next: RequestId = RequestId(RequestId.unwrap(requestId) + 1L)
+
+      /** Get the value of the request ID.
+        */
+      def value: Long = RequestId.unwrap(requestId)
+
+      def isLowerOrEqual(other: RequestId): Boolean = value <= other.value
     }
   }
 

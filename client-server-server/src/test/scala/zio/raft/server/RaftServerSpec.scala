@@ -121,7 +121,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
           _ <- sendClientMessage(client, request)
 
           error <- waitForMessage[SessionClosed](client)
-        } yield assertTrue(error.reason == SessionCloseReason.SessionError)
+        } yield assertTrue(error.reason == SessionCloseReason.NotLeaderAnymore)
       }
     }
 

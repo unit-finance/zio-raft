@@ -53,10 +53,10 @@ object ResponseCachingSpec extends ZIOSpecDefault:
     protected def handleSessionExpired(sid: SessionId, capabilities: Map[String, String], createdAt: Instant): StateWriter[HMap[TestSchema], ServerReq, Unit] =
       StateWriter.succeed(())
     
-    def takeSnapshot(state: HMap[CombinedSchema[TestSchema]]): Stream[Nothing, Byte] =
+    def takeSnapshot(state: HMap[Schema[TestSchema]]): Stream[Nothing, Byte] =
       zio.stream.ZStream.empty
     
-    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[TestSchema]]] =
+    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[Schema[TestSchema]]] =
       ZIO.succeed(HMap.empty)
     
     def shouldTakeSnapshot(lastSnapshotIndex: zio.raft.Index, lastSnapshotSize: Long, commitIndex: zio.raft.Index): Boolean =
@@ -66,7 +66,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
     
     test("PC-2: First request caches, second request returns cached") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       // First request
@@ -89,7 +89,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
     
     test("Cached response does NOT include server requests (only response is cached)") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       val cmd = SessionCommand.ClientRequest[TestCommand, ServerReq](
@@ -109,7 +109,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
     
     test("Cache persists across multiple duplicate requests") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       val cmd = SessionCommand.ClientRequest[TestCommand, ServerReq](
@@ -134,7 +134,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
     
     test("Multiple sessions maintain separate caches") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       // Session 1, Request 1
@@ -158,7 +158,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
     
     test("Multiple requests in same session maintain separate caches") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       // Request 1

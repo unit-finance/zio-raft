@@ -85,23 +85,35 @@ object HMapTypedKeysSpec extends ZIOSpecDefault:
       )
     },
     
-    test("schema narrowing with typed keys") {
-      type FullSchema = 
-        ("users", UserId, UserData) *:
-        ("orders", OrderId, OrderData) *:
-        EmptyTuple
-      
-      type PartialSchema = ("users", UserId, UserData) *: EmptyTuple
-      
-      val full: HMap[FullSchema] = HMap.empty[FullSchema]
+    test("different prefixes with same key values don't interfere") {
+      val hmap = HMap.empty[TestSchema]
         .updated["users"](UserId("u1"), UserData("Alice", "alice@example.com"))
-        .updated["orders"](OrderId("o1"), OrderData(1, 10.0))
+        .updated["orders"](OrderId("u1"), OrderData(5, 50.0))  // Same string "u1" but different typed key
       
-      val partial: HMap[PartialSchema] = full.narrowTo[PartialSchema]
+      val user = hmap.get["users"](UserId("u1"))
+      val order = hmap.get["orders"](OrderId("u1"))
       
-      val user = partial.get["users"](UserId("u1"))
+      assertTrue(
+        user == Some(UserData("Alice", "alice@example.com")),
+        order == Some(OrderData(5, 50.0))
+      )
+    },
+    
+    test("range queries return entries within key range") {
+      val hmap = HMap.empty[TestSchema]
+        .updated["users"](UserId("user001"), UserData("Alice", "alice@example.com"))
+        .updated["users"](UserId("user005"), UserData("Bob", "bob@example.com"))
+        .updated["users"](UserId("user010"), UserData("Charlie", "charlie@example.com"))
+        .updated["users"](UserId("user015"), UserData("Diana", "diana@example.com"))
       
-      assertTrue(user == Some(UserData("Alice", "alice@example.com")))
+      // Get users from "user003" (inclusive) to "user012" (exclusive)
+      val rangeResults = hmap.range["users"](UserId("user003"), UserId("user012")).toList
+      
+      assertTrue(
+        rangeResults.length == 2,
+        rangeResults.exists((k, v) => k == UserId("user005") && v.name == "Bob"),
+        rangeResults.exists((k, v) => k == UserId("user010") && v.name == "Charlie")
+      )
     }
   )
 

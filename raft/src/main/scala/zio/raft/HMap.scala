@@ -1,9 +1,10 @@
 package zio.raft
 
 import scala.util.NotGiven
-import scala.Conversion
+import scala.collection.immutable.TreeMap
 import zio.prelude.Newtype
-import zio.raft.HMap.{SubSchema, KeyAt, ValueAt, Contains, KeyLike}
+import zio.raft.HMap.{KeyAt, ValueAt, Contains, KeyLike}
+import java.nio.charset.StandardCharsets
 
 /** 
  * HMap: A type-safe heterogeneous map with prefix-based namespacing and typed keys
@@ -57,26 +58,6 @@ import zio.raft.HMap.{SubSchema, KeyAt, ValueAt, Contains, KeyLike}
  * 3. Values must match the type associated with their prefix
  * 4. Retrieved values have the correct type without manual casting
  * 
- * ## Schema Subtyping
- * 
- * HMap supports schema narrowing - you can treat an HMap with a larger schema
- * as one with a smaller schema (subset of prefixes):
- * 
- * ```scala
- * type FullSchema = 
- *   ("users", UserId, UserData) *: 
- *   ("orders", OrderId, OrderData) *: 
- *   EmptyTuple
- * type PartialSchema = ("users", UserId, UserData) *: EmptyTuple
- * 
- * val full: HMap[FullSchema] = HMap.empty[FullSchema]
- * val partial: HMap[PartialSchema] = full.narrowTo[PartialSchema]
- * 
- * // Or use implicit conversion:
- * def needsPartial(h: HMap[PartialSchema]): Unit = ()
- * needsPartial(full)  // automatic conversion
- * ```
- * 
  * ## Use Cases
  * 
  * HMap is particularly useful for:
@@ -89,20 +70,37 @@ import zio.raft.HMap.{SubSchema, KeyAt, ValueAt, Contains, KeyLike}
 /** 
  * A heterogeneous map with compile-time type safety for keys and values.
  * 
+ * Uses TreeMap internally for sorted key storage, enabling efficient range queries.
+ * 
  * @tparam M The schema as a tuple of (Prefix, KeyType, ValueType) triples
  * 
- * @param m Internal storage using "prefix\key" as the full key
+ * @param m Internal storage using byte arrays (prefix + separator + key bytes) as the full key, maintained in sorted order
  * 
  * The HMap provides immutable operations that preserve type safety. All methods
  * that access or modify the map verify at compile time that the prefix exists
  * in the schema and enforce the correct key and value types for that prefix.
  */
-final case class HMap[M <: Tuple](m: Map[String, Any] = Map.empty):
+final case class HMap[M <: Tuple](private val m: TreeMap[Array[Byte], Any] = TreeMap.empty(using HMap.byteArrayOrdering)):
   
-  /** Constructs the internal key by combining prefix and key with a backslash separator */
+  /** Constructs the internal key by combining prefix and key bytes with a backslash separator */
   private def fullKey[P <: String & Singleton : ValueOf](key: KeyAt[M, P])
-    (using kl: KeyLike[KeyAt[M, P]]): String =
-    s"${valueOf[P]}\\${kl.asString(key)}"
+    (using kl: KeyLike[KeyAt[M, P]]): Array[Byte] =
+    val prefixBytes = valueOf[P].getBytes(StandardCharsets.UTF_8)
+    val keyBytes = kl.asBytes(key)
+    val separator = Array(0x5C.toByte) // backslash
+    prefixBytes ++ separator ++ keyBytes
+  
+  /**
+   * Calculate the range bounds for a prefix in the TreeMap.
+   * Returns (lowerBound, upperBound) where lowerBound is inclusive and upperBound is exclusive.
+   * This allows efficient iteration over all entries with a given prefix.
+   */
+  private def prefixRange[P <: String & Singleton : ValueOf](): (Array[Byte], Array[Byte]) =
+    val prefixBytes = valueOf[P].getBytes(StandardCharsets.UTF_8)
+    val separatorByte = 0x5C.toByte // backslash
+    val lowerBound = prefixBytes :+ separatorByte
+    val upperBound = prefixBytes :+ (separatorByte + 1).toByte
+    (lowerBound, upperBound)
 
   /** 
    * Retrieve a value for the given prefix and key.
@@ -175,11 +173,38 @@ final case class HMap[M <: Tuple](m: Map[String, Any] = Map.empty):
   def removed[P <: String & Singleton : ValueOf](key: KeyAt[M, P])
     (using Contains[M, P], KeyLike[KeyAt[M, P]]): HMap[M] =
     copy(m = m.removed(fullKey[P](key)))
+  
+  /**
+   * Create a new HMap with multiple values removed for the given prefix.
+   * 
+   * More efficient than calling `removed` multiple times in a fold, as it builds
+   * a new TreeMap in one pass.
+   * 
+   * @tparam P The prefix (must be in the schema)
+   * @param keys The keys to remove within the prefix namespace
+   * @return A new HMap with all specified entries removed
+   * 
+   * @example
+   * {{{
+   * val hmap = HMap.empty[Schema]
+   *   .updated["users"](UserId("u1"), UserData(...))
+   *   .updated["users"](UserId("u2"), UserData(...))
+   *   .updated["users"](UserId("u3"), UserData(...))
+   * 
+   * val cleaned = hmap.removedAll["users"](List(UserId("u1"), UserId("u2")))
+   * }}}
+   */
+  def removedAll[P <: String & Singleton : ValueOf](keys: IterableOnce[KeyAt[M, P]])
+    (using c: Contains[M, P], kl: KeyLike[KeyAt[M, P]]): HMap[M] =
+    val fullKeys = keys.iterator.map(key => fullKey[P](key))
+    copy(m = m.removedAll(fullKeys))
 
 
-  /** 
+  /**
    * Returns an iterator over (key, value) pairs for the specified prefix.
    * Only entries belonging to prefix P are included; key is the typed key (without prefix).
+   * 
+   * Uses TreeMap's range for efficient iteration - only visits entries with the prefix.
    * 
    * @tparam P The prefix (must be present in the schema)
    * @return Iterator of (KeyType, ValueType) pairs for the prefix P
@@ -195,42 +220,105 @@ final case class HMap[M <: Tuple](m: Map[String, Any] = Map.empty):
    * }}}
    */
   def iterator[P <: String & Singleton : ValueOf](using c: Contains[M, P], kl: KeyLike[KeyAt[M, P]]): Iterator[(KeyAt[M, P], ValueAt[M, P])] = {
-    val prefix = valueOf[P] + "\\"
-    m.iterator.collect {
-      case (k, v) if k.startsWith(prefix) =>
-        val logicalKeyStr = k.substring(prefix.length)
-        val logicalKey = kl.fromString(logicalKeyStr)
-        (logicalKey, v.asInstanceOf[ValueAt[M, P]])
+    val (lowerBound, upperBound) = prefixRange[P]()
+    
+    // Use TreeMap's range for efficient iteration (O(log n + k) where k = results)
+    m.range(lowerBound, upperBound).iterator.map { case (k, v) =>
+      // Extract key bytes (everything after prefix + separator)
+      val keyBytes = k.drop(lowerBound.length)
+      val logicalKey = kl.fromBytes(keyBytes)
+      (logicalKey, v.asInstanceOf[ValueAt[M, P]])
+    }
+  }
+
+  /**
+   * Returns an iterator over (key, value) pairs for a key range within the specified prefix.
+   * 
+   * Only entries belonging to prefix P with keys in the range [from, until) are included.
+   * The range is based on the byte representation of the keys (after conversion via KeyLike).
+   * 
+   * @tparam P The prefix (must be present in the schema)
+   * @param from The start of the range (inclusive)
+   * @param until The end of the range (exclusive)
+   * @return Iterator of (KeyType, ValueType) pairs within the range
+   * 
+   * @example
+   * {{{
+   * type Schema = ("users", UserId, UserData) *: EmptyTuple
+   * val hmap = HMap.empty[Schema]
+   *   .updated["users"](UserId("user001"), UserData(...))
+   *   .updated["users"](UserId("user005"), UserData(...))
+   *   .updated["users"](UserId("user010"), UserData(...))
+   * 
+   * // Get users from "user003" to "user008"
+   * hmap.range["users"](UserId("user003"), UserId("user008")).toList
+   * // Returns: List((UserId("user005"), UserData(...)))
+   * }}}
+   */
+  def range[P <: String & Singleton : ValueOf](from: KeyAt[M, P], until: KeyAt[M, P])
+    (using c: Contains[M, P], kl: KeyLike[KeyAt[M, P]]): Iterator[(KeyAt[M, P], ValueAt[M, P])] = {
+    val prefixBytes = valueOf[P].getBytes(StandardCharsets.UTF_8)
+    val separatorByte = 0x5C.toByte // backslash
+    val prefixWithSep = prefixBytes :+ separatorByte
+    
+    val fromKey = prefixWithSep ++ kl.asBytes(from)
+    val untilKey = prefixWithSep ++ kl.asBytes(until)
+    
+    // TreeMap.range returns entries in [from, until) based on byte ordering
+    m.range(fromKey, untilKey).iterator.map { case (k, v) =>
+      // Extract key bytes (everything after prefix + separator)
+      val keyBytes = k.drop(prefixWithSep.length)
+      val logicalKey = kl.fromBytes(keyBytes)
+      (logicalKey, v.asInstanceOf[ValueAt[M, P]])
+    }
+  }
+
+  /**
+   * Check if any entry in the specified prefix satisfies the predicate.
+   * 
+   * Uses the underlying TreeMap's range.exists for efficient short-circuit evaluation.
+   * Stops as soon as it finds a matching entry without creating intermediate iterators.
+   * 
+   * @tparam P The prefix (must be present in the schema)
+   * @param predicate Function to test each (key, value) pair
+   * @return true if any entry satisfies the predicate, false otherwise
+   * 
+   * @example
+   * {{{
+   * type Schema = ("users", UserId, UserData) *: EmptyTuple
+   * val hmap = HMap.empty[Schema]
+   *   .updated["users"](UserId("alice"), UserData(age = 25))
+   *   .updated["users"](UserId("bob"), UserData(age = 30))
+   * 
+   * // Check if any user is over 18
+   * val hasAdults = hmap.exists["users"] { (_, user) => user.age >= 18 }
+   * }}}
+   */
+  def exists[P <: String & Singleton : ValueOf](predicate: (KeyAt[M, P], ValueAt[M, P]) => Boolean)
+    (using c: Contains[M, P], kl: KeyLike[KeyAt[M, P]]): Boolean = {
+    val (lowerBound, upperBound) = prefixRange[P]()
+    
+    // Use TreeMap's range.exists directly for maximum efficiency
+    m.range(lowerBound, upperBound).exists { case (k, v) =>
+      val keyBytes = k.drop(lowerBound.length)
+      val logicalKey = kl.fromBytes(keyBytes)
+      predicate(logicalKey, v.asInstanceOf[ValueAt[M, P]])
     }
   }
 
 
-  /** 
-   * Explicitly narrow the HMap to a subset schema.
-   * 
-   * This is useful when you need to pass an HMap to a function that expects
-   * a smaller schema. The compiler will verify that every prefix in Sub exists
-   * in M with the same key and value types.
-   * 
-   * @tparam Sub The subset schema (must be a valid subset of M)
-   * @return A view of this HMap with the narrower schema
-   * 
-   * @example
-   * {{{
-   * type Full = ("users", UserId, UserData) *: ("orders", OrderId, OrderData) *: EmptyTuple
-   * type Partial = ("users", UserId, UserData) *: EmptyTuple
-   * 
-   * val full: HMap[Full] = HMap.empty[Full]
-   * val partial: HMap[Partial] = full.narrowTo[Partial]
-   * }}}
-   */
-  def narrowTo[Sub <: Tuple](using SubSchema[M, Sub]): HMap[Sub] =
-    HMap[Sub](m)
 
 /** 
  * Companion object for HMap providing factory methods, type-level functions, and implicit conversions.
  */
 object HMap:
+  
+  /**
+   * Byte array ordering using Java's unsigned byte comparison.
+   * This ensures proper lexicographic ordering of byte arrays.
+   */
+  given byteArrayOrdering: Ordering[Array[Byte]] = 
+    Ordering.comparatorToOrdering(java.util.Arrays.compareUnsigned(_, _))
   
   /** 
    * Create an empty HMap with the given schema.
@@ -251,10 +339,10 @@ object HMap:
   // ---------------------------------------------
 
   /**
-   * Typeclass for converting typed keys to/from strings for internal storage.
+   * Typeclass for converting typed keys to/from byte arrays for internal storage.
    * 
    * This enables HMap to work with newtypes and other custom key types while
-   * storing them as strings internally.
+   * storing them as byte arrays internally for efficient binary comparison and ordering.
    * 
    * ## Usage with ZIO Prelude Newtype[String]
    * 
@@ -264,21 +352,34 @@ object HMap:
    * object UserId extends Newtype[String]
    * type UserId = UserId.Type
    * 
-   * given HMap.KeyLike[UserId] with
-   *   def asString(key: UserId): String = UserId.unwrap(key)
-   *   def fromString(str: String): UserId = UserId(str)
+   * given HMap.KeyLike[UserId] = HMap.KeyLike.forNewtype(UserId)
+   * ```
+   * 
+   * ## Usage with Composite Keys
+   * 
+   * For composite keys, implement KeyLike directly with proper encoding:
+   * 
+   * ```scala
+   * given HMap.KeyLike[(UserId, Timestamp)] = new HMap.KeyLike[(UserId, Timestamp)]:
+   *   def asBytes(key: (UserId, Timestamp)): Array[Byte] = 
+   *     // Encode with length prefixes and proper ordering
+   *     ???
+   *   def fromBytes(bytes: Array[Byte]): (UserId, Timestamp) = 
+   *     // Decode with length prefixes
+   *     ???
    * ```
    */
   trait KeyLike[K]:
-    /** Convert a typed key to a string for storage */
-    def asString(key: K): String
+    /** Convert a typed key to bytes for storage */
+    def asBytes(key: K): Array[Byte]
     
-    /** Convert a string back to a typed key */
-    def fromString(str: String): K
+    /** Convert bytes back to a typed key */
+    def fromBytes(bytes: Array[Byte]): K
 
   object KeyLike:
     /**
      * Helper method to create KeyLike instances for Newtype[String] types.
+     * Encodes strings as UTF-8 bytes.
      * 
      * @example
      * {{{
@@ -289,8 +390,10 @@ object HMap:
      * }}}
      */
     def forNewtype[A](nt: Newtype[String] { type Type = A }): KeyLike[A] = new KeyLike[A]:
-      def asString(key: A): String = nt.unwrap(key)
-      def fromString(str: String): A = nt.wrap(str)
+      def asBytes(key: A): Array[Byte] = 
+        nt.unwrap(key).getBytes(StandardCharsets.UTF_8)
+      def fromBytes(bytes: Array[Byte]): A = 
+        nt.wrap(new String(bytes, StandardCharsets.UTF_8))
 
   /** 
    * Type-level function that extracts the key type for a given prefix P in schema M.
@@ -370,69 +473,3 @@ object HMap:
      */
     inline given [M <: Tuple, P <: String](using NotGiven[ValueAt[M, P] =:= Nothing]): Contains[M, P] =
       evidence.asInstanceOf[Contains[M, P]]
-
-  /** 
-   * Implicit conversion from HMap[Sup] to HMap[Sub] when Sub is a subset of Sup.
-   * 
-   * This allows you to pass an HMap with a larger schema to functions expecting
-   * a smaller schema, as long as the smaller schema's prefixes are all present
-   * in the larger schema with matching key and value types.
-   * 
-   * @example
-   * {{{
-   * type Full = ("users", UserId, UserData) *: ("orders", OrderId, OrderData) *: EmptyTuple
-   * type Partial = ("users", UserId, UserData) *: EmptyTuple
-   * 
-   * def processUsers(h: HMap[Partial]): Unit = 
-   *   h.get["users"](UserId("admin"))
-   * 
-   * val full: HMap[Full] = HMap.empty[Full]
-   * processUsers(full)  // Implicit conversion happens here
-   * }}}
-   */
-  given [Sup <: Tuple, Sub <: Tuple](using SubSchema[Sup, Sub]): Conversion[HMap[Sup], HMap[Sub]] with
-    def apply(h: HMap[Sup]): HMap[Sub] = HMap[Sub](h.m)
-
-  // ---------------------------------------------
-  // Subset machinery (internal type-level proofs)
-  // ---------------------------------------------
-  
-  /** 
-   * Evidence that schema Sup contains prefix P with exactly key type K and value type V.
-   * This is used internally to construct SubSchema proofs.
-   */
-  trait Elem[Sup <: Tuple, P <: String, K, V]
-  
-  object Elem:
-    /** 
-     * Provides Elem evidence if:
-     * 1. Prefix P exists in Sup (via Contains)
-     * 2. The key type at P in Sup is exactly K (via =:=)
-     * 3. The value type at P in Sup is exactly V (via =:=)
-     * 
-     * Note: Change =:= to <:< if you want covariant key/value types.
-     */
-    given [Sup <: Tuple, P <: String, K, V](using Contains[Sup, P])
-        (using evK: KeyAt[Sup, P] =:= K, evV: ValueAt[Sup, P] =:= V): Elem[Sup, P, K, V] = 
-      new Elem[Sup, P, K, V] {}
-
-  /** 
-   * Evidence that Sub is a valid subset of Sup.
-   * 
-   * Sub is a subset of Sup if every (Prefix, KeyType, ValueType) triple in Sub
-   * appears in Sup with the same key and value types.
-   */
-  trait SubSchema[Sup <: Tuple, Sub <: Tuple]
-  
-  object SubSchema:
-    /** Base case: EmptyTuple is always a subset of any schema */
-    given [Sup <: Tuple]: SubSchema[Sup, EmptyTuple] = new {}
-    
-    /** 
-     * Inductive case: (P, K, V) *: T is a subset of Sup if:
-     * 1. Sup contains P with key type K and value type V (via Elem)
-     * 2. T is a subset of Sup (via recursive SubSchema)
-     */
-    given [Sup <: Tuple, P <: String, K, V, T <: Tuple]
-        (using Elem[Sup, P, K, V], SubSchema[Sup, T]): SubSchema[Sup, (P, K, V) *: T] = 
-        new {}

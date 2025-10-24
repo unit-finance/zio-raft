@@ -58,10 +58,10 @@ object InvariantSpec extends ZIOSpecDefault:
     protected def handleSessionExpired(sid: SessionId, capabilities: Map[String, String], createdAt: Instant): StateWriter[HMap[TestSchema], ServerReq, Unit] =
       StateWriter.succeed(())
     
-    def takeSnapshot(state: HMap[CombinedSchema[TestSchema]]): Stream[Nothing, Byte] =
+    def takeSnapshot(state: HMap[Schema[TestSchema]]): Stream[Nothing, Byte] =
       zio.stream.ZStream.empty
     
-    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[TestSchema]]] =
+    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[Schema[TestSchema]]] =
       ZIO.succeed(HMap.empty)
     
     def shouldTakeSnapshot(lastSnapshotIndex: zio.raft.Index, lastSnapshotSize: Long, commitIndex: zio.raft.Index): Boolean =
@@ -72,7 +72,7 @@ object InvariantSpec extends ZIOSpecDefault:
     test("INV-1: Idempotency consistency - duplicate requests always return same response") {
       check(Gen.int(1, 100), Gen.int(1, 10)) { (value, duplicateCount) =>
         val sm = new TestStateMachine()
-        val state0 = HMap.empty[CombinedSchema[TestSchema]]
+        val state0 = HMap.empty[Schema[TestSchema]]
         val now = Instant.now()
         
         val sessionId = SessionId("s1")
@@ -97,7 +97,7 @@ object InvariantSpec extends ZIOSpecDefault:
     
     test("INV-3: Monotonic server request IDs - IDs always increase") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       val sessionId = SessionId("s1")
@@ -125,7 +125,7 @@ object InvariantSpec extends ZIOSpecDefault:
     },
     
     test("INV-6: Schema type safety - HMap enforces correct types at compile time") {
-      val state = HMap.empty[CombinedSchema[TestSchema]]
+      val state = HMap.empty[Schema[TestSchema]]
       
       // These operations should compile - correct types
       val state1 = state.updated["counter"](counterKey, 42)
@@ -140,7 +140,7 @@ object InvariantSpec extends ZIOSpecDefault:
     
     test("INV-7: Prefix isolation - different prefixes don't interfere") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       // Create session (adds metadata prefix)
@@ -169,7 +169,7 @@ object InvariantSpec extends ZIOSpecDefault:
     test("Property: Multiple sessions operate independently") {
       check(Gen.listOfN(5)(Gen.int(1, 100))) { values =>
         val sm = new TestStateMachine()
-        val state0 = HMap.empty[CombinedSchema[TestSchema]]
+        val state0 = HMap.empty[Schema[TestSchema]]
         val now = Instant.now()
         
         // Create multiple sessions and execute commands
@@ -202,8 +202,8 @@ object InvariantSpec extends ZIOSpecDefault:
         val sm1 = new TestStateMachine()
         val sm2 = new TestStateMachine()
         
-        val state0_1 = HMap.empty[CombinedSchema[TestSchema]]
-        val state0_2 = HMap.empty[CombinedSchema[TestSchema]]
+        val state0_1 = HMap.empty[Schema[TestSchema]]
+        val state0_2 = HMap.empty[Schema[TestSchema]]
         
         val sessionId = SessionId("s1")
         val now = Instant.now()
@@ -234,7 +234,7 @@ object InvariantSpec extends ZIOSpecDefault:
     
     test("Property: State transitions are pure (no side effects)") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       val sessionId = SessionId("s1")

@@ -50,24 +50,24 @@ object CumulativeAckSpec extends ZIOSpecDefault:
     protected def handleSessionExpired(sid: SessionId, capabilities: Map[String, String], createdAt: Instant): StateWriter[HMap[TestSchema], ServerReq, Unit] =
       StateWriter.succeed(())
     
-    def takeSnapshot(state: HMap[CombinedSchema[TestSchema]]): Stream[Nothing, Byte] =
+    def takeSnapshot(state: HMap[Schema[TestSchema]]): Stream[Nothing, Byte] =
       zio.stream.ZStream.empty
     
-    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[TestSchema]]] =
+    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[Schema[TestSchema]]] =
       ZIO.succeed(HMap.empty)
     
     def shouldTakeSnapshot(lastSnapshotIndex: zio.raft.Index, lastSnapshotSize: Long, commitIndex: zio.raft.Index): Boolean =
       false
     
     // Helper to check pending requests
-    def getPendingRequests(state: HMap[CombinedSchema[TestSchema]], sid: SessionId): List[PendingServerRequest[ServerReq]] =
+    def getPendingRequests(state: HMap[Schema[TestSchema]], sid: SessionId): List[PendingServerRequest[ServerReq]] =
       state.get["serverRequests"](sid).getOrElse(List.empty).asInstanceOf[List[PendingServerRequest[ServerReq]]]
   
   def spec = suite("Cumulative Acknowledgment")(
     
     test("PC-3: Ack N removes all pending requests with ID ≤ N") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       // Create session
@@ -99,7 +99,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
     
     test("Acknowledging all requests clears pending list") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       val sessionId = SessionId("s1")
@@ -120,7 +120,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
     
     test("Acknowledging first request only removes that request") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       val sessionId = SessionId("s1")
@@ -142,7 +142,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
     
     test("Acknowledging non-existent high ID clears all requests") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       val sessionId = SessionId("s1")
@@ -161,7 +161,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
     
     test("Acknowledging same request twice is idempotent") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val state0 = HMap.empty[Schema[TestSchema]]
       val now = Instant.now()
       
       val sessionId = SessionId("s1")
@@ -184,7 +184,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
     test("Property: Ack N where N < max removes only requests ≤ N") {
       check(Gen.int(1, 10)) { ackN =>
         val sm = new TestStateMachine()
-        val state0 = HMap.empty[CombinedSchema[TestSchema]]
+        val state0 = HMap.empty[Schema[TestSchema]]
         val now = Instant.now()
         
         val sessionId = SessionId("s1")

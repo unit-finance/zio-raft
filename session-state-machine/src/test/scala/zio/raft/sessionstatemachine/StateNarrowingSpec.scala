@@ -83,10 +83,10 @@ object StateNarrowingSpec extends ZIOSpecDefault:
         _ = { receivedStateType = Some("UserSchema") }
       } yield ()
     
-    def takeSnapshot(state: HMap[CombinedSchema[TestUserSchema]]): Stream[Nothing, Byte] =
+    def takeSnapshot(state: HMap[Schema[TestUserSchema]]): Stream[Nothing, Byte] =
       zio.stream.ZStream.empty
     
-    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[TestUserSchema]]] =
+    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[Schema[TestUserSchema]]] =
       ZIO.succeed(HMap.empty)
     
     def shouldTakeSnapshot(lastSnapshotIndex: zio.raft.Index, lastSnapshotSize: Long, commitIndex: zio.raft.Index): Boolean =
@@ -96,7 +96,7 @@ object StateNarrowingSpec extends ZIOSpecDefault:
     
     test("User methods receive HMap[UserSchema]") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val state0 = HMap.empty[Schema[TestUserSchema]]
       val now = Instant.now()
       
       val cmd = SessionCommand.ClientRequest[TestCommand, String](
@@ -110,7 +110,7 @@ object StateNarrowingSpec extends ZIOSpecDefault:
     
     test("Changes to user state are merged back into combined state") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val state0 = HMap.empty[Schema[TestUserSchema]]
       val now = Instant.now()
       
       // Set counter
@@ -127,7 +127,7 @@ object StateNarrowingSpec extends ZIOSpecDefault:
     
     test("Multiple user prefixes can be updated independently") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val state0 = HMap.empty[Schema[TestUserSchema]]
       val now = Instant.now()
       
       // Set counter
@@ -150,7 +150,7 @@ object StateNarrowingSpec extends ZIOSpecDefault:
     
     test("Session state and user state coexist in combined state") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val state0 = HMap.empty[Schema[TestUserSchema]]
       val now = Instant.now()
       
       // Create session (adds session metadata)
@@ -177,7 +177,7 @@ object StateNarrowingSpec extends ZIOSpecDefault:
     
     test("User methods work correctly for handleSessionCreated") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val state0 = HMap.empty[Schema[TestUserSchema]]
       val now = Instant.now()
       
       sm.receivedStateType = None
@@ -192,7 +192,7 @@ object StateNarrowingSpec extends ZIOSpecDefault:
     
     test("User methods work correctly for handleSessionExpired") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val state0 = HMap.empty[Schema[TestUserSchema]]
       val now = Instant.now()
       
       // Create session first
@@ -210,7 +210,7 @@ object StateNarrowingSpec extends ZIOSpecDefault:
     
     test("User state changes persist across multiple commands") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val state0 = HMap.empty[Schema[TestUserSchema]]
       val now = Instant.now()
       
       // Multiple updates

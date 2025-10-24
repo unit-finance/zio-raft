@@ -67,10 +67,10 @@ object IdempotencySpec extends ZIOSpecDefault:
     protected def handleSessionExpired(sid: SessionId, capabilities: Map[String, String], createdAt: Instant): StateWriter[HMap[CounterSchema], String, Unit] =
       StateWriter.succeed(())
     
-    def takeSnapshot(state: HMap[CombinedSchema[CounterSchema]]): Stream[Nothing, Byte] =
+    def takeSnapshot(state: HMap[Schema[CounterSchema]]): Stream[Nothing, Byte] =
       zio.stream.ZStream.empty
     
-    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[CounterSchema]]] =
+    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[Schema[CounterSchema]]] =
       ZIO.succeed(HMap.empty)
     
     def shouldTakeSnapshot(lastSnapshotIndex: zio.raft.Index, lastSnapshotSize: Long, commitIndex: zio.raft.Index): Boolean =
@@ -80,7 +80,7 @@ object IdempotencySpec extends ZIOSpecDefault:
     
     test("PC-1: Cache hit returns cached response without calling applyCommand") {
       val sm = new CounterStateMachine()
-      val state0 = HMap.empty[CombinedSchema[CounterSchema]]
+      val state0 = HMap.empty[Schema[CounterSchema]]
       val now = Instant.now()
       
       // First request - should call applyCommand
@@ -107,7 +107,7 @@ object IdempotencySpec extends ZIOSpecDefault:
     
     test("Different request IDs should NOT be cached") {
       val sm = new CounterStateMachine()
-      val state0 = HMap.empty[CombinedSchema[CounterSchema]]
+      val state0 = HMap.empty[Schema[CounterSchema]]
       val now = Instant.now()
       
       val cmd1 = SessionCommand.ClientRequest[CounterCommand, String](
@@ -130,7 +130,7 @@ object IdempotencySpec extends ZIOSpecDefault:
     
     test("Different session IDs should NOT be cached") {
       val sm = new CounterStateMachine()
-      val state0 = HMap.empty[CombinedSchema[CounterSchema]]
+      val state0 = HMap.empty[Schema[CounterSchema]]
       val now = Instant.now()
       
       val cmd1 = SessionCommand.ClientRequest[CounterCommand, String](
@@ -151,7 +151,7 @@ object IdempotencySpec extends ZIOSpecDefault:
     
     test("State should be unchanged on duplicate request") {
       val sm = new CounterStateMachine()
-      val state0 = HMap.empty[CombinedSchema[CounterSchema]]
+      val state0 = HMap.empty[Schema[CounterSchema]]
       val now = Instant.now()
       
       // First request
@@ -178,7 +178,7 @@ object IdempotencySpec extends ZIOSpecDefault:
     
     test("Idempotency works across different command types") {
       val sm = new CounterStateMachine()
-      val state0 = HMap.empty[CombinedSchema[CounterSchema]]
+      val state0 = HMap.empty[Schema[CounterSchema]]
       val now = Instant.now()
       
       // First: Set command

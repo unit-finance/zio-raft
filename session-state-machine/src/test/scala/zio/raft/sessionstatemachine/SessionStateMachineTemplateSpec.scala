@@ -76,11 +76,11 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       StateWriter.succeed(())
     
     // Placeholder serialization (not tested here)
-    def takeSnapshot(state: HMap[CombinedSchema[TestUserSchema]]): Stream[Nothing, Byte] =
+    def takeSnapshot(state: HMap[Schema[TestUserSchema]]): Stream[Nothing, Byte] =
       zio.stream.ZStream.empty
     
-    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[TestUserSchema]]] =
-      ZIO.succeed(HMap.empty[CombinedSchema[TestUserSchema]])
+    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[Schema[TestUserSchema]]] =
+      ZIO.succeed(HMap.empty[Schema[TestUserSchema]])
     
     def shouldTakeSnapshot(lastSnapshotIndex: zio.raft.Index, lastSnapshotSize: Long, commitIndex: zio.raft.Index): Boolean =
       false  // Don't take snapshots in tests
@@ -105,7 +105,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
     
     test("template method should call applyCommand for ClientRequest") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val state0 = HMap.empty[Schema[TestUserSchema]]
       val now = Instant.now()
       
       val cmd = SessionCommand.ClientRequest[TestCommand, TestServerRequest](
@@ -121,7 +121,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
     
     test("template method should call handleSessionCreated for CreateSession") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val state0 = HMap.empty[Schema[TestUserSchema]]
       val now = Instant.now()
       
       val cmd: SessionCommand[TestCommand, TestServerRequest] = SessionCommand.CreateSession[TestServerRequest](
@@ -139,7 +139,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       val sm = new TestStateMachine()
       
       // First create a session
-      val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val state0 = HMap.empty[Schema[TestUserSchema]]
       val now = Instant.now()
       val createCmd: SessionCommand[TestCommand, TestServerRequest] = SessionCommand.CreateSession[TestServerRequest](
         now, SessionId("s1"), Map.empty
@@ -160,7 +160,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
     
     test("template method should NOT call applyCommand for duplicate requests (cache hit)") {
       val sm = new TestStateMachine()
-      val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val state0 = HMap.empty[Schema[TestUserSchema]]
       val now = Instant.now()
       
       // First request

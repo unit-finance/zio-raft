@@ -14,7 +14,7 @@ import zio.Chunk
  * Key types:
  * - SessionStateMachine: Abstract base class (template pattern)
  * - SessionSchema: Fixed 4-prefix schema for session management
- * - CombinedSchema: Type-level concatenation of SessionSchema + UserSchema
+ * - Schema: Type-level concatenation of SessionSchema + UserSchema
  * - SessionCommand: ADT of commands the session state machine accepts
  */
 package object sessionstatemachine {
@@ -73,49 +73,94 @@ package object sessionstatemachine {
    * 
    * This schema defines 4 prefixes with their key and value types:
    * - "metadata": (SessionId, SessionMetadata) - session information
-   * - "cache": (SessionId, Map[RequestId, Any]) - cached responses per session for idempotency
-   * - "serverRequests": (SessionId, List[PendingServerRequest[?]]) - pending requests per session
+   * - "cache": ((SessionId, RequestId), Any) - cached responses with composite key for efficient range queries and streaming
+   * - "serverRequests": ((SessionId, RequestId), PendingServerRequest[?]) - pending requests with composite key for efficiency
    * - "lastServerRequestId": (SessionId, RequestId) - last assigned server request ID per session
    * 
-   * All keys use SessionId for type safety and efficiency.
-   * 
-   * The cache design groups responses by session, making cleanup O(1) instead of O(n):
-   * - Cache lookup: get session's map, then lookup requestId
-   * - Cache cleanup: get session's map, filter by lowestRequestId, update once
-   * - Session expiration: remove single cache entry (not iterate all requests)
-   * 
-   * The SessionStateMachine base class uses this schema to manage session state
-   * automatically. Users don't interact with this schema directly - it's an
-   * implementation detail of the template pattern.
+   * Both cache and serverRequests use composite keys (SessionId, RequestId) for better performance:
+   * - Direct key access: O(log n) lookups
+   * - Range queries: Efficient iteration over session-specific entries
+   * - Session expiration: Use range to find all entries for a session
+   * - Streaming-friendly: Each entry is a separate key-value pair, not nested collections
+   * - Proper ordering: RequestId ordering is numeric (big-endian encoding), not lexicographic
+   * - No data duplication: sessionId and requestId are not stored in the value, only in the key
    */
   type SessionSchema = 
     ("metadata", SessionId, SessionMetadata) *:
-    ("cache", SessionId, Map[RequestId, Any]) *:
-    ("serverRequests", SessionId, List[PendingServerRequest[?]]) *:
+    ("cache", (SessionId, RequestId), Any) *:
+    ("serverRequests", (SessionId, RequestId), PendingServerRequest[?]) *:
     ("lastServerRequestId", SessionId, RequestId) *:
     EmptyTuple
   
   /**
-   * Combined schema that concatenates SessionSchema and UserSchema.
-   * 
-   * This type alias uses Tuple.Concat to merge the session management prefixes
-   * with the user-defined schema at the type level. The result is a schema with
-   * both session prefixes and user prefixes, all with compile-time type safety.
-   * 
-   * @tparam UserSchema The user-defined schema (tuple of (Prefix, KeyType, ValueType) triples)
-   * 
-   * Example:
-   * {{{
-   * type MyUserSchema = ("counter", CounterId, Int) *: ("name", NameId, String) *: EmptyTuple
-   * type MyCombined = CombinedSchema[MyUserSchema]
-   * // MyCombined has all 4 SessionSchema prefixes plus "counter" and "name"
-   * }}}
-   */
-  type CombinedSchema[UserSchema <: Tuple] = Tuple.Concat[SessionSchema, UserSchema]
-  
-  /**
    * KeyLike instance for SessionId keys.
-   * All session management prefixes use SessionId as the key type.
+   * Used by metadata, serverRequests, and lastServerRequestId prefixes.
    */
   given HMap.KeyLike[SessionId] = HMap.KeyLike.forNewtype(SessionId)
+  
+  /**
+   * KeyLike instance for composite (SessionId, RequestId) keys.
+   * Used by the cache prefix for efficient range queries and proper numeric ordering of RequestIds.
+   * 
+   * Encoding format:
+   * - 4 bytes: length of SessionId (big-endian Int)
+   * - N bytes: SessionId as UTF-8 string
+   * - 8 bytes: RequestId as big-endian Long
+   * 
+   * This encoding ensures:
+   * 1. Sessions are grouped together (sorted by SessionId first)
+   * 2. Within a session, RequestIds are ordered numerically (not lexicographically)
+   * 3. Range queries work efficiently: range((sid, rid1), (sid, rid2)) selects requests within the range
+   */
+  given HMap.KeyLike[(SessionId, RequestId)] = new HMap.KeyLike[(SessionId, RequestId)]:
+    import java.nio.charset.StandardCharsets
+    
+    def asBytes(key: (SessionId, RequestId)): Array[Byte] =
+      // Encode SessionId as UTF-8
+      val sessionBytes = SessionId.unwrap(key._1).getBytes(StandardCharsets.UTF_8)
+      
+      // Encode RequestId as 8-byte big-endian long
+      val requestId = RequestId.unwrap(key._2)
+      val requestBytes = Array(
+        (requestId >> 56).toByte, (requestId >> 48).toByte, 
+        (requestId >> 40).toByte, (requestId >> 32).toByte,
+        (requestId >> 24).toByte, (requestId >> 16).toByte, 
+        (requestId >> 8).toByte,  requestId.toByte
+      )
+      
+      // Length-prefix the SessionId (4 bytes big-endian)
+      val lengthBytes = Array(
+        (sessionBytes.length >> 24).toByte,
+        (sessionBytes.length >> 16).toByte,
+        (sessionBytes.length >> 8).toByte,
+        sessionBytes.length.toByte
+      )
+      
+      lengthBytes ++ sessionBytes ++ requestBytes
+    
+    def fromBytes(bytes: Array[Byte]): (SessionId, RequestId) =
+      // Read length prefix
+      val length = 
+        ((bytes(0) & 0xFF) << 24) |
+        ((bytes(1) & 0xFF) << 16) |
+        ((bytes(2) & 0xFF) << 8)  |
+        (bytes(3) & 0xFF)
+      
+      // Extract SessionId
+      val sessionBytes = bytes.slice(4, 4 + length)
+      val sessionId = SessionId(new String(sessionBytes, StandardCharsets.UTF_8))
+      
+      // Extract RequestId (8 bytes big-endian)
+      val offset = 4 + length
+      val requestId = 
+        ((bytes(offset).toLong & 0xFF) << 56) |
+        ((bytes(offset + 1).toLong & 0xFF) << 48) |
+        ((bytes(offset + 2).toLong & 0xFF) << 40) |
+        ((bytes(offset + 3).toLong & 0xFF) << 32) |
+        ((bytes(offset + 4).toLong & 0xFF) << 24) |
+        ((bytes(offset + 5).toLong & 0xFF) << 16) |
+        ((bytes(offset + 6).toLong & 0xFF) << 8)  |
+        (bytes(offset + 7).toLong & 0xFF)
+      
+      (sessionId, RequestId(requestId))
 }

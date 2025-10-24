@@ -60,6 +60,8 @@ package object protocol {
       */
     val zero: RequestId = RequestId(0L)
 
+    val max: RequestId = RequestId(Long.MaxValue)
+
     /** Create a RequestId from a long value (for testing/deserialization).
       */
     def fromLong(id: Long): RequestId = {

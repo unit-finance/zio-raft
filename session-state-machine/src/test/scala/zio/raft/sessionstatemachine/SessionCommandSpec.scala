@@ -4,6 +4,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import zio.raft.Command
 import zio.raft.protocol.{SessionId, RequestId}
+import java.time.Instant
 
 /**
  * Contract test for SessionCommand ADT with dependent types.
@@ -12,7 +13,7 @@ import zio.raft.protocol.{SessionId, RequestId}
  * 
  * Tests:
  * - SessionCommand is sealed trait
- * - All cases: ClientRequest, ServerRequestAck, SessionCreationConfirmed, SessionExpired, GetRequestsForRetry
+ * - All cases: ClientRequest, ServerRequestAck, CreateSession, SessionExpired, GetRequestsForRetry
  * - ClientRequest has dependent type Response based on UC (user command)
  * - Pattern matching works correctly
  */
@@ -32,11 +33,10 @@ object SessionCommandSpec extends ZIOSpecDefault:
       val sessionId = SessionId("session-1")
       val requestId = RequestId(1)
       val userCommand = IncrementCounter(5)
+      val now = Instant.now()
       
-      val clientRequest = SessionCommand.ClientRequest[IncrementCounter, Nothing](
-        sessionId = sessionId,
-        requestId = requestId,
-        command = userCommand
+      val clientRequest = SessionCommand.ClientRequest[TestCommand, Nothing](
+        now, sessionId, requestId, requestId, userCommand
       )
       
       assertTrue(
@@ -47,9 +47,9 @@ object SessionCommandSpec extends ZIOSpecDefault:
     },
     
     test("ServerRequestAck should contain sessionId and requestId") {
+      val now = Instant.now()
       val ack = SessionCommand.ServerRequestAck[Nothing](
-        sessionId = SessionId("s1"),
-        requestId = RequestId(10)
+        now, SessionId("s1"), RequestId(10)
       )
       
       assertTrue(
@@ -59,9 +59,9 @@ object SessionCommandSpec extends ZIOSpecDefault:
     },
     
     test("CreateSession should contain sessionId and capabilities") {
+      val now = Instant.now()
       val createSession = SessionCommand.CreateSession[Nothing](
-        sessionId = SessionId("new-session"),
-        capabilities = Map("version" -> "1.0")
+        now, SessionId("new-session"), Map("version" -> "1.0")
       )
       
       assertTrue(
@@ -71,37 +71,36 @@ object SessionCommandSpec extends ZIOSpecDefault:
     },
     
     test("SessionExpired should contain sessionId") {
+      val now = Instant.now()
       val expired = SessionCommand.SessionExpired[Nothing](
-        sessionId = SessionId("expired-session")
+        now, SessionId("expired-session")
       )
       
       assertTrue(expired.sessionId == SessionId("expired-session"))
     },
     
-    test("GetRequestsForRetry should contain sessionId, lastSentBefore, and currentTime") {
-      val threshold = java.time.Instant.parse("2025-10-22T10:00:00Z")
-      val now = java.time.Instant.parse("2025-10-22T11:00:00Z")
+    test("GetRequestsForRetry should contain createdAt and lastSentBefore") {
+      val threshold = Instant.parse("2025-10-22T10:00:00Z")
+      val now = Instant.parse("2025-10-22T11:00:00Z")
       
       val retry = SessionCommand.GetRequestsForRetry[Nothing](
-        sessionId = SessionId("retry-session"),
-        lastSentBefore = threshold,
-        currentTime = now
+        now, threshold
       )
       
       assertTrue(
-        retry.sessionId == SessionId("retry-session") &&
-        retry.lastSentBefore == threshold &&
-        retry.currentTime == now
+        retry.createdAt == now &&
+        retry.lastSentBefore == threshold
       )
     },
     
     test("should support pattern matching") {
-      val commands: List[SessionCommand[TestCommand]] = List(
-        SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), RequestId(1), IncrementCounter(1)),
-        SessionCommand.ServerRequestAck[Nothing](SessionId("s1"), RequestId(1)),
-        SessionCommand.CreateSession[Nothing](SessionId("s2"), Map.empty),
-        SessionCommand.SessionExpired[Nothing](SessionId("s3")),
-        SessionCommand.GetRequestsForRetry[Nothing](SessionId("s4"), java.time.Instant.now(), java.time.Instant.now())
+      val now = Instant.now()
+      val commands: List[SessionCommand[TestCommand, Nothing]] = List(
+        SessionCommand.ClientRequest[TestCommand, Nothing](now, SessionId("s1"), RequestId(1), RequestId(1), IncrementCounter(1)),
+        SessionCommand.ServerRequestAck[Nothing](now, SessionId("s1"), RequestId(1)): SessionCommand[TestCommand, Nothing],
+        SessionCommand.CreateSession[Nothing](now, SessionId("s2"), Map.empty): SessionCommand[TestCommand, Nothing],
+        SessionCommand.SessionExpired[Nothing](now, SessionId("s3")): SessionCommand[TestCommand, Nothing],
+        SessionCommand.GetRequestsForRetry[Nothing](now, Instant.now()): SessionCommand[TestCommand, Nothing]
       )
       
       val types = commands.map {
@@ -123,11 +122,9 @@ object SessionCommandSpec extends ZIOSpecDefault:
     
     test("ClientRequest should preserve user command's Response type") {
       val incrementCmd = IncrementCounter(5)
-      val clientRequest = SessionCommand.ClientRequest[IncrementCounter, Nothing](
-        SessionId("s1"),
-        RequestId(1),
-        RequestId(1),  // lowestRequestId
-        incrementCmd
+      val now = Instant.now()
+      val clientRequest = SessionCommand.ClientRequest[TestCommand, Nothing](
+        now, SessionId("s1"), RequestId(1), RequestId(1), incrementCmd
       )
       
       // The response type should be Int (from IncrementCounter)

@@ -4,9 +4,11 @@ import zio.test.*
 import zio.test.Assertion.*
 import zio.{UIO, ZIO}
 import zio.prelude.State
+import zio.prelude.fx.ZPure
 import zio.raft.{Command, HMap}
 import zio.raft.protocol.{SessionId, RequestId}
 import zio.stream.Stream
+import java.time.Instant
 
 /**
  * Contract test for idempotency checking (PC-1).
@@ -30,34 +32,43 @@ object IdempotencySpec extends ZIOSpecDefault:
   case class Get() extends CounterCommand:
     type Response = Int
   
-  type CounterSchema = ("counter", Int) *: EmptyTuple
+  // Define typed key for counter
+  import zio.prelude.Newtype
+  object CounterKey extends Newtype[String]
+  type CounterKey = CounterKey.Type
+  given HMap.KeyLike[CounterKey] = HMap.KeyLike.forNewtype(CounterKey)
+  
+  type CounterSchema = ("counter", CounterKey, Int) *: EmptyTuple
+  
+  val counterKey = CounterKey("value")
   
   // Test implementation with call tracking
   class CounterStateMachine extends SessionStateMachine[CounterCommand, String, CounterSchema]:
     var callCount = 0
     
-    protected def applyCommand(cmd: CounterCommand): State[HMap[CombinedSchema[CounterSchema]], (cmd.Response, List[String])] =
+    protected def applyCommand(cmd: CounterCommand, createdAt: Instant): StateWriter[HMap[CounterSchema], String, cmd.Response] =
       callCount += 1
       cmd match
         case Set(value) =>
-          State.modify { state =>
-            val newState = state.updated["counter"]("value", value)
-            (newState, (value, Nil))
-          }
+          for {
+            state <- StateWriter.get[HMap[CounterSchema]]
+            newState = state.updated["counter"](counterKey, value)
+            _ <- StateWriter.set(newState)
+          } yield value
         case Get() =>
-          State.get.map { state =>
-            val value = state.get["counter"]("value").getOrElse(0)
-            (value, Nil)
-          }
+          for {
+            state <- StateWriter.get[HMap[CounterSchema]]
+            value = state.get["counter"](counterKey).getOrElse(0)
+          } yield value
     
-    protected def handleSessionCreated(sid: SessionId, caps: Map[String, String]): State[HMap[CombinedSchema[CounterSchema]], List[String]] =
-      State.succeed(Nil)
+    protected def handleSessionCreated(sid: SessionId, caps: Map[String, String], createdAt: Instant): StateWriter[HMap[CounterSchema], String, Unit] =
+      StateWriter.succeed(())
     
-    protected def handleSessionExpired(sid: SessionId, capabilities: Map[String, String]): State[HMap[CombinedSchema[CounterSchema]], List[String]] =
-      State.succeed(Nil)
+    protected def handleSessionExpired(sid: SessionId, capabilities: Map[String, String], createdAt: Instant): StateWriter[HMap[CounterSchema], String, Unit] =
+      StateWriter.succeed(())
     
     def takeSnapshot(state: HMap[CombinedSchema[CounterSchema]]): Stream[Nothing, Byte] =
-      Stream.empty
+      zio.stream.ZStream.empty
     
     def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[CounterSchema]]] =
       ZIO.succeed(HMap.empty)
@@ -70,16 +81,21 @@ object IdempotencySpec extends ZIOSpecDefault:
     test("PC-1: Cache hit returns cached response without calling applyCommand") {
       val sm = new CounterStateMachine()
       val state0 = HMap.empty[CombinedSchema[CounterSchema]]
+      val now = Instant.now()
       
       // First request - should call applyCommand
-      val cmd1 = SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), Set(42))
+      val cmd1 = SessionCommand.ClientRequest[CounterCommand, String](
+        now, SessionId("s1"), RequestId(1), RequestId(1), Set(42)
+      )
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
       val callsAfterFirst = sm.callCount
       assertTrue(callsAfterFirst == 1)
       
       // Duplicate request - should NOT call applyCommand
-      val cmd2 = SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), Set(999))
+      val cmd2 = SessionCommand.ClientRequest[CounterCommand, String](
+        now, SessionId("s1"), RequestId(1), RequestId(1), Set(999)
+      )
       val (state2, response2) = sm.apply(cmd2).run(state1)
       
       assertTrue(
@@ -92,11 +108,16 @@ object IdempotencySpec extends ZIOSpecDefault:
     test("Different request IDs should NOT be cached") {
       val sm = new CounterStateMachine()
       val state0 = HMap.empty[CombinedSchema[CounterSchema]]
+      val now = Instant.now()
       
-      val cmd1 = SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), Set(10))
+      val cmd1 = SessionCommand.ClientRequest[CounterCommand, String](
+        now, SessionId("s1"), RequestId(1), RequestId(1), Set(10)
+      )
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
-      val cmd2 = SessionCommand.ClientRequest[SessionId("s1"), RequestId(2), RequestId(2), Set(20))
+      val cmd2 = SessionCommand.ClientRequest[CounterCommand, String](
+        now, SessionId("s1"), RequestId(2), RequestId(2), Set(20)
+      )
       val (state2, response2) = sm.apply(cmd2).run(state1)
       
       assertTrue(
@@ -110,11 +131,16 @@ object IdempotencySpec extends ZIOSpecDefault:
     test("Different session IDs should NOT be cached") {
       val sm = new CounterStateMachine()
       val state0 = HMap.empty[CombinedSchema[CounterSchema]]
+      val now = Instant.now()
       
-      val cmd1 = SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), Set(10))
+      val cmd1 = SessionCommand.ClientRequest[CounterCommand, String](
+        now, SessionId("s1"), RequestId(1), RequestId(1), Set(10)
+      )
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
-      val cmd2 = SessionCommand.ClientRequest[SessionId("s2"), RequestId(1), RequestId(1), Set(20))
+      val cmd2 = SessionCommand.ClientRequest[CounterCommand, String](
+        now, SessionId("s2"), RequestId(1), RequestId(1), Set(20)
+      )
       val (state2, response2) = sm.apply(cmd2).run(state1)
       
       assertTrue(
@@ -126,18 +152,23 @@ object IdempotencySpec extends ZIOSpecDefault:
     test("State should be unchanged on duplicate request") {
       val sm = new CounterStateMachine()
       val state0 = HMap.empty[CombinedSchema[CounterSchema]]
+      val now = Instant.now()
       
       // First request
-      val cmd1 = SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), Set(42))
+      val cmd1 = SessionCommand.ClientRequest[CounterCommand, String](
+        now, SessionId("s1"), RequestId(1), RequestId(1), Set(42)
+      )
       val (state1, _) = sm.apply(cmd1).run(state0)
       
-      val counterBefore = state1.get["counter"]("value")
+      val counterBefore = state1.get["counter"](counterKey)
       
       // Duplicate request with different value
-      val cmd2 = SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), Set(999))
+      val cmd2 = SessionCommand.ClientRequest[CounterCommand, String](
+        now, SessionId("s1"), RequestId(1), RequestId(1), Set(999)
+      )
       val (state2, _) = sm.apply(cmd2).run(state1)
       
-      val counterAfter = state2.get["counter"]("value")
+      val counterAfter = state2.get["counter"](counterKey)
       
       assertTrue(
         counterBefore == counterAfter &&  // State unchanged
@@ -148,13 +179,18 @@ object IdempotencySpec extends ZIOSpecDefault:
     test("Idempotency works across different command types") {
       val sm = new CounterStateMachine()
       val state0 = HMap.empty[CombinedSchema[CounterSchema]]
+      val now = Instant.now()
       
       // First: Set command
-      val cmd1 = SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), Set(42))
+      val cmd1 = SessionCommand.ClientRequest[CounterCommand, String](
+        now, SessionId("s1"), RequestId(1), RequestId(1), Set(42)
+      )
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
       // Duplicate with Get command (different type, same IDs)
-      val cmd2 = SessionCommand.ClientRequest[SessionId("s1"), RequestId(1), RequestId(1), Get())
+      val cmd2 = SessionCommand.ClientRequest[CounterCommand, String](
+        now, SessionId("s1"), RequestId(1), RequestId(1), Get()
+      )
       val (state2, response2) = sm.apply(cmd2).run(state1)
       
       assertTrue(

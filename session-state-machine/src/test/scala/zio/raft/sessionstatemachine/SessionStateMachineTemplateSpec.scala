@@ -7,6 +7,7 @@ import zio.prelude.State
 import zio.raft.{Command, HMap}
 import zio.raft.protocol.{SessionId, RequestId}
 import zio.stream.Stream
+import java.time.Instant
 
 /**
  * Contract test for SessionStateMachine template method behavior.
@@ -25,8 +26,16 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
   case class Increment(by: Int) extends TestCommand:
     type Response = Int
   
+  // Define typed key
+  import zio.prelude.Newtype
+  object CounterKey extends Newtype[String]
+  type CounterKey = CounterKey.Type
+  given HMap.KeyLike[CounterKey] = HMap.KeyLike.forNewtype(CounterKey)
+  
   // Test user schema
-  type TestUserSchema = ("counter", Int) *: EmptyTuple
+  type TestUserSchema = ("counter", CounterKey, Int) *: EmptyTuple
+  
+  val counterKey = CounterKey("value")
   
   // Test server request type
   case class TestServerRequest(msg: String)
@@ -39,32 +48,36 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
     var sessionCreatedCalled = false
     var sessionExpiredCalled = false
     
-    protected def applyCommand(cmd: TestCommand): State[HMap[CombinedSchema[TestUserSchema]], (cmd.Response, List[TestServerRequest])] =
+    protected def applyCommand(cmd: TestCommand, createdAt: Instant): StateWriter[HMap[TestUserSchema], TestServerRequest, cmd.Response] =
       applyCommandCalled = true
       cmd match
         case Increment(by) =>
-          State.modify { state =>
-            val current = state.get["counter"]("value").getOrElse(0)
-            val newState = state.updated["counter"]("value", current + by)
-            (newState, (current + by, Nil))
-          }
+          for {
+            state <- StateWriter.get[HMap[TestUserSchema]]
+            current = state.get["counter"](counterKey).getOrElse(0)
+            newState = state.updated["counter"](counterKey, current + by)
+            _ <- StateWriter.set(newState)
+          } yield current + by
     
     protected def handleSessionCreated(
       sessionId: SessionId,
-      capabilities: Map[String, String]
-    ): State[HMap[CombinedSchema[TestUserSchema]], List[TestServerRequest]] =
+      capabilities: Map[String, String],
+      createdAt: Instant
+    ): StateWriter[HMap[TestUserSchema], TestServerRequest, Unit] =
       sessionCreatedCalled = true
-      State.succeed(Nil)
+      StateWriter.succeed(())
     
     protected def handleSessionExpired(
-      sessionId: SessionId
-    ): State[HMap[CombinedSchema[TestUserSchema]], List[TestServerRequest]] =
+      sessionId: SessionId,
+      capabilities: Map[String, String],
+      createdAt: Instant
+    ): StateWriter[HMap[TestUserSchema], TestServerRequest, Unit] =
       sessionExpiredCalled = true
-      State.succeed(Nil)
+      StateWriter.succeed(())
     
     // Placeholder serialization (not tested here)
     def takeSnapshot(state: HMap[CombinedSchema[TestUserSchema]]): Stream[Nothing, Byte] =
-      Stream.empty
+      zio.stream.ZStream.empty
     
     def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[TestUserSchema]]] =
       ZIO.succeed(HMap.empty[CombinedSchema[TestUserSchema]])
@@ -80,10 +93,9 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       
       // We verify by checking that the method exists on the base class
       val sm = new TestStateMachine()
-      val cmd = SessionCommand.ClientRequest[DoWork, TestServerRequest](
-        SessionId("s1"),
-        RequestId(1),
-        Increment(5)
+      val now = Instant.now()
+      val cmd = SessionCommand.ClientRequest[TestCommand, TestServerRequest](
+        now, SessionId("s1"), RequestId(1), RequestId(1), Increment(5)
       )
       
       // If apply is final, this will call the base class implementation
@@ -94,11 +106,10 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
     test("template method should call applyCommand for ClientRequest") {
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val now = Instant.now()
       
-      val cmd = SessionCommand.ClientRequest[DoWork, TestServerRequest](
-        SessionId("s1"),
-        RequestId(1),
-        Increment(5)
+      val cmd = SessionCommand.ClientRequest[TestCommand, TestServerRequest](
+        now, SessionId("s1"), RequestId(1), RequestId(1), Increment(5)
       )
       
       val (state1, response) = sm.apply(cmd).run(state0)
@@ -108,13 +119,13 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       )
     },
     
-    test("template method should call handleSessionCreated for SessionCreationConfirmed") {
+    test("template method should call handleSessionCreated for CreateSession") {
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val now = Instant.now()
       
-      val cmd = SessionCommand.CreateSession[TestServerRequest](
-        SessionId("s1"),
-        Map("version" -> "1.0")
+      val cmd: SessionCommand[TestCommand, TestServerRequest] = SessionCommand.CreateSession[TestServerRequest](
+        now, SessionId("s1"), Map("version" -> "1.0")
       )
       
       val (state1, response) = sm.apply(cmd).run(state0)
@@ -129,9 +140,9 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       
       // First create a session
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
-      val createCmd = SessionCommand.CreateSession[TestServerRequest](
-        SessionId("s1"),
-        Map.empty
+      val now = Instant.now()
+      val createCmd: SessionCommand[TestCommand, TestServerRequest] = SessionCommand.CreateSession[TestServerRequest](
+        now, SessionId("s1"), Map.empty
       )
       val (state1, _) = sm.apply(createCmd).run(state0)
       
@@ -139,7 +150,7 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       sm.sessionExpiredCalled = false
       
       // Now expire the session
-      val expireCmd = SessionCommand.SessionExpired[TestServerRequest](SessionId("s1"))
+      val expireCmd: SessionCommand[TestCommand, TestServerRequest] = SessionCommand.SessionExpired[TestServerRequest](now, SessionId("s1"))
       val (state2, _) = sm.apply(expireCmd).run(state1)
       
       assertTrue(
@@ -150,12 +161,11 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
     test("template method should NOT call applyCommand for duplicate requests (cache hit)") {
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestUserSchema]]
+      val now = Instant.now()
       
       // First request
-      val cmd1 = SessionCommand.ClientRequest[DoWork, TestServerRequest](
-        SessionId("s1"),
-        RequestId(1),
-        Increment(5)
+      val cmd1 = SessionCommand.ClientRequest[TestCommand, TestServerRequest](
+        now, SessionId("s1"), RequestId(1), RequestId(1), Increment(5)
       )
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
@@ -165,10 +175,8 @@ object SessionStateMachineTemplateSpec extends ZIOSpecDefault:
       sm.applyCommandCalled = false
       
       // Second request (duplicate - same sessionId and requestId)
-      val cmd2 = SessionCommand.ClientRequest[DoWork, TestServerRequest](
-        SessionId("s1"),
-        RequestId(1),
-        Increment(10)  // Different command, but same IDs
+      val cmd2 = SessionCommand.ClientRequest[TestCommand, TestServerRequest](
+        now, SessionId("s1"), RequestId(1), RequestId(1), Increment(10)  // Different command, but same IDs
       )
       val (state2, response2) = sm.apply(cmd2).run(state1)
       

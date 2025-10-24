@@ -7,6 +7,7 @@ import zio.prelude.State
 import zio.raft.{Command, HMap}
 import zio.raft.protocol.{SessionId, RequestId}
 import zio.stream.Stream
+import java.time.Instant
 
 /**
  * Contract test for response caching (PC-2).
@@ -29,23 +30,31 @@ object ResponseCachingSpec extends ZIOSpecDefault:
   
   case class ServerReq(data: String)
   
-  type TestSchema = ("data", String) *: EmptyTuple
+  // Define typed key
+  import zio.prelude.Newtype
+  object DataKey extends Newtype[String]
+  type DataKey = DataKey.Type
+  given HMap.KeyLike[DataKey] = HMap.KeyLike.forNewtype(DataKey)
+  
+  type TestSchema = ("data", DataKey, String) *: EmptyTuple
   
   class TestStateMachine extends SessionStateMachine[TestCommand, ServerReq, TestSchema]:
     
-    protected def applyCommand(cmd: TestCommand): State[HMap[CombinedSchema[TestSchema]], (cmd.Response, List[ServerReq])] =
+    protected def applyCommand(cmd: TestCommand, createdAt: Instant): StateWriter[HMap[TestSchema], ServerReq, cmd.Response] =
       cmd match
         case DoWork(result) =>
-          State.succeed((result, List(ServerReq("notification"))))
+          for {
+            _ <- StateWriter.log(ServerReq("notification"))
+          } yield result
     
-    protected def handleSessionCreated(sid: SessionId, caps: Map[String, String]): State[HMap[CombinedSchema[TestSchema]], List[ServerReq]] =
-      State.succeed(Nil)
+    protected def handleSessionCreated(sid: SessionId, caps: Map[String, String], createdAt: Instant): StateWriter[HMap[TestSchema], ServerReq, Unit] =
+      StateWriter.succeed(())
     
-    protected def handleSessionExpired(sid: SessionId, capabilities: Map[String, String]): State[HMap[CombinedSchema[TestSchema]], List[ServerReq]] =
-      State.succeed(Nil)
+    protected def handleSessionExpired(sid: SessionId, capabilities: Map[String, String], createdAt: Instant): StateWriter[HMap[TestSchema], ServerReq, Unit] =
+      StateWriter.succeed(())
     
     def takeSnapshot(state: HMap[CombinedSchema[TestSchema]]): Stream[Nothing, Byte] =
-      Stream.empty
+      zio.stream.ZStream.empty
     
     def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema[TestSchema]]] =
       ZIO.succeed(HMap.empty)
@@ -58,20 +67,17 @@ object ResponseCachingSpec extends ZIOSpecDefault:
     test("PC-2: First request caches, second request returns cached") {
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val now = Instant.now()
       
       // First request
-      val cmd1 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
-        SessionId("s1"),
-        RequestId(1),
-        DoWork("result1")
+      val cmd1 = SessionCommand.ClientRequest[TestCommand, ServerReq](
+        now, SessionId("s1"), RequestId(1), RequestId(1), DoWork("result1")
       )
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
-      // Second request (same IDs)
-      val cmd2 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
-        SessionId("s1"),
-        RequestId(1),
-        DoWork("result2")  // Different command
+      // Second request (same IDs, different command)
+      val cmd2 = SessionCommand.ClientRequest[TestCommand, ServerReq](
+        now, SessionId("s1"), RequestId(1), RequestId(1), DoWork("result2")
       )
       val (state2, response2) = sm.apply(cmd2).run(state1)
       
@@ -84,12 +90,10 @@ object ResponseCachingSpec extends ZIOSpecDefault:
     test("Cached response does NOT include server requests (only response is cached)") {
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val now = Instant.now()
       
-      val cmd = SessionCommand.ClientRequest[IncrementCounter, Nothing](
-        SessionId("s1"),
-        RequestId(1),
-        RequestId(1),
-        DoWork("test"), TestServerRequest]
+      val cmd = SessionCommand.ClientRequest[TestCommand, ServerReq](
+        now, SessionId("s1"), RequestId(1), RequestId(1), DoWork("test")
       )
       val (state1, response1) = sm.apply(cmd).run(state0)
       
@@ -106,11 +110,10 @@ object ResponseCachingSpec extends ZIOSpecDefault:
     test("Cache persists across multiple duplicate requests") {
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val now = Instant.now()
       
-      val cmd = SessionCommand.ClientRequest[IncrementCounter, Nothing](
-        SessionId("s1"),
-        RequestId(1),
-        DoWork("original")
+      val cmd = SessionCommand.ClientRequest[TestCommand, ServerReq](
+        now, SessionId("s1"), RequestId(1), RequestId(1), DoWork("original")
       )
       
       // First request
@@ -132,20 +135,17 @@ object ResponseCachingSpec extends ZIOSpecDefault:
     test("Multiple sessions maintain separate caches") {
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val now = Instant.now()
       
       // Session 1, Request 1
-      val cmd1 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
-        SessionId("s1"),
-        RequestId(1),
-        DoWork("session1")
+      val cmd1 = SessionCommand.ClientRequest[TestCommand, ServerReq](
+        now, SessionId("s1"), RequestId(1), RequestId(1), DoWork("session1")
       )
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
       // Session 2, Request 1 (same request ID, different session)
-      val cmd2 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
-        SessionId("s2"),
-        RequestId(1),
-        DoWork("session2")
+      val cmd2 = SessionCommand.ClientRequest[TestCommand, ServerReq](
+        now, SessionId("s2"), RequestId(1), RequestId(1), DoWork("session2")
       )
       val (state2, response2) = sm.apply(cmd2).run(state1)
       
@@ -159,20 +159,17 @@ object ResponseCachingSpec extends ZIOSpecDefault:
     test("Multiple requests in same session maintain separate caches") {
       val sm = new TestStateMachine()
       val state0 = HMap.empty[CombinedSchema[TestSchema]]
+      val now = Instant.now()
       
       // Request 1
-      val cmd1 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
-        SessionId("s1"),
-        RequestId(1),
-        DoWork("request1")
+      val cmd1 = SessionCommand.ClientRequest[TestCommand, ServerReq](
+        now, SessionId("s1"), RequestId(1), RequestId(1), DoWork("request1")
       )
       val (state1, response1) = sm.apply(cmd1).run(state0)
       
       // Request 2 (same session, different request ID)
-      val cmd2 = SessionCommand.ClientRequest[IncrementCounter, Nothing](
-        SessionId("s1"),
-        RequestId(2),
-        DoWork("request2")
+      val cmd2 = SessionCommand.ClientRequest[TestCommand, ServerReq](
+        now, SessionId("s1"), RequestId(2), RequestId(2), DoWork("request2")
       )
       val (state2, response2) = sm.apply(cmd2).run(state1)
       

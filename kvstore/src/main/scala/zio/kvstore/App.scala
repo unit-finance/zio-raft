@@ -1,18 +1,15 @@
 package zio.kvstore
 
 import zio.raft.{Command, Index, HMap}
-import zio.raft.sessionstatemachine.{SessionStateMachine, ServerRequestForSession, StateWriter}
+import zio.raft.sessionstatemachine.{SessionStateMachine, ScodecSerialization, ServerRequestForSession, StateWriter}
+import zio.raft.sessionstatemachine.asResponseType // Extension method
 import zio.raft.protocol.SessionId
-import zio.stream.{Stream, ZStream}
-import zio.{Chunk, UIO, ZIO}
+import zio.{ZIO}
 import zio.prelude.Newtype
 
 import scodec.Codec
-import scodec.bits.BitVector
-import scodec.codecs.{ascii, discriminated, fixedSizeBytes, utf8_32, variableSizeBits, variableSizeBytes, int32}
+import scodec.codecs.{ascii, discriminated, fixedSizeBytes, utf8_32}
 import java.time.Instant
-import scodec.bits.ByteVector
-import zio.stream.ZPipeline
 
 // Simple KV store - no sessions, no server requests
 // We just use the session framework for the template pattern and HMap
@@ -21,11 +18,11 @@ sealed trait KVCommand extends Command
 
 object KVCommand:
   case class Set(key: String, value: String) extends KVCommand:
-    type Response = Unit
+    type Response = SetDone
 
   case class Get(key: String) extends KVCommand:
-    type Response = Option[String]
-  
+    type Response = GetResult
+
   // Codec for KVCommand (needed by ZmqRpc)
   val getCodec = utf8_32.as[Get]
   val setCodec = (utf8_32 :: utf8_32).as[Set]
@@ -34,69 +31,90 @@ object KVCommand:
     .typecase("S", setCodec)
     .typecase("G", getCodec)
 
+// Response marker type - encompasses all KV command responses
+sealed trait KVResponse
+case class SetDone() extends KVResponse
+case class GetResult(value: Option[String]) extends KVResponse
+
 // KV Schema - single prefix for key-value data
 object KVKey extends Newtype[String]
 type KVKey = KVKey.Type
 given HMap.KeyLike[KVKey] = HMap.KeyLike.forNewtype(KVKey)
 
 type KVSchema = ("kv", KVKey, String) *: EmptyTuple
-type KVCompleteSchema = Tuple.Concat[zio.raft.sessionstatemachine.SessionSchema, KVSchema]
+type KVCompleteSchema = Tuple.Concat[zio.raft.sessionstatemachine.SessionSchema[KVResponse, KVServerRequest], KVSchema]
 
-// KV store with proper streaming serialization using TypeclassMap
-class KVStateMachine(
-  codecs: HMap.TypeclassMap[KVCompleteSchema, Codec]
-) extends SessionStateMachine[KVCommand, Nothing, KVSchema]:
-  val keyCodec = variableSizeBytes(int32, scodec.codecs.bytes)
-  val codec = keyCodec.flatZip(key => {
-    val fullKey = key.toArray
-    val prefix = HMap.extractPrefix(fullKey).getOrElse {
-      throw new IllegalStateException("Invalid key: no prefix found")
-    }
-    val valueCodec: Codec[Any] = codecs.forPrefix(prefix)
-    variableSizeBytes(int32, valueCodec)
-  })
+// Dummy server request type (KV store doesn't use server requests)
+case class NoServerRequest()
 
-  
-  protected def applyCommand(command: KVCommand, createdAt: Instant): StateWriter[HMap[KVCompleteSchema], ServerRequestForSession[Nothing], command.Response] =
+type KVServerRequest = NoServerRequest
+
+// KV store with scodec serialization mixin
+class KVStateMachine extends SessionStateMachine[KVCommand, KVResponse, KVServerRequest, KVSchema]
+    with ScodecSerialization[KVResponse, KVServerRequest, KVSchema]:
+
+  // Import provided codecs from Codecs object
+  import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
+
+  // Provide codecs for response types
+  given Codec[SetDone] = scodec.codecs.provide(SetDone())
+  given Codec[GetResult] = scodec.codecs.optional(scodec.codecs.bool, utf8_32).xmap(
+    opt => GetResult(opt),
+    gr => gr.value
+  )
+
+  // Provide codec for response marker type
+  given Codec[KVResponse] = discriminated[KVResponse]
+    .by(fixedSizeBytes(1, ascii))
+    .typecase("S", summon[Codec[SetDone]])
+    .typecase("G", summon[Codec[GetResult]])
+
+  // Provide codec for our value types
+  given Codec[String] = utf8_32
+
+  // Dummy codec for NoServerRequest
+  given Codec[NoServerRequest] = scodec.codecs.provide(NoServerRequest())
+
+  val codecs = summon[HMap.TypeclassMap[Schema, Codec]]
+
+  protected def applyCommand(
+    command: KVCommand,
+    createdAt: Instant
+  ): StateWriter[HMap[KVCompleteSchema], ServerRequestForSession[KVServerRequest], command.Response & KVResponse] =
     command match
-      case KVCommand.Set(key, value) =>
-        for {
+      case set @ KVCommand.Set(key, value) =>
+        for
           state <- StateWriter.get[HMap[KVCompleteSchema]]
           newState = state.updated["kv"](KVKey(key), value)
           _ <- StateWriter.set(newState)
-        } yield ().asInstanceOf[command.Response]
-      
-      case KVCommand.Get(key) =>
-        for {
+        yield SetDone().asResponseType(command, set)
+
+      case get @ KVCommand.Get(key) =>
+        for
           state <- StateWriter.get[HMap[KVCompleteSchema]]
           result = state.get["kv"](KVKey(key))
-        } yield result.asInstanceOf[command.Response]
-  
-  protected def handleSessionCreated(sessionId: SessionId, capabilities: Map[String, String], createdAt: Instant): StateWriter[HMap[KVCompleteSchema], ServerRequestForSession[Nothing], Unit] =
+        yield GetResult(result).asResponseType(command, get)
+
+  protected def handleSessionCreated(
+    sessionId: SessionId,
+    capabilities: Map[String, String],
+    createdAt: Instant
+  ): StateWriter[HMap[KVCompleteSchema], ServerRequestForSession[KVServerRequest], Unit] =
     StateWriter.succeed(())
-  
-  protected def handleSessionExpired(sessionId: SessionId, capabilities: Map[String, String], createdAt: Instant): StateWriter[HMap[KVCompleteSchema], ServerRequestForSession[Nothing], Unit] =
+
+  protected def handleSessionExpired(
+    sessionId: SessionId,
+    capabilities: Map[String, String],
+    createdAt: Instant
+  ): StateWriter[HMap[KVCompleteSchema], ServerRequestForSession[KVServerRequest], Unit] =
     StateWriter.succeed(())
-  
-  override def takeSnapshot(state: HMap[KVCompleteSchema]): Stream[Nothing, Byte] =
-    val rawMap = state.toRaw      
-    
-    // Stream each entry separately - true streaming, no loading all into memory
-    ZStream.fromIterable(rawMap).mapZIO { case (fullKey, value) =>
-      ZIO.attempt(Chunk.from(codec.encode((ByteVector(fullKey), value)).require.toByteArray)).orDie
-    }.flattenChunks
-  
-  override def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[KVCompleteSchema]] =
-    stream.chunks
-      .via(CodecPipeline.decoder(codec))
-      .runFold(Map.empty[Array[Byte], Any]) { case (entries, (key, value)) =>        
-        entries + (key.toArray -> value)
-      }
-      .map(HMap.fromRaw[KVCompleteSchema])
-      .orDieWith(err => new RuntimeException(s"Failed to restore from snapshot: ${err.messageWithContext}"))
-  
-  override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean = 
-    false  // Disable snapshots for now
+
+  // takeSnapshot and restoreFromSnapshot are now provided by SessionStateMachine base class!
+  // They use the TypeclassMap[Schema, Codec] passed in constructor
+
+  override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
+    false // Disable snapshots for now
+end KVStateMachine
 
 // HttpServer commented out for now - SessionCommand type system complexity
 // The KVStateMachine implementation demonstrates:

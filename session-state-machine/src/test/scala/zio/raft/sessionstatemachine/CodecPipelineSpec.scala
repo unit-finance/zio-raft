@@ -1,4 +1,4 @@
-package zio.kvstore
+package zio.raft.sessionstatemachine
 
 import zio.test.*
 import zio.test.Assertion.*
@@ -6,7 +6,6 @@ import zio.stream.ZStream
 import zio.{Chunk, ZIO}
 import scodec.Codec
 import scodec.codecs.{int32, utf8_32, variableSizeBytes}
-import scodec.bits.ByteVector
 
 /**
  * Test for CodecPipeline streaming decoder/encoder.

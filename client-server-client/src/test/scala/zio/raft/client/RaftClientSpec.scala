@@ -100,7 +100,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
     } yield response == expectedResult
   }
 
-  override def spec: Spec[ZContext with TestEnvironment with Scope, Any] = suiteAll("RaftClient with Real ZMQ") {
+  override def spec: Spec[ZContext & TestEnvironment & Scope, Any] = suiteAll("RaftClient with Real ZMQ") {
 
     // ==========================================================================
     // Session Creation Tests

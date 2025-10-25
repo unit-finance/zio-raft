@@ -3,7 +3,6 @@ package zio.raft
 import zio.test.*
 import zio.test.Assertion.*
 import zio.prelude.Newtype
-import scala.collection.immutable.TreeMap
 
 /**
  * Test for HMap serialization utilities - extractPrefix and fromRaw.

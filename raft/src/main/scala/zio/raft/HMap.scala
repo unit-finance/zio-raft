@@ -322,21 +322,21 @@ final case class HMap[M <: Tuple](private val m: TreeMap[Array[Byte], Any] =
       val logicalKey = kl.fromBytes(keyBytes)
       predicate(logicalKey, v.asInstanceOf[ValueAt[M, P]])
     }
-  
-  /**
-   * Export the internal TreeMap for serialization.
-   * 
-   * This exposes the raw byte array keys and Any values for serialization purposes.
-   * Use with extractPrefix and TypeclassMap to implement custom serialization.
-   * 
-   * @return The internal TreeMap with byte array keys
-   * 
-   * @example
-   * {{{
-   * val rawMap = hmap.toRaw
-   * // Serialize rawMap to bytes/file
-   * }}}
-   */
+
+  /** Export the internal TreeMap for serialization.
+    *
+    * This exposes the raw byte array keys and Any values for serialization purposes. Use with extractPrefix and
+    * TypeclassMap to implement custom serialization.
+    *
+    * @return
+    *   The internal TreeMap with byte array keys
+    *
+    * @example
+    *   {{{
+    * val rawMap = hmap.toRaw
+    * // Serialize rawMap to bytes/file
+    *   }}}
+    */
   def toRaw: TreeMap[Array[Byte], Any] = m
 end HMap
 
@@ -364,60 +364,62 @@ object HMap:
     *   }}}
     */
   def empty[M <: Tuple]: HMap[M] = HMap[M](TreeMap.empty(using byteArrayOrdering))
-  
-  /**
-   * Create an HMap from a raw Map of byte arrays.
-   * 
-   * This is useful for deserialization - you can read entries from storage
-   * and build an HMap. Accepts any Map and converts to TreeMap internally.
-   * 
-   * WARNING: This is unsafe - the caller must ensure the keys and values match the schema!
-   * 
-   * @tparam M The schema
-   * @param raw The raw Map with byte array keys
-   * @return HMap with the provided entries
-   * 
-   * @example
-   * {{{
-   * // During deserialization
-   * val entries: Map[Array[Byte], Any] = deserializeFromBytes(...)
-   * val hmap = HMap.fromRaw[MySchema](entries)
-   * }}}
-   */
-  def fromRaw[M <: Tuple](raw: Map[Array[Byte], Any]): HMap[M] = 
+
+  /** Create an HMap from a raw Map of byte arrays.
+    *
+    * This is useful for deserialization - you can read entries from storage and build an HMap. Accepts any Map and
+    * converts to TreeMap internally.
+    *
+    * WARNING: This is unsafe - the caller must ensure the keys and values match the schema!
+    *
+    * @tparam M
+    *   The schema
+    * @param raw
+    *   The raw Map with byte array keys
+    * @return
+    *   HMap with the provided entries
+    *
+    * @example
+    *   {{{
+    * // During deserialization
+    * val entries: Map[Array[Byte], Any] = deserializeFromBytes(...)
+    * val hmap = HMap.fromRaw[MySchema](entries)
+    *   }}}
+    */
+  def fromRaw[M <: Tuple](raw: Map[Array[Byte], Any]): HMap[M] =
     // Always create new TreeMap with our byteArrayOrdering
     // Even if input is TreeMap, it might have different ordering
     HMap[M](TreeMap.from(raw)(using byteArrayOrdering))
-  
-  /**
-   * Extract the prefix string from a full byte key.
-   * 
-   * Full keys have format: prefixBytes ++ separator ++ keyBytes
-   * This extracts the prefix part (before the separator).
-   * 
-   * Useful for deserialization when you need to determine which prefix
-   * (and thus which codec/typeclass) to use for a key-value pair.
-   * 
-   * @param fullKey The complete byte key from HMap internal storage
-   * @return The prefix string, or None if separator not found
-   * 
-   * @example
-   * {{{
-   * // During deserialization
-   * rawMap.foreach { case (fullKey, value) =>
-   *   HMap.extractPrefix(fullKey) match
-   *     case Some(prefix) =>
-   *       val codec = codecs.forPrefix[prefix]  // Get codec for this prefix
-   *       // decode value using codec
-   *     case None =>
-   *       // Invalid key format
-   * }
-   * }}}
-   */
+
+  /** Extract the prefix string from a full byte key.
+    *
+    * Full keys have format: prefixBytes ++ separator ++ keyBytes This extracts the prefix part (before the separator).
+    *
+    * Useful for deserialization when you need to determine which prefix (and thus which codec/typeclass) to use for a
+    * key-value pair.
+    *
+    * @param fullKey
+    *   The complete byte key from HMap internal storage
+    * @return
+    *   The prefix string, or None if separator not found
+    *
+    * @example
+    *   {{{
+    * // During deserialization
+    * rawMap.foreach { case (fullKey, value) =>
+    *   HMap.extractPrefix(fullKey) match
+    *     case Some(prefix) =>
+    *       val codec = codecs.forPrefix[prefix]  // Get codec for this prefix
+    *       // decode value using codec
+    *     case None =>
+    *       // Invalid key format
+    * }
+    *   }}}
+    */
   def extractPrefix(fullKey: Array[Byte]): Option[String] =
-    val separatorByte = 0x5C.toByte  // backslash
+    val separatorByte = 0x5c.toByte // backslash
     val separatorIndex = fullKey.indexOf(separatorByte)
-    
+
     if separatorIndex >= 0 then
       val prefixBytes = fullKey.take(separatorIndex)
       Some(new String(prefixBytes, StandardCharsets.UTF_8))
@@ -560,80 +562,77 @@ object HMap:
       */
     inline given [M <: Tuple, P <: String](using NotGiven[ValueAt[M, P] =:= Nothing]): Contains[M, P] =
       evidence.asInstanceOf[Contains[M, P]]
-  
-  /**
-   * Typeclass that provides typeclass instances for each value type in the schema.
-   * 
-   * Given a schema M and a typeclass TC[_], allows retrieving TC[ValueAt[M, P]]
-   * for any prefix P in the schema. This is useful for deriving serialization,
-   * validation, or other typeclass-based functionality while preserving types.
-   * 
-   * @tparam M The schema tuple
-   * @tparam TC The typeclass (e.g., Codec, Ordering, Validator)
-   * 
-   * @example
-   * {{{
-   * trait Validator[A]:
-   *   def validate(a: A): Boolean
-   * 
-   * type Schema = ("users", UserId, UserData) *: ("orders", OrderId, OrderData) *: EmptyTuple
-   * 
-   * given Validator[UserData] = ...
-   * given Validator[OrderData] = ...
-   * 
-   * // Automatically derived!
-   * val validators = summon[TypeclassMap[Schema, Validator]]
-   * val userValidator = validators.forPrefix["users"]  // Validator[UserData]
-   * val orderValidator = validators.forPrefix["orders"]  // Validator[OrderData]
-   * }}}
-   */
+
+  /** Typeclass that provides typeclass instances for each value type in the schema.
+    *
+    * Given a schema M and a typeclass TC[_], allows retrieving TC[ValueAt[M, P]] for any prefix P in the schema. This
+    * is useful for deriving serialization, validation, or other typeclass-based functionality while preserving types.
+    *
+    * @tparam M
+    *   The schema tuple
+    * @tparam TC
+    *   The typeclass (e.g., Codec, Ordering, Validator)
+    *
+    * @example
+    *   {{{
+    * trait Validator[A]:
+    *   def validate(a: A): Boolean
+    *
+    * type Schema = ("users", UserId, UserData) *: ("orders", OrderId, OrderData) *: EmptyTuple
+    *
+    * given Validator[UserData] = ...
+    * given Validator[OrderData] = ...
+    *
+    * // Automatically derived!
+    * val validators = summon[TypeclassMap[Schema, Validator]]
+    * val userValidator = validators.forPrefix["users"]  // Validator[UserData]
+    * val orderValidator = validators.forPrefix["orders"]  // Validator[OrderData]
+    *   }}}
+    */
   trait TypeclassMap[M <: Tuple, TC[_]]:
-    /**
-     * Get typeclass instance for the value type at prefix P.
-     * 
-     * Type safety is ensured by:
-     * - Contains[M, P] proves P exists in schema
-     * - ValueAt[M, P] extracts the correct value type
-     * - TC[ValueAt[M, P]] is the correctly typed typeclass instance
-     * 
-     * @tparam P The prefix (must exist in schema)
-     * @return Typeclass instance for ValueAt[M, P] with correct type
-     */
-    def forPrefix[P <: String : ValueOf](using Contains[M, P]): TC[ValueAt[M, P]]
+    /** Get typeclass instance for the value type at prefix P.
+      *
+      * Type safety is ensured by:
+      *   - Contains[M, P] proves P exists in schema
+      *   - ValueAt[M, P] extracts the correct value type
+      *   - TC[ValueAt[M, P]] is the correctly typed typeclass instance
+      *
+      * @tparam P
+      *   The prefix (must exist in schema)
+      * @return
+      *   Typeclass instance for ValueAt[M, P] with correct type
+      */
+    def forPrefix[P <: String: ValueOf](using Contains[M, P]): TC[ValueAt[M, P]]
 
     def forPrefix(prefix: String): TC[Any]
-  
+
   object TypeclassMap:
-    /**
-     * Base case: EmptyTuple has no typeclass instances.
-     * This given will never actually be called due to Contains constraint.
-     */
+    /** Base case: EmptyTuple has no typeclass instances. This given will never actually be called due to Contains
+      * constraint.
+      */
     given empty[TC[_]]: TypeclassMap[EmptyTuple, TC] with
-      def forPrefix[P <: String : ValueOf](using Contains[EmptyTuple, P]): TC[ValueAt[EmptyTuple, P]] =
+      def forPrefix[P <: String: ValueOf](using Contains[EmptyTuple, P]): TC[ValueAt[EmptyTuple, P]] =
         // Never reached - Contains[EmptyTuple, P] cannot be satisfied
         throw new IllegalStateException("Unreachable: EmptyTuple has no prefixes")
 
       def forPrefix(prefix: String): TC[Any] =
         throw new IllegalStateException("Unreachable: EmptyTuple has no prefixes")
-    
-    /**
-     * Recursive case: (Prefix, Key, Value) *: Tail
-     * 
-     * Derives TypeclassMap by:
-     * 1. Requiring TC[V] for the head value type
-     * 2. Recursively deriving TypeclassMap[Tail, TC]
-     * 3. Checking at runtime if requested prefix matches head or is in tail
-     * 
-     * Note: Prefix comparison is at runtime, but type safety is at compile time
-     * via Contains and ValueAt match types.
-     */
+
+    /** Recursive case: (Prefix, Key, Value) *: Tail
+      *
+      * Derives TypeclassMap by:
+      *   1. Requiring TC[V] for the head value type 2. Recursively deriving TypeclassMap[Tail, TC] 3. Checking at
+      *      runtime if requested prefix matches head or is in tail
+      *
+      * Note: Prefix comparison is at runtime, but type safety is at compile time via Contains and ValueAt match types.
+      */
     given cons[P0 <: String, K, V, T <: Tuple, TC[_]](
       using
-        p0: ValueOf[P0],               // The prefix of the head
-        tc: TC[V],                     // Typeclass instance for head value type
-        tail: TypeclassMap[T, TC]      // Recursively derive for tail
+      p0: ValueOf[P0], // The prefix of the head
+      tc: TC[V], // Typeclass instance for head value type
+      tail: TypeclassMap[T, TC] // Recursively derive for tail
     ): TypeclassMap[(P0, K, V) *: T, TC] with
-      def forPrefix[P <: String : ValueOf](using Contains[(P0, K, V) *: T, P]): TC[ValueAt[(P0, K, V) *: T, P]] =
+      def forPrefix[P <: String: ValueOf](using Contains[(P0, K, V) *: T, P]): TC[ValueAt[(P0, K, V) *: T, P]] =
         // Runtime check if P matches P0
         if valueOf[P] == p0.value then
           // Prefix matches head - return tc for value type V
@@ -647,5 +646,5 @@ object HMap:
           tc.asInstanceOf[TC[Any]]
         else
           tail.forPrefix(prefix).asInstanceOf[TC[Any]]
-          
+
 end HMap

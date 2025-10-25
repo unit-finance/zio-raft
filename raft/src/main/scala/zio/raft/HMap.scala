@@ -80,21 +80,75 @@ import java.nio.charset.StandardCharsets
 final case class HMap[M <: Tuple](private val m: TreeMap[Array[Byte], Any] =
   TreeMap.empty(using HMap.byteArrayOrdering)):
 
-  /** Constructs the internal key by combining prefix and key bytes with a backslash separator */
+  /** Constructs the internal key with length-prefixed encoding.
+    * 
+    * Format: [1 byte: prefix length] ++ [N bytes: prefix UTF-8] ++ [key bytes]
+    * 
+    * Prefix length is limited to 254 bytes (1 unsigned byte).
+    */
   private def fullKey[P <: String & Singleton: ValueOf](key: KeyAt[M, P])(using kl: KeyLike[KeyAt[M, P]]): Array[Byte] =
     val prefixBytes = valueOf[P].getBytes(StandardCharsets.UTF_8)
     val keyBytes = kl.asBytes(key)
-    val separator = Array(0x5c.toByte) // backslash
-    prefixBytes ++ separator ++ keyBytes
+    
+    // Max 254 bytes because if all bytes are 0xFF, upperBound uses length+1
+    require(prefixBytes.length <= 254, s"Prefix '${valueOf[P]}' too long: ${prefixBytes.length} bytes (max 254)")
+    
+    Array(prefixBytes.length.toByte) ++ prefixBytes ++ keyBytes
+  
+  /**
+   * Extract and decode the logical key from a full internal key.
+   * 
+   * Skips the prefix length byte and prefix bytes, then decodes the key bytes
+   * using the KeyLike instance.
+   * 
+   * @param fullKey The complete internal key [length][prefix][key]
+   * @param kl KeyLike instance for decoding key bytes
+   * @tparam K The key type
+   * @return The decoded logical key
+   */
+  private def extractKey[K](fullKey: Array[Byte])(using kl: KeyLike[K]): K =
+    val prefixLength = fullKey(0) & 0xFF
+    val keyBytes = fullKey.drop(1 + prefixLength)
+    kl.fromBytes(keyBytes)
 
-  /** Calculate the range bounds for a prefix in the TreeMap. Returns (lowerBound, upperBound) where lowerBound is
-    * inclusive and upperBound is exclusive. This allows efficient iteration over all entries with a given prefix.
+  /** Calculate the range bounds for a prefix in the TreeMap with length-prefixed encoding.
+    *
+    * Format: [1 byte: prefix length] ++ [N bytes: prefix UTF-8] ++ [key bytes...]
+    *
+    * Returns (lowerBound, upperBound) where lowerBound is inclusive and upperBound is exclusive.
     */
   private def prefixRange[P <: String & Singleton: ValueOf](): (Array[Byte], Array[Byte]) =
     val prefixBytes = valueOf[P].getBytes(StandardCharsets.UTF_8)
-    val separatorByte = 0x5c.toByte // backslash
-    val lowerBound = prefixBytes :+ separatorByte
-    val upperBound = prefixBytes :+ (separatorByte + 1).toByte
+    val prefixLength = prefixBytes.length
+
+    // Lower bound: [length][prefix] - all keys with this prefix start here
+    val lowerBound = Array(prefixLength.toByte) ++ prefixBytes
+
+    // Upper bound: Increment prefix bytes with carry propagation
+    // Start from rightmost byte, find first byte that isn't 0xFF, increment it, zero rest
+    val upperPrefixBytes = prefixBytes.clone()
+    var i = upperPrefixBytes.length - 1
+    var carry = true
+
+    while carry && i >= 0 do
+      if upperPrefixBytes(i) != 0xff.toByte then
+        // Found a byte that is already 0xFF, will zero it and propagate carry (continue)
+        if upperPrefixBytes(i) == 0xff.toByte then
+          upperPrefixBytes(i) = 0.toByte
+        else
+          // Found a byte that is not 0xFF, increment it and stop carry
+          upperPrefixBytes(i) = (upperPrefixBytes(i) + 1).toByte
+          carry = false
+      i -= 1
+
+    val upperBound =
+      if carry then
+        // All bytes were 0xFF - use next length value with empty prefix
+        // This is lexicographically after all keys with current prefix length
+        Array((prefixLength + 1).toByte)
+      else
+        Array(prefixLength.toByte) ++ upperPrefixBytes
+
     (lowerBound, upperBound)
 
   /** Retrieve a value for the given prefix and key.
@@ -235,9 +289,7 @@ final case class HMap[M <: Tuple](private val m: TreeMap[Array[Byte], Any] =
 
     // Use TreeMap's range for efficient iteration (O(log n + k) where k = results)
     m.range(lowerBound, upperBound).iterator.map { case (k, v) =>
-      // Extract key bytes (everything after prefix + separator)
-      val keyBytes = k.drop(lowerBound.length)
-      val logicalKey = kl.fromBytes(keyBytes)
+      val logicalKey = extractKey(k)
       (logicalKey, v.asInstanceOf[ValueAt[M, P]])
     }
 
@@ -273,17 +325,15 @@ final case class HMap[M <: Tuple](private val m: TreeMap[Array[Byte], Any] =
     kl: KeyLike[KeyAt[M, P]]
   ): Iterator[(KeyAt[M, P], ValueAt[M, P])] =
     val prefixBytes = valueOf[P].getBytes(StandardCharsets.UTF_8)
-    val separatorByte = 0x5c.toByte // backslash
-    val prefixWithSep = prefixBytes :+ separatorByte
+    val prefixLength = Array(prefixBytes.length.toByte)
+    val prefixWithLength = prefixLength ++ prefixBytes
 
-    val fromKey = prefixWithSep ++ kl.asBytes(from)
-    val untilKey = prefixWithSep ++ kl.asBytes(until)
+    val fromKey = prefixWithLength ++ kl.asBytes(from)
+    val untilKey = prefixWithLength ++ kl.asBytes(until)
 
     // TreeMap.range returns entries in [from, until) based on byte ordering
     m.range(fromKey, untilKey).iterator.map { case (k, v) =>
-      // Extract key bytes (everything after prefix + separator)
-      val keyBytes = k.drop(prefixWithSep.length)
-      val logicalKey = kl.fromBytes(keyBytes)
+      val logicalKey = extractKey(k)
       (logicalKey, v.asInstanceOf[ValueAt[M, P]])
     }
 
@@ -318,8 +368,7 @@ final case class HMap[M <: Tuple](private val m: TreeMap[Array[Byte], Any] =
 
     // Use TreeMap's range.exists directly for maximum efficiency
     m.range(lowerBound, upperBound).exists { case (k, v) =>
-      val keyBytes = k.drop(lowerBound.length)
-      val logicalKey = kl.fromBytes(keyBytes)
+      val logicalKey = extractKey(k)
       predicate(logicalKey, v.asInstanceOf[ValueAt[M, P]])
     }
 
@@ -393,7 +442,7 @@ object HMap:
 
   /** Extract the prefix string from a full byte key.
     *
-    * Full keys have format: prefixBytes ++ separator ++ keyBytes This extracts the prefix part (before the separator).
+    * Full keys have format: [1 byte: prefix length] ++ [N bytes: prefix UTF-8] ++ [key bytes]
     *
     * Useful for deserialization when you need to determine which prefix (and thus which codec/typeclass) to use for a
     * key-value pair.
@@ -401,7 +450,7 @@ object HMap:
     * @param fullKey
     *   The complete byte key from HMap internal storage
     * @return
-    *   The prefix string, or None if separator not found
+    *   The prefix string, or None if invalid format
     *
     * @example
     *   {{{
@@ -409,7 +458,7 @@ object HMap:
     * rawMap.foreach { case (fullKey, value) =>
     *   HMap.extractPrefix(fullKey) match
     *     case Some(prefix) =>
-    *       val codec = codecs.forPrefix[prefix]  // Get codec for this prefix
+    *       val codec = codecs.forPrefix(prefix)  // Get codec for this prefix
     *       // decode value using codec
     *     case None =>
     *       // Invalid key format
@@ -417,14 +466,16 @@ object HMap:
     *   }}}
     */
   def extractPrefix(fullKey: Array[Byte]): Option[String] =
-    val separatorByte = 0x5c.toByte // backslash
-    val separatorIndex = fullKey.indexOf(separatorByte)
-
-    if separatorIndex >= 0 then
-      val prefixBytes = fullKey.take(separatorIndex)
-      Some(new String(prefixBytes, StandardCharsets.UTF_8))
-    else
+    if fullKey.isEmpty then
       None
+    else
+      val prefixLength = fullKey(0) & 0xff // Unsigned byte to int
+
+      if fullKey.length > prefixLength then
+        val prefixBytes = fullKey.slice(1, 1 + prefixLength)
+        Some(new String(prefixBytes, StandardCharsets.UTF_8))
+      else
+        None
 
   // ---------------------------------------------
   // Type-level machinery for compile-time schema validation

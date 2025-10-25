@@ -1,6 +1,6 @@
 package zio.raft.sessionstatemachine
 
-import zio.UIO
+import zio.{UIO, Chunk}
 import zio.prelude.State
 import zio.raft.{Command, HMap, StateMachine, Index}
 import zio.raft.protocol.{SessionId, RequestId}
@@ -80,7 +80,9 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    * This method receives ONLY the user schema state (UserSchema), not session management state.
    * Session management prefixes are handled by the base class automatically.
    * 
-   * Use `.log(serverRequest)` to emit server-initiated requests instead of returning them.
+   * Use `.log(serverRequest)` to emit server-initiated requests.
+   * Server requests MUST be wrapped in ServerRequestForSession to specify target sessionId.
+   * This allows sending requests to ANY session, not just the current one!
    * 
    * @param command The user command to process
    * @param createdAt The timestamp when the command was created (use this instead of adding to command)
@@ -89,21 +91,21 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    * @note Must be pure and deterministic
    * @note Must NOT throw exceptions - return errors in response payload
    * @note Only receives and modifies UserSchema state
-   * @note Use `.log(serverRequest)` to emit server requests
+   * @note Use `.log(ServerRequestForSession(targetSessionId, payload))` to emit server requests
    * 
    * @example
    * {{{
-   * protected def applyCommand(command: UC, createdAt: Instant): StateWriter[HMap[UserSchema], SR, command.Response] =
+   * protected def applyCommand(command: UC, createdAt: Instant): StateWriter[HMap[Schema], ServerRequestForSession[SR], command.Response] =
    *   for {
-   *     state <- StateWriter.get[HMap[UserSchema]]
+   *     state <- StateWriter.get[HMap[Schema]]
    *     result = // ... compute result
    *     newState = state.updated["myPrefix"](key, value)
    *     _ <- StateWriter.set(newState)
-   *     _ <- StateWriter.log(ServerRequest(...))  // Emit server request
+   *     _ <- StateWriter.log(ServerRequestForSession(targetSessionId, MyRequest(...)))  // Can target any session!
    *   } yield CommandResponse(result)
    * }}}
    */
-  protected def applyCommand(command: UC, createdAt: Instant): StateWriter[HMap[Schema], SR, command.Response]
+  protected def applyCommand(command: UC, createdAt: Instant): StateWriter[HMap[Schema], ServerRequestForSession[SR], command.Response]
   
   /**
    * Handle session creation event.
@@ -111,7 +113,7 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    * Called when a CreateSession command is processed. Use this to initialize
    * any per-session state in your user-defined prefixes.
    * 
-   * Use `.log(serverRequest)` to emit server-initiated requests.
+   * Use `.log(ServerRequestForSession(targetSessionId, payload))` to emit server requests.
    * 
    * @param sessionId The newly created session ID
    * @param capabilities Client capabilities as key-value pairs
@@ -119,13 +121,13 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    * 
    * @note Receives complete schema state
    * @note Must be pure and deterministic
-   * @note Use `.log(serverRequest)` to emit server requests
+   * @note Server requests must specify target sessionId (can be different from current session)
    */
   protected def handleSessionCreated(
     sessionId: SessionId,
     capabilities: Map[String, String],
     createdAt: Instant
-  ): StateWriter[HMap[Schema], SR, Unit]
+  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Unit]
   
   /**
    * Handle session expiration event.
@@ -133,7 +135,8 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    * Called when a SessionExpired command is processed. Use this to clean up any
    * per-session state in your user-defined prefixes.
    * 
-   * Use `.log(serverRequest)` to emit any final server-initiated requests.
+   * Use `.log(ServerRequestForSession(targetSessionId, payload))` to emit server requests.
+   * Server requests can target ANY session, not just the expiring one!
    * 
    * @param sessionId The expired session ID
    * @param capabilities The session capabilities (retrieved from metadata)
@@ -142,13 +145,13 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    * @note Receives complete schema state
    * @note Session metadata and cache are automatically removed by base class
    * @note Must be pure and deterministic
-   * @note Use `.log(serverRequest)` to emit server requests
+   * @note Server requests can be for OTHER sessions (e.g., notify admin session)
    */
   protected def handleSessionExpired(
     sessionId: SessionId, 
     capabilities: Map[String, String],
     createdAt: Instant
-  ): StateWriter[HMap[Schema], SR, Unit]
+  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Unit]
   
   // ====================================================================================
   // StateMachine INTERFACE - Implemented by base class
@@ -246,14 +249,12 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
           
           // Execute command (pass createdAt to avoid storing twice)
           val (serverRequestsLog, newState, response) = applyCommand(cmd.command, cmd.createdAt).runStateLog(stateAfterCleanup)
-          val serverRequests = serverRequestsLog.toList  // Convert Chunk[SR] to List[SR]
           
-          // Add server requests and assign IDs
+          // Add server requests and assign IDs (serverRequestsLog is Chunk, keep it as Chunk)
           val (stateWithRequests, assignedRequests) = addServerRequests(
             cmd.createdAt,
             newState,
-            cmd.sessionId,
-            serverRequests
+            serverRequestsLog
           )
           
           // Cache the response using composite key
@@ -288,22 +289,17 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
         metadata
       )
       
-      // Initialize lastServerRequestId for this session
-      val stateWithRequestId = stateWithMetadata.updated["lastServerRequestId"](
-        cmd.sessionId,
-        RequestId.zero
-      )
+      // Initialize lastServerRequestId for all sessions that will receive server requests
+      // This is done lazily per session in addServerRequests
       
       // Call user's session created handler (passing capabilities and createdAt)
-      val (serverRequestsLog, newState, _) = handleSessionCreated(cmd.sessionId, cmd.capabilities, cmd.createdAt).runStateLog(stateWithRequestId)
-      val serverRequests = serverRequestsLog.toList  // Convert Chunk[SR] to List[SR]
+      val (serverRequestsLog, newState, _) = handleSessionCreated(cmd.sessionId, cmd.capabilities, cmd.createdAt).runStateLog(stateWithMetadata)
       
-      // Add any server requests
+      // Add any server requests (keep as Chunk, sessionId is inside ServerRequestForSession)
       val (finalState, assignedRequests) = addServerRequests(
         cmd.createdAt,
         newState,
-        cmd.sessionId,
-        serverRequests
+        serverRequestsLog
       )
       
       (assignedRequests, finalState)
@@ -321,13 +317,19 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
       
       // Call user's session expired handler with capabilities and createdAt
       val (serverRequestsLog, stateWithUserChanges, _) = handleSessionExpired(cmd.sessionId, capabilities, cmd.createdAt).runStateLog(state)
-      // Note: serverRequests are ignored - session is expired so we don't send them
       
-      // Remove all session data
-      val finalState = expireSession(stateWithUserChanges, cmd.sessionId)
+      // Add server requests before removing session data (keep as Chunk - they may be for OTHER sessions!)
+      val (stateWithRequests, assignedRequests) = addServerRequests(
+        cmd.createdAt,
+        stateWithUserChanges,
+        serverRequestsLog
+      )
       
-      // Return empty list - session is expired so we don't send server requests
-      (Nil, finalState)
+      // Remove all session data for THIS session
+      val finalState = expireSession(stateWithRequests, cmd.sessionId)
+      
+      // Return server requests - they may be for other sessions
+      (assignedRequests, finalState)
     }
   
   /**
@@ -343,27 +345,21 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    */
   private def handleGetRequestsForRetry(cmd: SessionCommand.GetRequestsForRetry[SR]): State[HMap[Schema], List[PendingServerRequest[SR]]] =
     State.modify { state =>
-      // Iterate through all server request entries in the HMap
-      // Collect all pending requests across all sessions that need retry
-      var allUpdated = List.empty[PendingServerRequest[SR]]
-      var newState = state
-      
-      // Use the iterator to go through all sessions' server requests
-      state.iterator["serverRequests"].foreach { case (compositeKey, pendingAny) =>
-        val (sessionId, requestId) = compositeKey
-        val pending = pendingAny.asInstanceOf[PendingServerRequest[SR]]
-        
-        // Check if this request needs retry (lastSentAt before threshold)
-        if pending.lastSentAt.isBefore(cmd.lastSentBefore) then
-          // Update lastSentAt and collect for return
-          val updatedReq = pending.copy(lastSentAt = cmd.createdAt)
-          allUpdated = updatedReq :: allUpdated
+      // Use foldRight to collect updated requests and build new state
+      // This avoids vars and the need to reverse at the end
+      state.iterator["serverRequests"].foldRight((List.empty[PendingServerRequest[SR]], state)) {
+        case (((sessionId, requestId), pendingAny), (accumulated, currentState)) =>
+          val pending = pendingAny.asInstanceOf[PendingServerRequest[SR]]
           
-          // Update state with the modified request
-          newState = newState.updated["serverRequests"]((sessionId, requestId), updatedReq)
+          // Check if this request needs retry (lastSentAt before threshold)
+          if pending.lastSentAt.isBefore(cmd.lastSentBefore) then
+            // Update lastSentAt and add to accumulated list
+            val updatedReq = pending.copy(lastSentAt = cmd.createdAt)
+            val updatedState = currentState.updated["serverRequests"]((sessionId, requestId), updatedReq)
+            (updatedReq :: accumulated, updatedState)
+          else
+            (accumulated, currentState)
       }
-      
-      (allUpdated.reverse, newState)
     }
   
   // ====================================================================================
@@ -380,56 +376,65 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
    * Add server requests to state and assign monotonically increasing IDs.
    * 
    * Each request is stored with a composite key (SessionId, RequestId) for efficiency.
+   * sessionId comes from ServerRequestForSession, not as a parameter!
    * 
-   * @param state Current state
-   * @param sessionId Session ID
-   * @param serverRequests List of server requests to add
    * @param createdAt Timestamp when the command was created (for lastSentAt)
+   * @param state Current state
+   * @param serverRequests Chunk of server requests (each contains target sessionId)
    */
   private def addServerRequests(
     createdAt: Instant,
     state: HMap[Schema],
-    sessionId: SessionId,
-    serverRequests: List[SR]
+    serverRequests: Chunk[ServerRequestForSession[SR]]
   ): (HMap[Schema], List[ServerRequestWithContext[SR]]) =
     if serverRequests.isEmpty then
       (state, Nil)
     else
-      // Get last assigned ID for this session
-      val lastId = state.get["lastServerRequestId"](sessionId)
-        .getOrElse(RequestId.zero)
+      // Group requests by sessionId for efficient ID assignment
+      val groupedBySession = serverRequests.groupBy(_.sessionId)
       
-      // Assign IDs starting from lastId + 1 and create pending requests
-      val requestsWithIds = serverRequests.zipWithIndex.map { case (req, index) =>
-        val newId = RequestId(RequestId.unwrap(lastId) + index + 1)
-        (newId, PendingServerRequest(
-          payload = req,
-          lastSentAt = createdAt  // Use provided timestamp
-        ))
+      // Process each session's requests
+      val (finalState, allRequestsWithContext) = groupedBySession.foldLeft((state, List.empty[ServerRequestWithContext[SR]])) {
+        case ((currentState, accumulated), (sessionId, sessionRequests)) =>
+          // Get last assigned ID for this session
+          val lastId = currentState.get["lastServerRequestId"](sessionId)
+            .getOrElse(RequestId.zero)
+          
+          // Assign IDs starting from lastId + 1
+          val requestsWithIds = sessionRequests.zipWithIndex.map { case (reqWithSession, index) =>
+            val newId = RequestId(RequestId.unwrap(lastId) + index + 1)
+            (sessionId, newId, PendingServerRequest(
+              payload = reqWithSession.payload,
+              lastSentAt = createdAt
+            ))
+          }
+          
+          // Update lastServerRequestId for this session
+          val newLastId = requestsWithIds.last._2
+          val stateWithNewId = currentState.updated["lastServerRequestId"](
+            sessionId,
+            newLastId
+          )
+          
+          // Add all requests with composite keys
+          val stateWithRequests = requestsWithIds.foldLeft(stateWithNewId) { 
+            case (s, (sid, requestId, pending)) =>
+              s.updated["serverRequests"]((sid, requestId), pending)
+          }
+          
+          // Create requests with context
+          val requestsWithContext = requestsWithIds.map { case (sid, requestId, pending) =>
+            ServerRequestWithContext(
+              sessionId = sid,
+              requestId = requestId,
+              payload = pending.payload
+            )
+          }.toList
+          
+          (stateWithRequests, accumulated ++ requestsWithContext)
       }
       
-      // Update lastServerRequestId
-      val newLastId = requestsWithIds.last._1
-      val stateWithNewId = state.updated["lastServerRequestId"](
-        sessionId,
-        newLastId
-      )
-      
-      // Add all requests with composite keys
-      val stateWithRequests = requestsWithIds.foldLeft(stateWithNewId) { case (s, (requestId, pending)) =>
-        s.updated["serverRequests"]((sessionId, requestId), pending)
-      }
-      
-      // Return requests with context (session ID and request ID)
-      val requestsWithContext = requestsWithIds.map { case (requestId, pending) =>
-        ServerRequestWithContext(
-          sessionId = sessionId,
-          requestId = requestId,
-          payload = pending.payload
-        )
-      }
-      
-      (stateWithRequests, requestsWithContext)
+      (finalState, allRequestsWithContext)
   
   /**
    * Acknowledge server requests with cumulative acknowledgment.

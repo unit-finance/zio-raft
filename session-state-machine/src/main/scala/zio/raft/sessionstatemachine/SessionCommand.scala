@@ -5,10 +5,32 @@ import zio.raft.protocol.{SessionId, RequestId}
 import java.time.Instant
 
 /**
- * Wrapper for server-initiated requests with full context.
+ * Wrapper for server-initiated requests that users emit via StateWriter.log().
+ * 
+ * Users must wrap their server request payload with the target sessionId.
+ * This allows server requests to target ANY session, not just the current one.
+ * 
+ * @param sessionId The session this request is for (may be different from current session!)
+ * @param payload The actual server request payload
+ * 
+ * @example
+ * {{{
+ * // User code - can send to any session
+ * for {
+ *   _ <- StateWriter.log(ServerRequestForSession(targetSessionId, MyRequest(...)))
+ * } yield response
+ * }}}
+ */
+case class ServerRequestForSession[SR](
+  sessionId: SessionId,
+  payload: SR
+)
+
+/**
+ * Server request with assigned ID after being added to state.
  * 
  * @param sessionId The session this request belongs to
- * @param requestId The unique request ID
+ * @param requestId The unique request ID (assigned by SessionStateMachine)
  * @param payload The actual server request payload
  */
 case class ServerRequestWithContext[SR](

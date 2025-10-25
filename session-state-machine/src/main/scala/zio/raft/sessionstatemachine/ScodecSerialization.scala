@@ -103,9 +103,9 @@ trait ScodecSerialization[R, SR, UserSchema <: Tuple]:
   def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[Schema]] =
     stream.chunks
       .via(CodecPipeline.decoder(entryCodec))
-      .runFold(Map.empty[Array[Byte], Any]) { case (entries, (key, value)) =>
-        entries + (key.toArray -> value)
-      }
+      .map { case (key, value) => key.toArray -> value }
+      .runCollect
+      .map(_.toMap)
       .map(HMap.fromRaw[Schema])
       .orDieWith(err => new RuntimeException(s"Failed to restore from snapshot: ${err.messageWithContext}"))
 end ScodecSerialization

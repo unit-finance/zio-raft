@@ -263,24 +263,44 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
   // INTERNAL COMMAND HANDLERS
   // ====================================================================================
 
-  /** Handle ClientRequest command with idempotency checking.
+  /** Handle ClientRequest command with idempotency checking and eviction detection.
+    *
+    * Implementation of Raft dissertation Chapter 6.3 session management protocol:
+    *   1. Check cache for (sessionId, requestId) 2. If cache hit, return cached response 3. If cache miss, check if
+    *      requestId < highestLowestRequestIdSeen → response was evicted, return error 4. If cache miss + requestId >=
+    *      highestLowestRequestIdSeen, execute command and update highestLowestRequestIdSeen
+    *
+    * This correctly handles out-of-order requests. The lowestRequestId from the client tells us which responses have
+    * been acknowledged and can be evicted. We only update highestLowestRequestIdSeen for requests we actually process.
     */
   private def handleClientRequest(cmd: SessionCommand.ClientRequest[UC, SR])
-    : State[HMap[Schema], (cmd.command.Response, List[ServerRequestWithContext[SR]])] =
-    getCachedResponse((cmd.sessionId, cmd.requestId)).flatMap {
-      case Some(cachedResponse) =>
-        // Cache hit - return cached response without calling user method
-        State.succeed((cachedResponse.asInstanceOf[cmd.command.Response], Nil))
+    : State[HMap[Schema], Either[RequestError, (cmd.command.Response, List[ServerRequestWithContext[SR]])]] =
+    for
+      highestLowestSeen <- getHighestLowestRequestIdSeen(cmd.sessionId)
+      cachedOpt <- getCachedResponse((cmd.sessionId, cmd.requestId))
+      result <- cachedOpt match
+        case Some(cachedResponse) =>
+          // Cache hit - return cached response without calling user method
+          State.succeed(Right((cachedResponse.asInstanceOf[cmd.command.Response], Nil)))
 
-      case None =>
-        // Cache miss - compose State operations
-        for
-          _ <- cleanupCache(cmd.sessionId, cmd.lowestRequestId)
-          (serverRequestsLog, response) <- applyCommand(cmd.command, cmd.createdAt).withLog
-          assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
-          _ <- cacheResponse((cmd.sessionId, cmd.requestId), response)
-        yield (response, assignedRequests)
-    }
+        case None =>
+          // Cache miss - check if response was evicted
+          // If requestId < highestLowestRequestIdSeen, client has acknowledged receiving this response
+          if cmd.requestId.isLowerThan(highestLowestSeen) then
+            // Client said "I have responses for all requestIds < highestLowest", so this was evicted
+            State.succeed(Left(RequestError.ResponseEvicted(cmd.sessionId, cmd.requestId)))
+          else
+            // requestId >= highestLowestRequestIdSeen
+            // This is a valid request (not yet acknowledged), execute the command
+            for
+              // Update highestLowestRequestIdSeen ONLY when actually executing a new request
+              _ <- updateHighestLowestRequestIdSeen(cmd.sessionId, cmd.lowestRequestId)
+              _ <- cleanupCache(cmd.sessionId, cmd.lowestRequestId)
+              (serverRequestsLog, response) <- applyCommand(cmd.command, cmd.createdAt).withLog
+              assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
+              _ <- cacheResponse((cmd.sessionId, cmd.requestId), response)
+            yield Right((response, assignedRequests))
+    yield result
 
   /** Get cached response for a composite key.
     */
@@ -294,6 +314,33 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     response: R
   ): State[HMap[Schema], Unit] =
     State.update(_.updated["cache"](key, response))
+
+  /** Get the highest lowestRequestId seen from the client for a session.
+    *
+    * This tracks the highest value of lowestRequestId that the client has sent, indicating which responses the client
+    * has acknowledged receiving.
+    *
+    * Returns RequestId.zero if no lowestRequestId has been seen yet (no requests have been acknowledged).
+    */
+  private def getHighestLowestRequestIdSeen(sessionId: SessionId): State[HMap[Schema], RequestId] =
+    State.get.map(_.get["highestLowestRequestIdSeen"](sessionId).getOrElse(RequestId.zero))
+
+  /** Update the highest lowestRequestId seen from the client (only if lowestRequestId > current highest).
+    *
+    * The lowestRequestId from the client indicates "I have received all responses for requestIds < this value". We
+    * track the highest such value to detect evicted responses.
+    */
+  private def updateHighestLowestRequestIdSeen(
+    sessionId: SessionId,
+    lowestRequestId: RequestId
+  ): State[HMap[Schema], Unit] =
+    State.update(state =>
+      state.get["highestLowestRequestIdSeen"](sessionId) match
+        case Some(current) if !lowestRequestId.isGreaterThan(current) =>
+          state // Don't update if lowestRequestId is not higher
+        case _ =>
+          state.updated["highestLowestRequestIdSeen"](sessionId, lowestRequestId)
+    )
 
   /** Handle ServerRequestAck with cumulative acknowledgment.
     *
@@ -352,11 +399,6 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
         .getOrElse(Map.empty[String, String])
     )
 
-  /** Handle GetRequestsForRetry command.
-    *
-    * NOTE: Left unimplemented - requires access to HMap internal iteration which is not currently available. This
-    * functionality should be implemented externally or requires additional HMap methods.
-    */
   /** Handle GetRequestsForRetry - atomically get eligible requests and update lastSentAt. Works on ALL sessions,
     * iterating through all pending requests.
     */
@@ -379,12 +421,6 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
             (accumulated, currentState)
       }
     }
-
-  // ====================================================================================
-  // NOTE: State narrowing/merging removed for simplicity
-  // User methods receive full HMap[Schema] and should only
-  // modify their own UserSchema prefixes
-  // ====================================================================================
 
   // ====================================================================================
   // SERVER REQUEST MANAGEMENT
@@ -482,6 +518,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
         .removedAll["serverRequests"](serverRequestKeysToRemove)
         .removed["metadata"](sessionId)
         .removed["lastServerRequestId"](sessionId)
+        .removed["highestLowestRequestIdSeen"](sessionId)
     }
 
   // ====================================================================================

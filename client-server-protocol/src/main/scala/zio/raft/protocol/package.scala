@@ -82,6 +82,10 @@ package object protocol {
       def value: Long = RequestId.unwrap(requestId)
 
       def isLowerOrEqual(other: RequestId): Boolean = value <= other.value
+
+      def isLowerThan(other: RequestId): Boolean = value < other.value
+
+      def isGreaterThan(other: RequestId): Boolean = value > other.value
     }
   }
 

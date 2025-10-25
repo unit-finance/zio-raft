@@ -21,23 +21,31 @@ object SessionCommand:
   /** A client request containing a user command to execute.
     *
     * This is the primary command type. The SessionStateMachine base class:
-    *   1. Checks if (sessionId, requestId) is already in the cache (idempotency) 2. If cached, returns the cached
-    *      response 3. If not cached, narrows state to UserSchema and calls user's applyCommand method 4. Caches the
-    *      response and returns it
+    *   1. Updates highestLowestRequestIdSeen if lowestRequestId is higher 2. Checks if requestId <
+    *      highestLowestRequestIdSeen AND not in cache → return Left(SessionError.ResponseEvicted) 3. Checks if
+    *      (sessionId, requestId) is already in the cache (idempotency) 4. If cached, returns the cached response 5. If
+    *      not cached, narrows state to UserSchema and calls user's applyCommand method 6. Caches the response and
+    *      returns it
     *
     * @param sessionId
     *   The client session ID
     * @param requestId
     *   The request ID (for idempotency checking)
     * @param lowestRequestId
-    *   The lowest request ID for which client hasn't received response (for cache cleanup)
+    *   The lowest request ID for which client hasn't received response (for cache cleanup). Client is saying "I have
+    *   received all responses for requestIds < this value"
     * @param command
     *   The user's command to execute
     *
     * @note
-    *   Response type is the user command's Response type (dependent types)
+    *   Response type is Either[RequestError, (command.Response, List[ServerRequestWithContext[SR]])] Left: error (e.g.,
+    *   response evicted) Right: (user command response, server requests with context)
     * @note
     *   lowestRequestId enables the "Lowest Sequence Number Protocol" from Raft dissertation Ch. 6.3
+    * @note
+    *   ResponseEvicted error indicates client must create a new session (Raft dissertation Ch. 6.3)
+    * @note
+    *   Requests can arrive out of order. Eviction detection uses lowestRequestId, not requestId ordering
     */
   case class ClientRequest[UC <: Command, SR](
     createdAt: Instant,
@@ -46,8 +54,8 @@ object SessionCommand:
     lowestRequestId: RequestId,
     command: UC
   ) extends SessionCommand[UC, SR]:
-    // Response type matches the user command's Response type
-    type Response = (command.Response, List[ServerRequestWithContext[SR]]) // (response, server requests with context)
+    // Response type can be an error or the user command's response with server requests
+    type Response = Either[RequestError, (command.Response, List[ServerRequestWithContext[SR]])]
 
   /** Acknowledgment from a client for a server-initiated request.
     *

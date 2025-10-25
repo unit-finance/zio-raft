@@ -49,8 +49,9 @@ import java.nio.charset.StandardCharsets
   *
   * ## How It Works
   *
-  * Internally, keys are stored as "prefix\key" strings in a Map[String, Any]. The KeyLike typeclass handles conversion
-  * between typed keys (like newtypes) and strings. The type system ensures:
+  * Internally, keys are stored as length-prefixed byte arrays in a TreeMap[Array[Byte], Any]. Each full key has the
+  * format: [1 byte: prefix length] ++ [N bytes: prefix UTF-8] ++ [key bytes]. The KeyLike typeclass handles conversion
+  * between typed keys (like newtypes) and byte arrays. The type system ensures:
   *   1. Only prefixes defined in the schema can be used 2. Keys must match the type associated with their prefix 3.
   *      Values must match the type associated with their prefix 4. Retrieved values have the correct type without
   *      manual casting
@@ -81,33 +82,35 @@ final case class HMap[M <: Tuple](private val m: TreeMap[Array[Byte], Any] =
   TreeMap.empty(using HMap.byteArrayOrdering)):
 
   /** Constructs the internal key with length-prefixed encoding.
-    * 
+    *
     * Format: [1 byte: prefix length] ++ [N bytes: prefix UTF-8] ++ [key bytes]
-    * 
+    *
     * Prefix length is limited to 254 bytes (1 unsigned byte).
     */
   private def fullKey[P <: String & Singleton: ValueOf](key: KeyAt[M, P])(using kl: KeyLike[KeyAt[M, P]]): Array[Byte] =
     val prefixBytes = valueOf[P].getBytes(StandardCharsets.UTF_8)
     val keyBytes = kl.asBytes(key)
-    
+
     // Max 254 bytes because if all bytes are 0xFF, upperBound uses length+1
     require(prefixBytes.length <= 254, s"Prefix '${valueOf[P]}' too long: ${prefixBytes.length} bytes (max 254)")
-    
+
     Array(prefixBytes.length.toByte) ++ prefixBytes ++ keyBytes
-  
-  /**
-   * Extract and decode the logical key from a full internal key.
-   * 
-   * Skips the prefix length byte and prefix bytes, then decodes the key bytes
-   * using the KeyLike instance.
-   * 
-   * @param fullKey The complete internal key [length][prefix][key]
-   * @param kl KeyLike instance for decoding key bytes
-   * @tparam K The key type
-   * @return The decoded logical key
-   */
+
+  /** Extract and decode the logical key from a full internal key.
+    *
+    * Skips the prefix length byte and prefix bytes, then decodes the key bytes using the KeyLike instance.
+    *
+    * @param fullKey
+    *   The complete internal key [length][prefix][key]
+    * @param kl
+    *   KeyLike instance for decoding key bytes
+    * @tparam K
+    *   The key type
+    * @return
+    *   The decoded logical key
+    */
   private def extractKey[K](fullKey: Array[Byte])(using kl: KeyLike[K]): K =
-    val prefixLength = fullKey(0) & 0xFF
+    val prefixLength = fullKey(0) & 0xff
     val keyBytes = fullKey.drop(1 + prefixLength)
     kl.fromBytes(keyBytes)
 
@@ -395,8 +398,10 @@ object HMap:
 
   /** Byte array ordering using Java's unsigned byte comparison. This ensures proper lexicographic ordering of byte
     * arrays.
+    *
+    * Private since it's only used internally by HMap and is explicitly referenced where needed.
     */
-  given byteArrayOrdering: Ordering[Array[Byte]] =
+  private given byteArrayOrdering: Ordering[Array[Byte]] =
     Ordering.comparatorToOrdering(java.util.Arrays.compareUnsigned(_, _))
 
   /** Create an empty HMap with the given schema.

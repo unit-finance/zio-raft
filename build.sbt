@@ -115,10 +115,12 @@ lazy val kvstore = project
       "dev.zio" %% "zio" % zio2Version,
       "dev.zio" %% "zio-prelude" % zioPreludeVersion,
       "dev.zio" %% "zio-http" % "3.0.0-RC8",
+      "dev.zio" %% "zio-test" % zio2Version % Test,
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test
     ),
     excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
-  .dependsOn(raft, raftZmq, stores)
+  .dependsOn(raft, raftZmq, stores, sessionStateMachine, clientServerProtocol)
 
 lazy val raftZmq = project
   .in(file("raft-zmq"))

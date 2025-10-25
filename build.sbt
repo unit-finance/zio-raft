@@ -291,6 +291,7 @@ lazy val sessionStateMachine = project
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,
       "dev.zio" %% "zio-prelude" % zioPreludeVersion,
+      "org.scodec" %% "scodec-core" % "2.2.2",
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test
     ),

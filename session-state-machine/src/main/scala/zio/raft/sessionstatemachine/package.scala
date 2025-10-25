@@ -17,43 +17,44 @@ import java.time.Instant
   *   - SessionCommand: ADT of commands the session state machine accepts
   */
 package object sessionstatemachine:
-  
-  /**
-   * Metadata associated with a client session.
-   * 
-   * @param capabilities Key-value pairs describing client capabilities
-   * @param createdAt Timestamp when the session was created
-   * @note sessionId is NOT stored here - it's the key in the HMap
-   */
+
+  /** Metadata associated with a client session.
+    *
+    * @param capabilities
+    *   Key-value pairs describing client capabilities
+    * @param createdAt
+    *   Timestamp when the session was created
+    * @note
+    *   sessionId is NOT stored here - it's the key in the HMap
+    */
   case class SessionMetadata(
     capabilities: Map[String, String],
     createdAt: Instant
   )
-  
-  /**
-   * Server-initiated request awaiting acknowledgment.
-   * 
-   * @param payload The actual request data
-   * @param lastSentAt Timestamp when request was last sent
-   * @note id and sessionId are in the HMap key, not duplicated here
-   */
+
+  /** Server-initiated request awaiting acknowledgment.
+    *
+    * @param payload
+    *   The actual request data
+    * @param lastSentAt
+    *   Timestamp when request was last sent
+    * @note
+    *   id and sessionId are in the HMap key, not duplicated here
+    */
   case class PendingServerRequest[SR](
     payload: SR,
     lastSentAt: Instant
   )
-  
-  /**
-   * Wrapper for server requests emitted via StateWriter.log().
-   * Allows targeting ANY session, not just the current one.
-   */
+
+  /** Wrapper for server requests emitted via StateWriter.log(). Allows targeting ANY session, not just the current one.
+    */
   case class ServerRequestForSession[SR](
     sessionId: SessionId,
     payload: SR
   )
-  
-  /**
-   * Server request with assigned ID after being added to state.
-   */
+
+  /** Server request with assigned ID after being added to state.
+    */
   case class ServerRequestWithContext[SR](
     sessionId: SessionId,
     requestId: RequestId,
@@ -151,10 +152,10 @@ package object sessionstatemachine:
     *   - Proper ordering: RequestId ordering is numeric (big-endian encoding), not lexicographic
     *   - No data duplication: sessionId and requestId are not stored in the value, only in the key
     */
-  type SessionSchema =
+  type SessionSchema[R, SR] =
     ("metadata", SessionId, SessionMetadata) *:
-      ("cache", (SessionId, RequestId), Any) *:
-      ("serverRequests", (SessionId, RequestId), PendingServerRequest[?]) *:
+      ("cache", (SessionId, RequestId), R) *:
+      ("serverRequests", (SessionId, RequestId), PendingServerRequest[SR]) *:
       ("lastServerRequestId", SessionId, RequestId) *:
       EmptyTuple
 
@@ -162,19 +163,17 @@ package object sessionstatemachine:
     */
   given HMap.KeyLike[SessionId] = HMap.KeyLike.forNewtype(SessionId)
 
-  /** KeyLike instance for composite (SessionId, RequestId) keys. Used by the cache prefix for efficient range queries
-    * and proper numeric ordering of RequestIds.
+  /** Helper type to concatenate SessionSchema with user schema.
     *
-    * Encoding format:
-    *   - 4 bytes: length of SessionId (big-endian Int)
-    *   - N bytes: SessionId as UTF-8 string
-    *   - 8 bytes: RequestId as big-endian Long
-    *
-    * This encoding ensures:
-    *   1. Sessions are grouped together (sorted by SessionId first) 2. Within a session, RequestIds are ordered
-    *      numerically (not lexicographically) 3. Range queries work efficiently: range((sid, rid1), (sid, rid2))
-    *      selects requests within the range
+    * @tparam R
+    *   Response marker type
+    * @tparam SR
+    *   Server request type
+    * @tparam UserSchema
+    *   User-defined schema
     */
+  type Schema[R, SR, UserSchema <: Tuple] = Tuple.Concat[SessionSchema[R, SR], UserSchema]
+
   given HMap.KeyLike[(SessionId, RequestId)] = new HMap.KeyLike[(SessionId, RequestId)]:
     import java.nio.charset.StandardCharsets
 
@@ -230,4 +229,47 @@ package object sessionstatemachine:
           (bytes(offset + 7).toLong & 0xff)
 
       (sessionId, RequestId(requestId))
+
+  /** Extension method to convert a response value to the intersection type required by SessionStateMachine.
+    *
+    * The intersection type `command.Response & R` ensures that:
+    *   - The response satisfies the specific command's Response type (compile-time checked via evidence)
+    *   - The response is compatible with the marker type R (for serialization)
+    *
+    * This provides a type-safe way to satisfy the intersection type constraint without manual casts.
+    *
+    * @param base
+    *   The base command (used to capture the base command type)
+    * @param c
+    *   The specific command instance (used to get c.Response type)
+    * @param ev
+    *   Evidence that A equals c.Response (ensures type safety)
+    * @tparam A
+    *   The response value type
+    * @tparam B
+    *   The base command type
+    * @tparam C
+    *   The specific command type (subtype of B)
+    * @return
+    *   The response cast to base.Response & A
+    *
+    * @example
+    *   {{{
+    * sealed trait KVResponse
+    * case class GetResult(value: String) extends KVResponse
+    *
+    * case class Get(key: String) extends Command:
+    *   type Response = GetResult
+    *
+    * protected def applyCommand(cmd: MyCommand, ...): StateWriter[..., cmd.Response & KVResponse] =
+    *   cmd match
+    *     case get @ Get(key) =>
+    *       val result = GetResult(lookupKey(key))
+    *       yield result.asResponseType(cmd, get)  // ✅ cmd is base, get is specific
+    *   }}}
+    */
+  extension [A](a: A)
+    def asResponseType[B <: Command, C <: B](base: B, c: C)(using ev: A =:= (c.Response)): base.Response & A =
+      a.asInstanceOf[base.Response & A]
+
 end sessionstatemachine

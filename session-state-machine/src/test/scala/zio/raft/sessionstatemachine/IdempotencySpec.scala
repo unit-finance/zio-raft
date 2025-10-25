@@ -2,10 +2,8 @@ package zio.raft.sessionstatemachine
 
 import zio.test.*
 import zio.test.Assertion.*
-import zio.{UIO, ZIO}
 import zio.raft.{Command, HMap, Index}
 import zio.raft.protocol.{SessionId, RequestId}
-import zio.stream.{Stream, ZStream}
 import java.time.Instant
 
 /**
@@ -20,21 +18,44 @@ object IdempotencySpec extends ZIOSpecDefault:
     case class Increment(by: Int) extends TestCommand:
       type Response = Int
   
+  // Response marker type - all command responses must be Int
+  type TestResponse = Int
+  
   import zio.prelude.Newtype
   object CounterKey extends Newtype[String]
   type CounterKey = CounterKey.Type
   given HMap.KeyLike[CounterKey] = HMap.KeyLike.forNewtype(CounterKey)
   
   type TestSchema = ("counter", CounterKey, Int) *: EmptyTuple
-  type CombinedSchema = Tuple.Concat[SessionSchema, TestSchema]
+  type CombinedSchema = Tuple.Concat[SessionSchema[TestResponse, String], TestSchema]
   
   val counterKey = CounterKey("value")
   
   // SR = String (the actual server request payload type)
-  class TestStateMachine extends SessionStateMachine[TestCommand, String, TestSchema]:
+  // Provide codecs for all value types in schema
+  import scodec.codecs.*
+  
+  // Simple dummy codec for Any (cache can store any type)
+  given scodec.Codec[Any] = scodec.Codec[String].upcast[Any]
+  
+  // Codec for Int (our counter value)
+  given scodec.Codec[Int] = int32
+  
+  // Use provided codecs from Codecs object
+  import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
+  
+  // PendingServerRequest[String] codec is automatically derived from utf8_32!
+  // Just need to cast for the ? wildcard in schema
+  given scodec.Codec[PendingServerRequest[?]] =
+    summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]
+  
+  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, TestSchema]
+    with ScodecSerialization[TestResponse, String, TestSchema]:
+    
+    val codecs = summon[HMap.TypeclassMap[CombinedSchema, scodec.Codec]]
     var callCount = 0  // Track how many times applyCommand is called
     
-    protected def applyCommand(cmd: TestCommand, createdAt: Instant): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], cmd.Response] =
+    protected def applyCommand(cmd: TestCommand, createdAt: Instant): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], cmd.Response & TestResponse] =
       callCount += 1
       cmd match
         case TestCommand.Increment(by) =>
@@ -44,7 +65,7 @@ object IdempotencySpec extends ZIOSpecDefault:
             newValue = current + by
             newState = state.updated["counter"](counterKey, newValue)
             _ <- StateWriter.set(newState)
-          } yield newValue.asInstanceOf[cmd.Response]
+          } yield newValue.asInstanceOf[cmd.Response & TestResponse]
     
     protected def handleSessionCreated(sid: SessionId, caps: Map[String, String], createdAt: Instant): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
       StateWriter.succeed(())
@@ -52,13 +73,9 @@ object IdempotencySpec extends ZIOSpecDefault:
     protected def handleSessionExpired(sid: SessionId, capabilities: Map[String, String], createdAt: Instant): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
       StateWriter.succeed(())
     
-    def takeSnapshot(state: HMap[CombinedSchema]): Stream[Nothing, Byte] =
-      ZStream.empty
+    // takeSnapshot and restoreFromSnapshot are now provided by SessionStateMachine base class!
     
-    def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[CombinedSchema]] =
-      ZIO.succeed(HMap.empty)
-    
-    def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
+    override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
       false
   
   def spec = suite("Idempotency with Composite Keys")(

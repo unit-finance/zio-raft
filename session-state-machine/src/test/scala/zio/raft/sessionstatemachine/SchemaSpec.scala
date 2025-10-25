@@ -27,13 +27,17 @@ object SchemaSpec extends ZIOSpecDefault:
     ("counter", CounterKey, Int) *:
     EmptyTuple
   
-  type CombinedSchema = Tuple.Concat[SessionSchema, TestUserSchema]
+  // Use concrete types for R and SR
+  type TestResponse = String  // Simple marker type for test
+  type TestServerReq = String
+  
+  type CombinedSchema = Tuple.Concat[SessionSchema[TestResponse, TestServerReq], TestUserSchema]
   
   def spec = suite("Schema with Composite Keys")(
     
     test("SessionSchema has composite key for cache") {
       val sessionId = SessionId("session-1")
-      val state = HMap.empty[SessionSchema]
+      val state = HMap.empty[SessionSchema[TestResponse, TestServerReq]]
       
       // Cache uses composite key (SessionId, RequestId)
       val withCache = state.updated["cache"](
@@ -48,7 +52,7 @@ object SchemaSpec extends ZIOSpecDefault:
     
     test("SessionSchema has composite key for serverRequests") {
       val sessionId = SessionId("session-1")
-      val state = HMap.empty[SessionSchema]
+      val state = HMap.empty[SessionSchema[TestResponse, TestServerReq]]
       
       // serverRequests uses composite key (SessionId, RequestId)
       val pending = PendingServerRequest(
@@ -98,7 +102,7 @@ object SchemaSpec extends ZIOSpecDefault:
     
     test("Composite keys enable range queries for session") {
       val sessionId = SessionId("session-1")
-      val state = HMap.empty[SessionSchema]
+      val state = HMap.empty[SessionSchema[TestResponse, TestServerReq]]
         .updated["cache"]((sessionId, RequestId(1)), "resp1")
         .updated["cache"]((sessionId, RequestId(5)), "resp5")
         .updated["cache"]((sessionId, RequestId(10)), "resp10")
@@ -117,7 +121,7 @@ object SchemaSpec extends ZIOSpecDefault:
     
     test("Numeric ordering works correctly for RequestIds") {
       val sessionId = SessionId("session-1")
-      val state = HMap.empty[SessionSchema]
+      val state = HMap.empty[SessionSchema[TestResponse, TestServerReq]]
         .updated["cache"]((sessionId, RequestId(9)), "nine")
         .updated["cache"]((sessionId, RequestId(42)), "forty-two")
         .updated["cache"]((sessionId, RequestId(100)), "hundred")

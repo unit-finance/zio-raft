@@ -34,6 +34,11 @@ import java.time.Instant
   *
   * @tparam UC
   *   User command type (extends Command with dependent Response type)
+  * @tparam R
+  *   Response marker type - a sealed trait or type that encompasses all possible command responses. This enables proper
+  *   serialization of cached responses. Each command's Response type must be a subtype of R (enforced via intersection
+  *   type: command.Response & R). Example: sealed trait MyResponse; case class GetResponse(value: String) extends
+  *   MyResponse
   * @tparam SR
   *   Server-initiated request payload type
   * @tparam UserSchema
@@ -63,15 +68,15 @@ import java.time.Instant
   * @see
   *   StateWriter for the state + writer monad used in abstract methods
   */
-abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
-    extends StateMachine[HMap[Tuple.Concat[SessionSchema, UserSchema]], SessionCommand[UC, SR]]:
+trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
+    extends StateMachine[HMap[Tuple.Concat[SessionSchema[R, SR], UserSchema]], SessionCommand[UC, SR]]:
 
-  /** Type alias for the complete schema (SessionSchema ++ UserSchema).
+  /** Type alias for the complete schema (SessionSchema[R, SR] ++ UserSchema).
     *
-    * This allows using `HMap[Schema]` instead of `HMap[Tuple.Concat[SessionSchema, UserSchema]]` throughout the
+    * This allows using `HMap[Schema]` instead of `HMap[Tuple.Concat[SessionSchema[R, SR], UserSchema]]` throughout the
     * implementation, making signatures cleaner.
     */
-  type Schema = Tuple.Concat[SessionSchema, UserSchema]
+  type Schema = Tuple.Concat[SessionSchema[R, SR], UserSchema]
 
   // ====================================================================================
   // ABSTRACT METHODS - Users must implement
@@ -91,33 +96,38 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
     * @param createdAt
     *   The timestamp when the command was created (use this instead of adding to command)
     * @return
-    *   StateWriter monad yielding the response and accumulating server requests via log
+    *   StateWriter monad yielding the response (must be subtype of R) and accumulating server requests via log
     *
     * @note
     *   Must be pure and deterministic
     * @note
     *   Must NOT throw exceptions - return errors in response payload
     * @note
-    *   Only receives and modifies UserSchema state
+    *   Return type is intersection: command.Response & R This ensures command response is compatible with response
+    *   marker type R for serialization
     * @note
     *   Use `.log(ServerRequestForSession(targetSessionId, payload))` to emit server requests
     *
     * @example
     *   {{{
-    * protected def applyCommand(command: UC, createdAt: Instant): StateWriter[HMap[Schema], ServerRequestForSession[SR], command.Response] =
+    * sealed trait MyResponse
+    * case class GetResponse(value: String) extends MyResponse
+    *
+    * case class GetCmd(key: String) extends Command:
+    *   type Response = GetResponse  // Must be subtype of MyResponse!
+    *
+    * protected def applyCommand(cmd: UC, createdAt: Instant): StateWriter[HMap[Schema], ServerRequestForSession[SR], cmd.Response & MyResponse] =
     *   for {
     *     state <- StateWriter.get[HMap[Schema]]
-    *     result = // ... compute result
-    *     newState = state.updated["myPrefix"](key, value)
-    *     _ <- StateWriter.set(newState)
-    *     _ <- StateWriter.log(ServerRequestForSession(targetSessionId, MyRequest(...)))  // Can target any session!
-    *   } yield CommandResponse(result)
+    *     result = GetResponse(state.get["kv"](key))  // Response is GetResponse & MyResponse
+    *     _ <- StateWriter.log(ServerRequestForSession(targetSessionId, notification))
+    *   } yield result
     *   }}}
     */
   protected def applyCommand(
     command: UC,
     createdAt: Instant
-  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], command.Response]
+  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], command.Response & R]
 
   /** Handle session creation event.
     *
@@ -199,38 +209,38 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
     *   The session command to process
     * @return
     *   State transition with command-specific response
-    *   
-    * @note @unchecked is needed because SessionCommand is a GADT with dependent types.
-    *       Each case class has its own Response type, and the compiler cannot verify
-    *       exhaustiveness due to type erasure. This is safe because we handle all
-    *       sealed trait cases explicitly.
+    *
+    * @note
+    *   \@unchecked is needed because SessionCommand is a GADT with dependent types. Each case class has its own
+    *   Response type, and the compiler cannot verify exhaustiveness due to type erasure. This is safe because we handle
+    *   all sealed trait cases explicitly.
     */
   final def apply(command: SessionCommand[UC, SR]): State[HMap[Schema], command.Response] =
     command match
       case cmd: SessionCommand.ClientRequest[UC, SR] @unchecked =>
-        handleClientRequest(cmd).asInstanceOf[State[HMap[Schema], command.Response]]
+        handleClientRequest(cmd).map(_.asResponseType(command, cmd))
 
       case cmd: SessionCommand.ServerRequestAck[SR] @unchecked =>
-        handleServerRequestAck(cmd).asInstanceOf[State[HMap[Schema], command.Response]]
+        handleServerRequestAck(cmd).map(_.asResponseType(command, cmd))
 
       case cmd: SessionCommand.CreateSession[SR] @unchecked =>
-        handleCreateSession(cmd).asInstanceOf[State[HMap[Schema], command.Response]]
+        handleCreateSession(cmd).map(_.asResponseType(command, cmd))
 
       case cmd: SessionCommand.SessionExpired[SR] @unchecked =>
-        handleSessionExpired_internal(cmd).asInstanceOf[State[HMap[Schema], command.Response]]
+        handleSessionExpired_internal(cmd).map(_.asResponseType(command, cmd))
 
       case cmd: SessionCommand.GetRequestsForRetry[SR] @unchecked =>
-        handleGetRequestsForRetry(cmd).asInstanceOf[State[HMap[Schema], command.Response]]
+        handleGetRequestsForRetry(cmd).map(_.asResponseType(command, cmd))
 
-  /** Default snapshot behavior - delegates to user.
+  /** Snapshot behavior - users must implement.
     *
-    * Users must implement this in their concrete classes.
+    * Users can implement custom serialization or use ScodecSerialization mixin trait.
     */
   def takeSnapshot(state: HMap[Schema]): Stream[Nothing, Byte]
 
-  /** Default restore behavior - delegates to user.
+  /** Restore behavior - users must implement.
     *
-    * Users must implement this in their concrete classes.
+    * Users can implement custom deserialization or use ScodecSerialization mixin trait.
     */
   def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[Schema]]
 
@@ -281,7 +291,7 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
     */
   private def cacheResponse(
     key: (SessionId, RequestId),
-    response: Any
+    response: R
   ): State[HMap[Schema], Unit] =
     State.update(_.updated["cache"](key, response))
 
@@ -298,7 +308,7 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
         (cmd.sessionId, RequestId.zero),
         (cmd.sessionId, upperBoundExclusive)
       ).map(_._1)
-      
+
       // Remove all acknowledged requests in one efficient operation
       state.removedAll["serverRequests"](keysToRemove)
     }
@@ -449,7 +459,6 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
 
         (allRequestsWithContext, finalState)
       }
-
 
   /** Remove all session data when session expires.
     */

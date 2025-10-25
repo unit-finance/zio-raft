@@ -134,15 +134,30 @@ package object sessionstatemachine:
         ((log, value), ev.flip(newState))
       }
 
+  /** Error type for request handling failures.
+    */
+  enum RequestError:
+    /** Response was cached but has been evicted. Client must create a new session.
+      *
+      * This error occurs when:
+      *   1. Client retries a request with requestId < highestLowestRequestIdSeen for the session 2. The response is not
+      *      in the cache (was evicted via cleanupCache)
+      *
+      * Per Raft dissertation Chapter 6.3, the client should create a new session and retry the operation.
+      */
+    case ResponseEvicted(sessionId: SessionId, requestId: RequestId)
+
   /** Fixed schema for session management state with typed keys.
     *
-    * This schema defines 4 prefixes with their key and value types:
+    * This schema defines 5 prefixes with their key and value types:
     *   - "metadata": (SessionId, SessionMetadata) - session information
-    *   - "cache": ((SessionId, RequestId), Any) - cached responses with composite key for efficient range queries and
+    *   - "cache": ((SessionId, RequestId), R) - cached responses with composite key for efficient range queries and
     *     streaming
     *   - "serverRequests": ((SessionId, RequestId), PendingServerRequest[?]) - pending requests with composite key for
     *     efficiency
     *   - "lastServerRequestId": (SessionId, RequestId) - last assigned server request ID per session
+    *   - "highestLowestRequestIdSeen": (SessionId, RequestId) - highest lowestRequestId acknowledged by client (for
+    *     eviction detection)
     *
     * Both cache and serverRequests use composite keys (SessionId, RequestId) for better performance:
     *   - Direct key access: O(log n) lookups
@@ -151,12 +166,20 @@ package object sessionstatemachine:
     *   - Streaming-friendly: Each entry is a separate key-value pair, not nested collections
     *   - Proper ordering: RequestId ordering is numeric (big-endian encoding), not lexicographic
     *   - No data duplication: sessionId and requestId are not stored in the value, only in the key
+    *
+    * The highestLowestRequestIdSeen prefix enables detection of evicted responses:
+    *   - Client sends lowestRequestId indicating "I have received all responses < this ID"
+    *   - We track the highest lowestRequestId value we've seen from the client
+    *   - When a ClientRequest arrives, we check if requestId < highestLowestRequestIdSeen
+    *   - If yes and response is not in cache, we know it was evicted (client already acknowledged it)
+    *   - This correctly handles out-of-order requests while preventing re-execution of acknowledged commands
     */
   type SessionSchema[R, SR] =
     ("metadata", SessionId, SessionMetadata) *:
       ("cache", (SessionId, RequestId), R) *:
       ("serverRequests", (SessionId, RequestId), PendingServerRequest[SR]) *:
       ("lastServerRequestId", SessionId, RequestId) *:
+      ("highestLowestRequestIdSeen", SessionId, RequestId) *:
       EmptyTuple
 
   /** KeyLike instance for SessionId keys. Used by metadata, serverRequests, and lastServerRequestId prefixes.

@@ -114,6 +114,43 @@ object HMapTypedKeysSpec extends ZIOSpecDefault:
         rangeResults.exists((k, v) => k == UserId("user005") && v.name == "Bob"),
         rangeResults.exists((k, v) => k == UserId("user010") && v.name == "Charlie")
       )
+    },
+    
+    test("removedAll removes multiple entries in one operation") {
+      val hmap = HMap.empty[TestSchema]
+        .updated["users"](UserId("u1"), UserData("Alice", "alice@example.com"))
+        .updated["users"](UserId("u2"), UserData("Bob", "bob@example.com"))
+        .updated["users"](UserId("u3"), UserData("Charlie", "charlie@example.com"))
+        .updated["users"](UserId("u4"), UserData("David", "david@example.com"))
+      
+      // Remove multiple users at once
+      val cleaned = hmap.removedAll["users"](List(UserId("u1"), UserId("u3")))
+      
+      assertTrue(
+        cleaned.get["users"](UserId("u1")).isEmpty &&
+        cleaned.get["users"](UserId("u2")).isDefined &&
+        cleaned.get["users"](UserId("u3")).isEmpty &&
+        cleaned.get["users"](UserId("u4")).isDefined
+      )
+    },
+    
+    test("exists checks if any entry satisfies predicate with short-circuit") {
+      val hmap = HMap.empty[TestSchema]
+        .updated["users"](UserId("u1"), UserData("Alice", "alice@example.com"))
+        .updated["users"](UserId("u2"), UserData("Bob", "bob@example.com"))
+        .updated["users"](UserId("u3"), UserData("Charlie", "charlie@example.com"))
+      
+      // Check if any user has name "Bob"
+      val hasBob = hmap.exists["users"] { (_, userData) =>
+        userData.name == "Bob"
+      }
+      
+      // Check if any user has name "Zoe" (doesn't exist)
+      val hasZoe = hmap.exists["users"] { (_, userData) =>
+        userData.name == "Zoe"
+      }
+      
+      assertTrue(hasBob && !hasZoe)
     }
   )
 

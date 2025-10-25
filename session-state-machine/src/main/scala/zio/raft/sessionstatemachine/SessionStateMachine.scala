@@ -199,6 +199,11 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
     *   The session command to process
     * @return
     *   State transition with command-specific response
+    *   
+    * @note @unchecked is needed because SessionCommand is a GADT with dependent types.
+    *       Each case class has its own Response type, and the compiler cannot verify
+    *       exhaustiveness due to type erasure. This is safe because we handle all
+    *       sealed trait cases explicitly.
     */
   final def apply(command: SessionCommand[UC, SR]): State[HMap[Schema], command.Response] =
     command match
@@ -285,7 +290,18 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
     * Acknowledging request N removes all pending requests with ID ≤ N.
     */
   private def handleServerRequestAck(cmd: SessionCommand.ServerRequestAck[SR]): State[HMap[Schema], Unit] =
-    acknowledgeServerRequests(cmd.sessionId, cmd.requestId)
+    State.update { state =>
+      // Find all requests for this session with requestId <= ackRequestId
+      // Range is [from, until), so we use (sessionId, RequestId.zero) to (sessionId, ackRequestId + 1)
+      val upperBoundExclusive = cmd.requestId.next
+      val keysToRemove = state.range["serverRequests"](
+        (cmd.sessionId, RequestId.zero),
+        (cmd.sessionId, upperBoundExclusive)
+      ).map(_._1)
+      
+      // Remove all acknowledged requests in one efficient operation
+      state.removedAll["serverRequests"](keysToRemove)
+    }
 
   /** Handle CreateSession command.
     */
@@ -434,27 +450,6 @@ abstract class SessionStateMachine[UC <: Command, SR, UserSchema <: Tuple]
         (allRequestsWithContext, finalState)
       }
 
-  /** Acknowledge server requests with cumulative acknowledgment.
-    *
-    * Acknowledging request N removes all pending requests with ID ≤ N. Uses range queries to efficiently find and
-    * remove acknowledged requests.
-    */
-  private def acknowledgeServerRequests(
-    sessionId: SessionId,
-    ackRequestId: RequestId
-  ): State[HMap[Schema], Unit] =
-    State.update { state =>
-      // Find all requests for this session with requestId <= ackRequestId
-      // Range is [from, until), so we use (sessionId, RequestId.zero) to (sessionId, ackRequestId + 1)
-      val nextRequestId = ackRequestId.next
-      val keysToRemove = state.range["serverRequests"](
-        (sessionId, RequestId.zero),
-        (sessionId, nextRequestId)
-      ).map(_._1)
-
-      // Remove all acknowledged requests in one efficient operation
-      state.removedAll["serverRequests"](keysToRemove)
-    }
 
   /** Remove all session data when session expires.
     */

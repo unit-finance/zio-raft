@@ -3,6 +3,7 @@ package zio.raft
 import zio.raft.protocol.{RequestId, SessionId}
 import zio.prelude.fx.ZPure
 import zio.Chunk
+import java.time.Instant
 
 /** Session State Machine Framework package.
   *
@@ -16,6 +17,48 @@ import zio.Chunk
   *   - SessionCommand: ADT of commands the session state machine accepts
   */
 package object sessionstatemachine:
+  
+  /**
+   * Metadata associated with a client session.
+   * 
+   * @param capabilities Key-value pairs describing client capabilities
+   * @param createdAt Timestamp when the session was created
+   * @note sessionId is NOT stored here - it's the key in the HMap
+   */
+  case class SessionMetadata(
+    capabilities: Map[String, String],
+    createdAt: Instant
+  )
+  
+  /**
+   * Server-initiated request awaiting acknowledgment.
+   * 
+   * @param payload The actual request data
+   * @param lastSentAt Timestamp when request was last sent
+   * @note id and sessionId are in the HMap key, not duplicated here
+   */
+  case class PendingServerRequest[SR](
+    payload: SR,
+    lastSentAt: Instant
+  )
+  
+  /**
+   * Wrapper for server requests emitted via StateWriter.log().
+   * Allows targeting ANY session, not just the current one.
+   */
+  case class ServerRequestForSession[SR](
+    sessionId: SessionId,
+    payload: SR
+  )
+  
+  /**
+   * Server request with assigned ID after being added to state.
+   */
+  case class ServerRequestWithContext[SR](
+    sessionId: SessionId,
+    requestId: RequestId,
+    payload: SR
+  )
 
   /** Type alias combining State monad with Writer monad for server requests.
     *

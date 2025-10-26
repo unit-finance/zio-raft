@@ -318,7 +318,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
               case Right(None)              => true // Command timed out - leader couldn't commit
               case Left(_: NotALeaderError) => true // Leader stepped down due to isolation
               case _                        => false
-              // Any other result is unexpected
+            // Any other result is unexpected
           )
       )
     } @@ TestAspect.timeout(5.seconds)

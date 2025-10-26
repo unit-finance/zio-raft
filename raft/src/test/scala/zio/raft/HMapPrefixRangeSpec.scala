@@ -69,7 +69,7 @@ object HMapPrefixRangeSpec extends ZIOSpecDefault:
       // Lower bound should match input
       assertTrue(lower.drop(1).sameElements(prefixBytes)) &&
       // Upper bound should carry: 0xBF + 1 = 0xC0, but might need carry
-      // Actually E0 A0 BF -> E0 A1 00 (carry from BF->C0 doesn't work, carry to A0->A1)
+      // Actually E0 A0 BF -> E0 A1 00 (since 0xBF + 1 = 0xC0, which is outside the valid range for that UTF-8 byte position, the carry propagates to the previous byte, incrementing 0xA0 to 0xA1 and setting the current byte to 0x00)
       assertTrue(compareUnsigned(upper, lower) > 0)
     }
 

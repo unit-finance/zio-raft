@@ -126,3 +126,9 @@ object InstallSnapshotResult:
     done: Boolean
   ) extends InstallSnapshotResult[A]
   case class Failure[A <: Command](from: MemberId, term: Term, index: Index) extends InstallSnapshotResult[A]
+
+sealed trait StateNotification
+object StateNotification:
+  case object SteppedUp extends StateNotification
+  case class SteppedDown(leaderId: Option[MemberId]) extends StateNotification
+  case class LeaderChanged(leaderId: MemberId) extends StateNotification

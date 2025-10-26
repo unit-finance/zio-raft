@@ -119,8 +119,10 @@ final case class HMap[M <: Tuple](private val m: TreeMap[Array[Byte], Any] =
     * Format: [1 byte: prefix length] ++ [N bytes: prefix UTF-8] ++ [key bytes...]
     *
     * Returns (lowerBound, upperBound) where lowerBound is inclusive and upperBound is exclusive.
+    *
+    * Package-private for testing.
     */
-  private def prefixRange[P <: String & Singleton: ValueOf](): (Array[Byte], Array[Byte]) =
+  private[raft] def prefixRange[P <: String & Singleton: ValueOf](): (Array[Byte], Array[Byte]) =
     val prefixBytes = valueOf[P].getBytes(StandardCharsets.UTF_8)
     val prefixLength = prefixBytes.length
 

@@ -229,8 +229,8 @@ This feature depends on the existing client-server library. During specification
 **Current behavior**: Client-server protocol does not include this field in requests, so the server has no way to know which cached responses can be safely discarded.
 
 **Required behavior**: 
-- Client MUST include `lowestPendingSequenceNumber` field in every request
-- Server MUST discard all cached responses for the session with sequence numbers lower than this value
+- Client MUST include `lowestPendingRequestId` field in every request
+- Server MUST discard all cached responses for the session with sequence numbers lower than this value (exclusive)
 - This allows deterministic, client-driven cache cleanup instead of relying on time-based or size-based eviction
 
 **Impact on this feature**: Without this protocol:

@@ -141,8 +141,8 @@ package object sessionstatemachine:
     /** Response was cached but has been evicted. Client must create a new session.
       *
       * This error occurs when:
-      *   1. Client retries a request with requestId <= highestLowestRequestIdSeen for the session 2. The response is
-      *      not in the cache (was evicted via cleanupCache)
+      *   1. Client retries a request with requestId < highestLowestPendingRequestIdSeen for the session 2. The response
+      *      is not in the cache (was evicted via cleanupCache)
       *
       * Per Raft dissertation Chapter 6.3, the client should create a new session and retry the operation.
       */
@@ -157,7 +157,7 @@ package object sessionstatemachine:
     *   - "serverRequests": ((SessionId, RequestId), PendingServerRequest[?]) - pending requests with composite key for
     *     efficiency
     *   - "lastServerRequestId": (SessionId, RequestId) - last assigned server request ID per session
-    *   - "highestLowestRequestIdSeen": (SessionId, RequestId) - highest lowestRequestId acknowledged by client (for
+    *   - "highestLowestPendingRequestIdSeen": (SessionId, RequestId) - highest lowestPendingRequestId observed (for
     *     eviction detection)
     *
     * Both cache and serverRequests use composite keys (SessionId, RequestId) for better performance:
@@ -168,10 +168,10 @@ package object sessionstatemachine:
     *   - Proper ordering: RequestId ordering is numeric (big-endian encoding), not lexicographic
     *   - No data duplication: sessionId and requestId are not stored in the value, only in the key
     *
-    * The highestLowestRequestIdSeen prefix enables detection of evicted responses:
-    *   - Client sends lowestRequestId indicating "I have received all responses <= this ID (inclusive)"
-    *   - We track the highest lowestRequestId value we've seen from the client
-    *   - When a ClientRequest arrives, we check if requestId <= highestLowestRequestIdSeen
+    * The highestLowestPendingRequestIdSeen prefix enables detection of evicted responses:
+    *   - Client sends lowestPendingRequestId indicating the lowest sequence number without a response
+    *   - We track the highest such value received from the client
+    *   - When a ClientRequest arrives, we check if requestId < highestLowestPendingRequestIdSeen
     *   - If yes and response is not in cache, we know it was evicted (client already acknowledged it)
     *   - This correctly handles out-of-order requests while preventing re-execution of acknowledged commands
     */
@@ -180,7 +180,7 @@ package object sessionstatemachine:
       ("cache", (SessionId, RequestId), R) *:
       ("serverRequests", (SessionId, RequestId), PendingServerRequest[SR]) *:
       ("lastServerRequestId", SessionId, RequestId) *:
-      ("highestLowestRequestIdSeen", SessionId, RequestId) *:
+      ("highestLowestPendingRequestIdSeen", SessionId, RequestId) *:
       EmptyTuple
 
   /** KeyLike instance for SessionId keys. Used by metadata, serverRequests, and lastServerRequestId prefixes.

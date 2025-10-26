@@ -28,8 +28,9 @@ import java.time.Instant
   *   - Response caching for duplicate requests
   *   - Server-initiated request management with cumulative acknowledgment
   *   - Session lifecycle coordination
-  *   - Cache cleanup driven by client-provided lowestRequestId (inclusive: removes requestId <= lowestRequestId)
-  *   - Evicted response detection: if requestId <= highestLowestRequestIdSeen and not in cache, return
+  *   - Cache cleanup driven by client-provided lowestPendingRequestId (exclusive: removes requestId <
+  *     lowestPendingRequestId)
+  *   - Evicted response detection: if requestId < highestLowestPendingRequestIdSeen and not in cache, return
   *     RequestError.ResponseEvicted
   *
   * ## Type Parameters
@@ -269,17 +270,17 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     *
     * Implementation of Raft dissertation Chapter 6.3 session management protocol:
     *   1. Check cache for (sessionId, requestId) 2. If cache hit, return cached response 3. If cache miss, check if
-    *      requestId <= highestLowestRequestIdSeen → response was evicted, return error 4. If cache miss + requestId >
-    *      highestLowestRequestIdSeen, execute command and update highestLowestRequestIdSeen
+    *      requestId < highestLowestPendingRequestIdSeen → response was evicted, return error 4. If cache miss +
+    *      requestId ≥ highestLowestPendingRequestIdSeen, execute command and update highestLowestPendingRequestIdSeen
     *
-    * This correctly handles out-of-order requests. The lowestRequestId from the client tells us which responses have
-    * been acknowledged (inclusive) and can be evicted. We only update highestLowestRequestIdSeen for requests we
-    * actually process.
+    * This correctly handles out-of-order requests. The lowestPendingRequestId from the client tells us the lowest
+    * sequence number without a response; we can evict responses with lower numbers. We only update
+    * highestLowestPendingRequestIdSeen for requests we actually process.
     */
   private def handleClientRequest(cmd: SessionCommand.ClientRequest[UC, SR])
     : State[HMap[Schema], Either[RequestError, (cmd.command.Response, List[ServerRequestEnvelope[SR]])]] =
     for
-      highestLowestSeen <- getHighestLowestRequestIdSeen(cmd.sessionId)
+      highestLowestSeen <- getHighestLowestPendingRequestIdSeen(cmd.sessionId)
       cachedOpt <- getCachedResponse((cmd.sessionId, cmd.requestId))
       result <- cachedOpt match
         case Some(cachedResponse) =>
@@ -288,17 +289,17 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
 
         case None =>
           // Cache miss - check if response was evicted
-          // If requestId <= highestLowestRequestIdSeen, client has acknowledged receiving this response
-          if cmd.requestId.isLowerOrEqual(highestLowestSeen) then
-            // Client said "I have responses for all requestIds <= highestLowest", so this was evicted
+          // If requestId < highestLowestPendingRequestIdSeen, client has acknowledged receiving this response
+          if cmd.requestId.isLowerThan(highestLowestSeen) then
+            // Client said "I have responses for all requestIds < highestLowestPending", so this was evicted
             State.succeed(Left(RequestError.ResponseEvicted(cmd.sessionId, cmd.requestId)))
           else
-            // requestId >= highestLowestRequestIdSeen
+            // requestId >= highestLowestPendingRequestIdSeen
             // This is a valid request (not yet acknowledged), execute the command
             for
-              // Update highestLowestRequestIdSeen ONLY when actually executing a new request
-              _ <- updateHighestLowestRequestIdSeen(cmd.sessionId, cmd.lowestRequestId)
-              _ <- cleanupCache(cmd.sessionId, cmd.lowestRequestId)
+              // Update highestLowestPendingRequestIdSeen ONLY when actually executing a new request
+              _ <- updateHighestLowestPendingRequestIdSeen(cmd.sessionId, cmd.lowestPendingRequestId)
+              _ <- cleanupCache(cmd.sessionId, cmd.lowestPendingRequestId)
               (serverRequestsLog, response) <- applyCommand(cmd.command, cmd.createdAt).withLog
               assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
               _ <- cacheResponse((cmd.sessionId, cmd.requestId), response)
@@ -318,31 +319,31 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
   ): State[HMap[Schema], Unit] =
     State.update(_.updated["cache"](key, response))
 
-  /** Get the highest lowestRequestId seen from the client for a session.
+  /** Get the highest lowestPendingRequestId seen from the client for a session.
     *
-    * This tracks the highest value of lowestRequestId that the client has sent, indicating which responses the client
-    * has acknowledged receiving.
+    * This tracks the highest value of lowestPendingRequestId that the client has sent, indicating below which requestId
+    * responses have been acknowledged and can be discarded.
     *
-    * Returns RequestId.zero if no lowestRequestId has been seen yet (no requests have been acknowledged).
+    * Returns RequestId.zero if no lowestPendingRequestId has been seen yet (no requests have been acknowledged).
     */
-  private def getHighestLowestRequestIdSeen(sessionId: SessionId): State[HMap[Schema], RequestId] =
-    State.get.map(_.get["highestLowestRequestIdSeen"](sessionId).getOrElse(RequestId.zero))
+  private def getHighestLowestPendingRequestIdSeen(sessionId: SessionId): State[HMap[Schema], RequestId] =
+    State.get.map(_.get["highestLowestPendingRequestIdSeen"](sessionId).getOrElse(RequestId.zero))
 
-  /** Update the highest lowestRequestId seen from the client (only if lowestRequestId > current highest).
+  /** Update the highest lowestPendingRequestId seen from the client (only if it increased).
     *
-    * The lowestRequestId from the client indicates "I have received all responses for requestIds <= this value
-    * (inclusive)". We track the highest such value to detect evicted responses.
+    * The lowestPendingRequestId from the client indicates "I have not yet received a response for this requestId". We
+    * discard cached responses with lower requestIds and track the highest such value to detect evicted responses.
     */
-  private def updateHighestLowestRequestIdSeen(
+  private def updateHighestLowestPendingRequestIdSeen(
     sessionId: SessionId,
-    lowestRequestId: RequestId
+    lowestPendingRequestId: RequestId
   ): State[HMap[Schema], Unit] =
     State.update(state =>
-      state.get["highestLowestRequestIdSeen"](sessionId) match
-        case Some(current) if !lowestRequestId.isGreaterThan(current) =>
-          state // Don't update if lowestRequestId is not higher
+      state.get["highestLowestPendingRequestIdSeen"](sessionId) match
+        case Some(current) if !lowestPendingRequestId.isGreaterThan(current) =>
+          state // Don't update if not higher
         case _ =>
-          state.updated["highestLowestRequestIdSeen"](sessionId, lowestRequestId)
+          state.updated["highestLowestPendingRequestIdSeen"](sessionId, lowestPendingRequestId)
     )
 
   /** Handle ServerRequestAck with cumulative acknowledgment.
@@ -512,32 +513,33 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
         .removedAll["serverRequests"](serverRequestKeysToRemove)
         .removed["metadata"](sessionId)
         .removed["lastServerRequestId"](sessionId)
-        .removed["highestLowestRequestIdSeen"](sessionId)
+        .removed["highestLowestPendingRequestIdSeen"](sessionId)
     }
 
   // ====================================================================================
   // HELPER METHODS - All return State[HMap[Schema], A] for composition
   // ====================================================================================
 
-  /** Clean up cached responses based on lowestRequestId (Lowest Sequence Number Protocol).
+  /** Clean up cached responses based on lowestPendingRequestId (Lowest Sequence Number Protocol).
     *
-    * Removes all cached responses for the session with requestId <= lowestRequestId. This allows the client to control
-    * cache cleanup by telling the server which responses it no longer needs (Chapter 6.3 of Raft dissertation).
+    * Removes all cached responses for the session with requestId < lowestPendingRequestId. This allows the client to
+    * control cache cleanup by telling the server the lowest requestId without a response (Chapter 6.3 of Raft
+    * dissertation).
     *
-    * The client sends lowestRequestId to indicate "I have received all responses up to and including this ID".
+    * The client sends lowestPendingRequestId to indicate "I have not yet received a response for this ID".
     *
     * Uses range queries to efficiently find and remove old cache entries.
     */
   private def cleanupCache(
     sessionId: SessionId,
-    lowestRequestId: RequestId
+    lowestPendingRequestId: RequestId
   ): State[HMap[Schema], Unit] =
     State.update { state =>
-      // Use range to find all cache entries for this session with requestId <= lowestRequestId
-      // Range is [from, until), so to include lowestRequestId, we use lowestRequestId.next as upper bound
+      // Use range to find all cache entries for this session with requestId < lowestPendingRequestId
+      // Range is [from, until), so use lowestPendingRequestId as the exclusive upper bound
       val keysToRemove = state.range["cache"](
         (sessionId, RequestId.zero),
-        (sessionId, lowestRequestId.next)
+        (sessionId, lowestPendingRequestId)
       ).map((key, _) => key)
 
       // Remove all old cache entries in one efficient operation

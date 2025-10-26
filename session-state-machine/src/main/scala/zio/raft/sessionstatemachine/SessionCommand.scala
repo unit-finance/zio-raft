@@ -51,7 +51,7 @@ object SessionCommand:
     createdAt: Instant,
     sessionId: SessionId,
     requestId: RequestId,
-    lowestRequestId: RequestId,
+    lowestPendingRequestId: RequestId,
     command: UC
   ) extends SessionCommand[UC, SR]:
     // Response type can be an error or the user command's response with server request envelopes

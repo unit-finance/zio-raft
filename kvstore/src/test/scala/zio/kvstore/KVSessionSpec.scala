@@ -22,7 +22,7 @@ object KVSessionSpec extends ZIOSpecDefault:
         createdAt = now,
         sessionId = sessionId,
         requestId = RequestId(1),
-        lowestRequestId = RequestId(1),
+        lowestPendingRequestId = RequestId(1),
         command = KVCommand.Set("k", "v")
       )
       val (s2, _) = sm.apply(set).run(s1)
@@ -36,7 +36,7 @@ object KVSessionSpec extends ZIOSpecDefault:
         createdAt = now,
         sessionId = sessionId,
         requestId = RequestId(2),
-        lowestRequestId = RequestId(1),
+        lowestPendingRequestId = RequestId(1),
         command = KVCommand.Get("k")
       )
       val (_, result) = sm.apply(get).run(s3)

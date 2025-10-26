@@ -82,9 +82,9 @@
   - **Content**: Uses composite keys (SessionId, RequestId) for cache and serverRequests
   - **Note**: Byte-based HMap keys with proper numeric ordering
 
-- [x] **T011** ✅ DONE - SessionCommand ADT with ServerRequestForSession wrapper
+ - [x] **T011** ✅ DONE - SessionCommand ADT with ServerRequestForSession wrapper
   - **File**: `session-state-machine/src/main/scala/zio/raft/sessionstatemachine/SessionCommand.scala`
-  - **Cases**: ClientRequest (with lowestRequestId), ServerRequestAck, CreateSession, SessionExpired, GetRequestsForRetry
+  - **Cases**: ClientRequest (with lowestPendingRequestId), ServerRequestAck, CreateSession, SessionExpired, GetRequestsForRetry
   - **Note**: Added ServerRequestForSession wrapper per PR comment
 
 ---
@@ -148,7 +148,7 @@
 
 - [x] **T011** ✅ SessionCommand ADT with ServerRequestForSession wrapper
   - **File**: `session-state-machine/src/main/scala/zio/raft/sessionstatemachine/SessionCommand.scala`
-  - **Note**: Added ServerRequestForSession wrapper per PR comment, added lowestRequestId to ClientRequest
+  - **Note**: Added ServerRequestForSession wrapper per PR comment, added lowestPendingRequestId to ClientRequest
 
 - [x] **T019-T027** ✅ SessionStateMachine fully implemented
   - **File**: `session-state-machine/src/main/scala/zio/raft/sessionstatemachine/SessionStateMachine.scala`

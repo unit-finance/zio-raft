@@ -162,7 +162,7 @@ object SessionCommand:
   case class ClientRequest[UC <: Command](
     sessionId: SessionId,
     requestId: RequestId,
-    lowestRequestId: RequestId,  // For cache cleanup (Lowest Sequence Number Protocol)
+    lowestPendingRequestId: RequestId,  // For cache cleanup (Lowest Sequence Number Protocol, exclusive: evict < this)
     command: UC  // Already decoded! UC is a Command subtype
   ) extends SessionCommand[UC]:
     type Response = (command.Response, List[Any])  // (user response, server requests)

@@ -23,7 +23,7 @@ object KVStateMachineSpec extends ZIOSpecDefault:
         createdAt = now,
         sessionId = sessionId,
         requestId = RequestId(1),
-        lowestRequestId = RequestId(1),
+        lowestPendingRequestId = RequestId(1),
         command = KVCommand.Set("a", "v1")
       )
       val (s2, _) = sm.apply(set1).run(s1)
@@ -33,7 +33,7 @@ object KVStateMachineSpec extends ZIOSpecDefault:
         createdAt = now,
         sessionId = sessionId,
         requestId = RequestId(1),
-        lowestRequestId = RequestId(1),
+        lowestPendingRequestId = RequestId(1),
         command = KVCommand.Set("a", "v2")
       )
       val (s3, _) = sm.apply(set2).run(s2)
@@ -42,7 +42,7 @@ object KVStateMachineSpec extends ZIOSpecDefault:
         createdAt = now,
         sessionId = sessionId,
         requestId = RequestId(2),
-        lowestRequestId = RequestId(1),
+        lowestPendingRequestId = RequestId(1),
         command = KVCommand.Get("a")
       )
       val (_, result) = sm.apply(get).run(s3)

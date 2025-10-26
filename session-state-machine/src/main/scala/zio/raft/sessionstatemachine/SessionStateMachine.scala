@@ -29,7 +29,8 @@ import java.time.Instant
   *   - Server-initiated request management with cumulative acknowledgment
   *   - Session lifecycle coordination
   *   - Cache cleanup driven by client-provided lowestRequestId (inclusive: removes requestId <= lowestRequestId)
-  *   - Evicted response detection: if requestId <= highestLowestRequestIdSeen and not in cache, return RequestError.ResponseEvicted
+  *   - Evicted response detection: if requestId <= highestLowestRequestIdSeen and not in cache, return
+  *     RequestError.ResponseEvicted
   *
   * ## Type Parameters
   *

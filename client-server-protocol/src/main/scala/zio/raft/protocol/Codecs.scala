@@ -6,7 +6,6 @@ import scodec.codecs.*
 import java.time.Instant
 import zio.raft.protocol.RejectionReason.*
 import zio.raft.protocol.SessionCloseReason.*
-import zio.raft.protocol.CloseReason.*
 
 /** scodec binary serialization codecs for ZIO Raft protocol messages.
   *
@@ -174,7 +173,7 @@ object Codecs {
   /** Codec for ClientRequest message.
     */
   implicit val clientRequestCodec: Codec[ClientRequest] = {
-    (requestIdCodec :: payloadCodec :: instantCodec).as[ClientRequest]
+    (requestIdCodec :: requestIdCodec :: payloadCodec :: instantCodec).as[ClientRequest]
   }
 
   /** Codec for ServerRequestAck message.
@@ -256,6 +255,22 @@ object Codecs {
     (requestIdCodec :: payloadCodec :: instantCodec).as[ServerRequest]
   }
 
+  /** Codec for RequestErrorReason.
+    */
+  implicit val requestErrorReasonCodec: Codec[RequestErrorReason] = {
+    discriminated[RequestErrorReason]
+      .by(uint8)
+      .subcaseP(1) { case RequestErrorReason.ResponseEvicted => RequestErrorReason.ResponseEvicted }(provide(
+        RequestErrorReason.ResponseEvicted
+      ))
+  }
+
+  /** Codec for RequestError message.
+    */
+  implicit val requestErrorCodec: Codec[RequestError] = {
+    (requestIdCodec :: requestErrorReasonCodec).as[RequestError]
+  }
+
   /** Discriminated codec for all ServerMessage types.
     */
   implicit val serverMessageCodec: Codec[ServerMessage] = {
@@ -268,6 +283,7 @@ object Codecs {
       .typecase(5, keepAliveResponseCodec)
       .typecase(6, clientResponseCodec)
       .typecase(7, serverRequestCodec)
+      .typecase(8, requestErrorCodec)
   }
 
   // ============================================================================

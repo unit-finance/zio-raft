@@ -252,6 +252,35 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
           assertTrue(clientReq.requestId == RequestId.fromLong(1L))
       }
 
+      test("T002: includes lowestPendingRequestId = min(pending) on ClientRequest") {
+        val port = findOpenPort
+        for {
+          mockServer <- ZSocket.server
+          _ <- mockServer.bind(s"tcp://0.0.0.0:$port")
+
+          client <- RaftClient.make(
+            clusterMembers = Map(MemberId.fromString("node1") -> s"tcp://127.0.0.1:$port"),
+            capabilities = Map("test" -> "v1")
+          )
+          _ <- client.run().forkScoped
+          _ <- client.connect()
+
+          (routingId, createMsg) <- expectMessage[CreateSession](mockServer)
+
+          sessionId <- SessionId.generate()
+          _ <- sendServerMessage(mockServer, routingId, SessionCreated(sessionId, createMsg.nonce))
+
+          // Submit two commands quickly so the second is sent while first is pending
+          _ <- client.submitCommand(ByteVector.fromValidHex("01")).fork
+          _ <- client.submitCommand(ByteVector.fromValidHex("02")).fork
+
+          // Receive two ClientRequest messages
+          (_, req1) <- waitForMessage[ClientRequest](mockServer)
+          (_, req2) <- waitForMessage[ClientRequest](mockServer)
+
+        } yield assertTrue(req2.lowestPendingRequestId == req1.requestId)
+      }
+
       test("should queue multiple requests during Connecting and send all after Connected") {
         val port = findOpenPort
         for {
@@ -442,6 +471,68 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
           resp1 <- req1Fiber.join
           resp2 <- req2Fiber.join
         } yield assertTrue(resp1.nonEmpty && resp2.nonEmpty)
+      }
+    }
+
+    // ==========================================================================
+    // RequestError Handling Tests
+    // ==========================================================================
+
+    suiteAll("RequestError Handling") {
+      test("dies when RequestError is for a pending request") {
+        val port = findOpenPort
+        for {
+          mockServer <- ZSocket.server
+          _ <- mockServer.bind(s"tcp://0.0.0.0:$port")
+
+          client <- RaftClient.make(
+            clusterMembers = Map(MemberId.fromString("node1") -> s"tcp://127.0.0.1:$port"),
+            capabilities = Map("test" -> "v1")
+          )
+          runFiber <- client.run().sandbox.forkScoped
+          _ <- client.connect()
+
+          (routingId, createMsg) <- expectMessage[CreateSession](mockServer)
+          sessionId <- SessionId.generate()
+          _ <- sendServerMessage(mockServer, routingId, SessionCreated(sessionId, createMsg.nonce))
+
+          // Submit command; capture the requestId then send RequestError
+          _ <- client.submitCommand(ByteVector.fromValidHex("aa")).fork
+          (_, req) <- waitForMessage[ClientRequest](mockServer)
+          _ <- sendServerMessage(mockServer, routingId, RequestError(req.requestId, RequestErrorReason.ResponseEvicted))
+
+          exit <- runFiber.join.exit
+        } yield assertTrue(exit.is(_.failure).isDie)
+      }
+
+      test("ignores RequestError when request is not pending") {
+        val port = findOpenPort
+        for {
+          mockServer <- ZSocket.server
+          _ <- mockServer.bind(s"tcp://0.0.0.0:$port")
+
+          client <- RaftClient.make(
+            clusterMembers = Map(MemberId.fromString("node1") -> s"tcp://127.0.0.1:$port"),
+            capabilities = Map("test" -> "v1")
+          )
+          runFiber <- client.run().forkScoped
+          _ <- client.connect()
+
+          (routingId, createMsg) <- expectMessage[CreateSession](mockServer)
+          sessionId <- SessionId.generate()
+          _ <- sendServerMessage(mockServer, routingId, SessionCreated(sessionId, createMsg.nonce))
+
+          // Send RequestError for non-pending id
+          _ <- sendServerMessage(
+            mockServer,
+            routingId,
+            RequestError(RequestId.fromLong(999L), RequestErrorReason.ResponseEvicted)
+          )
+
+          // Give the client a bit of time; it should not die
+          _ <- ZIO.sleep(200.millis)
+          _ <- runFiber.interrupt
+        } yield assertCompletes
       }
     }
     // ==========================================================================

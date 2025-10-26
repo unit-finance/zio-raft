@@ -268,6 +268,9 @@ object RaftClient {
           case StreamEvent.ServerMsg(ClientResponse(_, _)) =>
             ZIO.logWarning("Received ClientResponse while connecting, ignoring").as(this)
 
+          case StreamEvent.ServerMsg(_: RequestError) =>
+            ZIO.logWarning("Received RequestError while connecting, ignoring").as(this)
+
           case StreamEvent.ServerMsg(KeepAliveResponse(_)) =>
             ZIO.succeed(this)
 
@@ -405,6 +408,9 @@ object RaftClient {
           case StreamEvent.ServerMsg(KeepAliveResponse(_)) =>
             ZIO.succeed(this)
 
+          case StreamEvent.ServerMsg(_: RequestError) =>
+            ZIO.logWarning("Received RequestError while connecting existing session, ignoring").as(this)
+
           case StreamEvent.ServerMsg(_: ServerRequest) =>
             ZIO.logWarning("Received ServerRequest while connecting, ignoring").as(this)
 
@@ -490,13 +496,22 @@ object RaftClient {
             for {
               requestId <- nextRequestId.next
               now <- Clock.instant
-              request = ClientRequest(requestId, payload, now)
+              lowestPendingRequestId = pendingRequests.lowestPendingRequestIdOr(requestId)
+              request = ClientRequest(requestId, lowestPendingRequestId, payload, now)
               _ <- transport.sendMessage(request).orDie
               newPending = pendingRequests.add(requestId, payload, promise, now)
             } yield copy(pendingRequests = newPending)
 
           case StreamEvent.ServerMsg(ClientResponse(requestId, result)) =>
             pendingRequests.complete(requestId, result).map(newPending => copy(pendingRequests = newPending))
+
+          case StreamEvent.ServerMsg(RequestError(requestId, RequestErrorReason.ResponseEvicted)) =>
+            if (pendingRequests.contains(requestId))
+              ZIO.logError(s"RequestError: ResponseEvicted for request $requestId, terminating client") *>
+                pendingRequests.die(requestId, new RuntimeException("ResponseEvicted")) *>
+                ZIO.dieMessage("ResponseEvicted")
+            else
+              ZIO.logWarning(s"RequestError for non-pending request $requestId, ignoring").as(this)
 
           case StreamEvent.ServerMsg(KeepAliveResponse(_)) =>
             ZIO.succeed(this)

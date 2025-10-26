@@ -2,6 +2,7 @@ package zio.raft.client
 
 import zio.*
 import zio.raft.protocol.*
+import scala.math.Ordering
 import scodec.bits.ByteVector
 import java.time.Instant
 
@@ -10,6 +11,10 @@ import java.time.Instant
 case class PendingRequests(
   requests: Map[RequestId, PendingRequests.PendingRequestData]
 ) {
+  def contains(requestId: RequestId): Boolean = requests.contains(requestId)
+  def lowestPendingRequestIdOr(default: RequestId): RequestId =
+    if (requests.isEmpty) default else requests.keys.min(using Ordering.by[RequestId, Long](_.value))
+
   def add(
     requestId: RequestId,
     payload: ByteVector,
@@ -33,7 +38,8 @@ case class PendingRequests(
     ZIO.foldLeft(requests.toList)(this) { case (pending, (requestId, data)) =>
       for {
         now <- Clock.instant
-        request = ClientRequest(requestId, data.payload, now)
+        lowestPendingRequestId = pending.lowestPendingRequestIdOr(requestId)
+        request = ClientRequest(requestId, lowestPendingRequestId, data.payload, now)
         _ <- transport.sendMessage(request).orDie
         _ <- ZIO.logDebug(s"Resending pending request: $requestId")
         updatedData = data.copy(lastSentAt = now)
@@ -47,7 +53,8 @@ case class PendingRequests(
     ZIO.foldLeft(requests.toList)(this) { case (pending, (requestId, data)) =>
       val elapsed = Duration.fromInterval(data.lastSentAt, currentTime)
       if (elapsed > timeout) {
-        val request = ClientRequest(requestId, data.payload, currentTime)
+        val lowestPendingRequestId = pending.lowestPendingRequestIdOr(requestId)
+        val request = ClientRequest(requestId, lowestPendingRequestId, data.payload, currentTime)
         for {
           _ <- transport.sendMessage(request).orDie
           _ <- ZIO.logDebug(s"Resending timed out request: $requestId")
@@ -58,6 +65,12 @@ case class PendingRequests(
       }
     }
   }
+
+  def die(requestId: RequestId, error: Throwable): UIO[PendingRequests] =
+    requests.get(requestId) match {
+      case Some(data) => data.promise.die(error).ignore.as(copy(requests = requests.removed(requestId)))
+      case None       => ZIO.succeed(this)
+    }
 }
 
 object PendingRequests {

@@ -156,40 +156,83 @@ object IdempotencySpec extends ZIOSpecDefault:
       val (state1, _) = sm.apply(createCmd).run(state0)
       
       // First request (requestId=1, lowestRequestId=1)
-      // Client says "I need responses for requests >= 1"
       val cmd1: SessionCommand[TestCommand, String] = 
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(10))
       val (state2, result1) = sm.apply(cmd1).run(state1)
       val Right((response1, _)) = (result1.asInstanceOf[Either[RequestError, (Int, List[Any])]]): @unchecked
       
       // Second request (requestId=2, lowestRequestId=1)
-      // Client still needs response for request 1
       val cmd2: SessionCommand[TestCommand, String] = 
         SessionCommand.ClientRequest(now, sessionId, RequestId(2), RequestId(1), TestCommand.Increment(5))
       val (state3, result2) = sm.apply(cmd2).run(state2)
       val Right((response2, _)) = (result2.asInstanceOf[Either[RequestError, (Int, List[Any])]]): @unchecked
       
-      // Third request (requestId=3, lowestRequestId=3)
-      // Client says "I have received responses for all requests < 3", so responses 1 and 2 can be evicted
-      // This triggers cache cleanup AND updates highestLowestRequestIdSeen to 3
+      // Third request (requestId=3, lowestRequestId=2)
+      // Client says "I have received responses for requestIds <= 2 (inclusive)", so responses 1 and 2 can be evicted
+      // This triggers cache cleanup AND updates highestLowestRequestIdSeen to 2
       val cmd3: SessionCommand[TestCommand, String] = 
-        SessionCommand.ClientRequest(now, sessionId, RequestId(3), RequestId(3), TestCommand.Increment(1))
+        SessionCommand.ClientRequest(now, sessionId, RequestId(3), RequestId(2), TestCommand.Increment(1))
       val (state4, _) = sm.apply(cmd3).run(state3)
       
-      // Now retry request 1 - should fail with ResponseEvicted
-      // requestId(1) < highestLowestRequestIdSeen(3) AND not in cache (was evicted)
+      // Now retry request 2 - should fail with ResponseEvicted
+      // requestId(2) <= highestLowestRequestIdSeen(2) AND not in cache (was evicted)
       val cmd4: SessionCommand[TestCommand, String] = 
-        SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(3), TestCommand.Increment(999))
+        SessionCommand.ClientRequest(now, sessionId, RequestId(2), RequestId(2), TestCommand.Increment(999))
       val (state5, result4) = sm.apply(cmd4).run(state4)
       
       (result4.asInstanceOf[Either[RequestError, (Int, List[Any])]]: @unchecked) match
         case Left(RequestError.ResponseEvicted(sid, rid)) =>
           assertTrue(
             sid == sessionId &&
-            rid == RequestId(1) &&
+            rid == RequestId(2) &&
             sm.callCount == 3  // Command was NOT executed again (only 3 commands processed)
           )
         case Right(_) =>
           assertTrue(false) // Should not succeed
+    },
+    
+    test("PC-3: Cache cleanup removes responses based on lowestRequestId") {
+      val sm = new TestStateMachine()
+      val state0: HMap[CombinedSchema] = HMap.empty[CombinedSchema]
+      val now = Instant.now()
+      val sessionId = SessionId("s1")
+      
+      // Create session
+      val createCmd: SessionCommand[TestCommand, String] = 
+        SessionCommand.CreateSession[String](now, sessionId, Map.empty)
+          .asInstanceOf[SessionCommand[TestCommand, String]]
+      val (state1, _) = sm.apply(createCmd).run(state0)
+      
+      // Execute 3 requests (requestIds 1, 2, 3)
+      val cmd1: SessionCommand[TestCommand, String] = 
+        SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(10))
+      val (state2, _) = sm.apply(cmd1).run(state1)
+      
+      val cmd2: SessionCommand[TestCommand, String] = 
+        SessionCommand.ClientRequest(now, sessionId, RequestId(2), RequestId(1), TestCommand.Increment(5))
+      val (state3, _) = sm.apply(cmd2).run(state2)
+      
+      val cmd3: SessionCommand[TestCommand, String] = 
+        SessionCommand.ClientRequest(now, sessionId, RequestId(3), RequestId(1), TestCommand.Increment(3))
+      val (state4, _) = sm.apply(cmd3).run(state3)
+      
+      // All 3 should be cached at this point
+      val cache4 = state4.asInstanceOf[HMap[CombinedSchema]]
+      assertTrue(cache4.get["cache"]((sessionId, RequestId(1))).isDefined) &&
+      assertTrue(cache4.get["cache"]((sessionId, RequestId(2))).isDefined) &&
+      assertTrue(cache4.get["cache"]((sessionId, RequestId(3))).isDefined)
+      
+      // Execute request 4 with lowestRequestId=2 (client says "I have received 1 and 2 (inclusive)")
+      val cmd4: SessionCommand[TestCommand, String] = 
+        SessionCommand.ClientRequest(now, sessionId, RequestId(4), RequestId(2), TestCommand.Increment(1))
+      val (state5, _) = sm.apply(cmd4).run(state4)
+      
+      // Requests 1 and 2 should be cleaned up (<= lowestRequestId=2, inclusive)
+      // Request 3 and 4 should still be cached (> lowestRequestId=2)
+      val cache5 = state5.asInstanceOf[HMap[CombinedSchema]]
+      assertTrue(cache5.get["cache"]((sessionId, RequestId(1))).isEmpty) &&
+      assertTrue(cache5.get["cache"]((sessionId, RequestId(2))).isEmpty) &&
+      assertTrue(cache5.get["cache"]((sessionId, RequestId(3))).isDefined) &&
+      assertTrue(cache5.get["cache"]((sessionId, RequestId(4))).isDefined)
     }
   )

@@ -21,8 +21,8 @@ object SessionCommand:
   /** A client request containing a user command to execute.
     *
     * This is the primary command type. The SessionStateMachine base class:
-    *   1. Updates highestLowestRequestIdSeen if lowestRequestId is higher 2. Checks if requestId <
-    *      highestLowestRequestIdSeen AND not in cache → return Left(SessionError.ResponseEvicted) 3. Checks if
+    *   1. Updates highestLowestRequestIdSeen if lowestRequestId is higher 2. Checks if requestId <=
+    *      highestLowestRequestIdSeen AND not in cache → return Left(RequestError.ResponseEvicted) 3. Checks if
     *      (sessionId, requestId) is already in the cache (idempotency) 4. If cached, returns the cached response 5. If
     *      not cached, narrows state to UserSchema and calls user's applyCommand method 6. Caches the response and
     *      returns it
@@ -33,13 +33,13 @@ object SessionCommand:
     *   The request ID (for idempotency checking)
     * @param lowestRequestId
     *   The lowest request ID for which client hasn't received response (for cache cleanup). Client is saying "I have
-    *   received all responses for requestIds < this value"
+    *   received all responses for requestIds <= this value (inclusive)"
     * @param command
     *   The user's command to execute
     *
     * @note
-    *   Response type is Either[RequestError, (command.Response, List[ServerRequestWithContext[SR]])] Left: error (e.g.,
-    *   response evicted) Right: (user command response, server requests with context)
+    *   Response type is Either[RequestError, (command.Response, List[ServerRequestEnvelope[SR]])] Left: error (e.g.,
+    *   response evicted) Right: (user command response, server request envelopes)
     * @note
     *   lowestRequestId enables the "Lowest Sequence Number Protocol" from Raft dissertation Ch. 6.3
     * @note
@@ -54,8 +54,8 @@ object SessionCommand:
     lowestRequestId: RequestId,
     command: UC
   ) extends SessionCommand[UC, SR]:
-    // Response type can be an error or the user command's response with server requests
-    type Response = Either[RequestError, (command.Response, List[ServerRequestWithContext[SR]])]
+    // Response type can be an error or the user command's response with server request envelopes
+    type Response = Either[RequestError, (command.Response, List[ServerRequestEnvelope[SR]])]
 
   /** Acknowledgment from a client for a server-initiated request.
     *
@@ -90,7 +90,7 @@ object SessionCommand:
     sessionId: SessionId,
     capabilities: Map[String, String]
   ) extends SessionCommand[Nothing, SR]:
-    type Response = List[ServerRequestWithContext[SR]] // server requests with context
+    type Response = List[ServerRequestEnvelope[SR]] // server request envelopes
 
   /** Notification that a session has expired.
     *
@@ -105,7 +105,7 @@ object SessionCommand:
     createdAt: Instant,
     sessionId: SessionId
   ) extends SessionCommand[Nothing, SR]:
-    type Response = List[ServerRequestWithContext[SR]] // server requests with context
+    type Response = List[ServerRequestEnvelope[SR]] // server request envelopes
 
   /** Command to atomically retrieve requests needing retry and update lastSentAt.
     *

@@ -4,6 +4,7 @@ import zio.{UIO, Chunk}
 import zio.prelude.State
 import zio.raft.{Command, HMap, StateMachine, Index}
 import zio.raft.protocol.{SessionId, RequestId}
+import zio.raft.protocol.RequestId.RequestIdSyntax
 import zio.stream.Stream
 import java.time.Instant
 
@@ -267,14 +268,15 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     *
     * Implementation of Raft dissertation Chapter 6.3 session management protocol:
     *   1. Check cache for (sessionId, requestId) 2. If cache hit, return cached response 3. If cache miss, check if
-    *      requestId < highestLowestRequestIdSeen → response was evicted, return error 4. If cache miss + requestId >=
+    *      requestId <= highestLowestRequestIdSeen → response was evicted, return error 4. If cache miss + requestId >
     *      highestLowestRequestIdSeen, execute command and update highestLowestRequestIdSeen
     *
     * This correctly handles out-of-order requests. The lowestRequestId from the client tells us which responses have
-    * been acknowledged and can be evicted. We only update highestLowestRequestIdSeen for requests we actually process.
+    * been acknowledged (inclusive) and can be evicted. We only update highestLowestRequestIdSeen for requests we
+    * actually process.
     */
   private def handleClientRequest(cmd: SessionCommand.ClientRequest[UC, SR])
-    : State[HMap[Schema], Either[RequestError, (cmd.command.Response, List[ServerRequestWithContext[SR]])]] =
+    : State[HMap[Schema], Either[RequestError, (cmd.command.Response, List[ServerRequestEnvelope[SR]])]] =
     for
       highestLowestSeen <- getHighestLowestRequestIdSeen(cmd.sessionId)
       cachedOpt <- getCachedResponse((cmd.sessionId, cmd.requestId))
@@ -285,9 +287,9 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
 
         case None =>
           // Cache miss - check if response was evicted
-          // If requestId < highestLowestRequestIdSeen, client has acknowledged receiving this response
-          if cmd.requestId.isLowerThan(highestLowestSeen) then
-            // Client said "I have responses for all requestIds < highestLowest", so this was evicted
+          // If requestId <= highestLowestRequestIdSeen, client has acknowledged receiving this response
+          if cmd.requestId.isLowerOrEqual(highestLowestSeen) then
+            // Client said "I have responses for all requestIds <= highestLowest", so this was evicted
             State.succeed(Left(RequestError.ResponseEvicted(cmd.sessionId, cmd.requestId)))
           else
             // requestId >= highestLowestRequestIdSeen
@@ -327,8 +329,8 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
 
   /** Update the highest lowestRequestId seen from the client (only if lowestRequestId > current highest).
     *
-    * The lowestRequestId from the client indicates "I have received all responses for requestIds < this value". We
-    * track the highest such value to detect evicted responses.
+    * The lowestRequestId from the client indicates "I have received all responses for requestIds <= this value
+    * (inclusive)". We track the highest such value to detect evicted responses.
     */
   private def updateHighestLowestRequestIdSeen(
     sessionId: SessionId,
@@ -354,7 +356,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
       val keysToRemove = state.range["serverRequests"](
         (cmd.sessionId, RequestId.zero),
         (cmd.sessionId, upperBoundExclusive)
-      ).map(_._1)
+      ).map((key, _) => key)
 
       // Remove all acknowledged requests in one efficient operation
       state.removedAll["serverRequests"](keysToRemove)
@@ -363,7 +365,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
   /** Handle CreateSession command.
     */
   private def handleCreateSession(cmd: SessionCommand.CreateSession[SR])
-    : State[HMap[Schema], List[ServerRequestWithContext[SR]]] =
+    : State[HMap[Schema], List[ServerRequestEnvelope[SR]]] =
     for
       _ <- createSessionMetadata(cmd.sessionId, cmd.capabilities, cmd.createdAt)
       (serverRequestsLog, _) <- handleSessionCreated(cmd.sessionId, cmd.capabilities, cmd.createdAt).withLog
@@ -382,7 +384,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
   /** Handle SessionExpired command (internal name to avoid conflict with abstract method).
     */
   private def handleSessionExpired_internal(cmd: SessionCommand.SessionExpired[SR])
-    : State[HMap[Schema], List[ServerRequestWithContext[SR]]] =
+    : State[HMap[Schema], List[ServerRequestEnvelope[SR]]] =
     for
       capabilities <- getSessionCapabilities(cmd.sessionId)
       (serverRequestsLog, _) <- handleSessionExpired(cmd.sessionId, capabilities, cmd.createdAt).withLog
@@ -408,9 +410,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
       // Use foldRight to collect updated requests and build new state
       // This avoids vars and the need to reverse at the end
       state.iterator["serverRequests"].foldRight((List.empty[PendingServerRequest[SR]], state)) {
-        case (((sessionId, requestId), pendingAny), (accumulated, currentState)) =>
-          val pending = pendingAny.asInstanceOf[PendingServerRequest[SR]]
-
+        case (((sessionId, requestId), pending), (accumulated, currentState)) =>
           // Check if this request needs retry (lastSentAt before threshold)
           if pending.lastSentAt.isBefore(cmd.lastSentBefore) then
             // Update lastSentAt and add to accumulated list
@@ -439,7 +439,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
   private def addServerRequests(
     createdAt: Instant,
     serverRequests: Chunk[ServerRequestForSession[SR]]
-  ): State[HMap[Schema], List[ServerRequestWithContext[SR]]] =
+  ): State[HMap[Schema], List[ServerRequestEnvelope[SR]]] =
     if serverRequests.isEmpty then
       State.succeed(Nil)
     else
@@ -448,52 +448,45 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
         val groupedBySession = serverRequests.groupBy(_.sessionId)
 
         // Process each session's requests
-        val (finalState, allRequestsWithContext) =
-          groupedBySession.foldLeft((state, List.empty[ServerRequestWithContext[SR]])) {
+        val (finalState, allEnvelopes) =
+          groupedBySession.foldLeft((state, List.empty[ServerRequestEnvelope[SR]])) {
             case ((currentState, accumulated), (sessionId, sessionRequests)) =>
               // Get last assigned ID for this session
               val lastId = currentState.get["lastServerRequestId"](sessionId)
                 .getOrElse(RequestId.zero)
 
-              // Assign IDs starting from lastId + 1
-              val requestsWithIds = sessionRequests.zipWithIndex.map { case (reqWithSession, index) =>
-                val newId = RequestId(RequestId.unwrap(lastId) + index + 1)
-                (
-                  sessionId,
-                  newId,
-                  PendingServerRequest(
-                    payload = reqWithSession.payload,
-                    lastSentAt = createdAt
-                  )
-                )
-              }
-
-              // Update lastServerRequestId for this session
-              val newLastId = requestsWithIds.last._2
+              // Calculate new last ID: lastId + number of requests
+              val newLastId = lastId.increaseBy(sessionRequests.length)
               val stateWithNewId = currentState.updated["lastServerRequestId"](
                 sessionId,
                 newLastId
               )
 
-              // Add all requests with composite keys
-              val stateWithRequests = requestsWithIds.foldLeft(stateWithNewId) {
-                case (s, (sid, requestId, pending)) =>
-                  s.updated["serverRequests"]((sid, requestId), pending)
-              }
+              // Add all requests with composite keys and create envelopes in one pass
+              val (stateWithRequests, envelopes) =
+                sessionRequests.zipWithIndex.foldLeft((stateWithNewId, List.empty[ServerRequestEnvelope[SR]])) {
+                  case ((s, envs), (reqWithSession, index)) =>
+                    val requestId = lastId.increaseBy(index + 1)
+                    val pending = PendingServerRequest(
+                      payload = reqWithSession.payload,
+                      lastSentAt = createdAt
+                    )
+                    val updatedState = s.updated["serverRequests"]((sessionId, requestId), pending)
+                    val envelope = ServerRequestEnvelope(
+                      sessionId = sessionId,
+                      requestId = requestId,
+                      payload = reqWithSession.payload
+                    )
+                    (updatedState, envelope :: envs)
+                }
 
-              // Create requests with context
-              val requestsWithContext = requestsWithIds.map { case (sid, requestId, pending) =>
-                ServerRequestWithContext(
-                  sessionId = sid,
-                  requestId = requestId,
-                  payload = pending.payload
-                )
-              }.toList
+              // Reverse to maintain order (since we prepended)
+              val orderedEnvelopes = envelopes.reverse
 
-              (stateWithRequests, accumulated ++ requestsWithContext)
+              (stateWithRequests, accumulated ++ orderedEnvelopes)
           }
 
-        (allRequestsWithContext, finalState)
+        (allEnvelopes, finalState)
       }
 
   /** Remove all session data when session expires.
@@ -504,13 +497,13 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
       val cacheKeysToRemove = state.range["cache"](
         (sessionId, RequestId.zero),
         (sessionId, RequestId.max)
-      ).map(_._1)
+      ).map((key, _) => key)
 
       // Remove all server requests for this session using range query
       val serverRequestKeysToRemove = state.range["serverRequests"](
         (sessionId, RequestId.zero),
         (sessionId, RequestId.max)
-      ).map(_._1)
+      ).map((key, _) => key)
 
       // Remove all session data in batch
       state
@@ -527,8 +520,10 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
 
   /** Clean up cached responses based on lowestRequestId (Lowest Sequence Number Protocol).
     *
-    * Removes all cached responses for the session with requestId < lowestRequestId. This allows the client to control
+    * Removes all cached responses for the session with requestId <= lowestRequestId. This allows the client to control
     * cache cleanup by telling the server which responses it no longer needs (Chapter 6.3 of Raft dissertation).
+    *
+    * The client sends lowestRequestId to indicate "I have received all responses up to and including this ID".
     *
     * Uses range queries to efficiently find and remove old cache entries.
     */
@@ -537,18 +532,18 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     lowestRequestId: RequestId
   ): State[HMap[Schema], Unit] =
     State.update { state =>
-      // Use range to find all cache entries for this session with requestId < lowestRequestId
-      // Range is [from, until), so we use (sessionId, RequestId.zero) to (sessionId, lowestRequestId)
+      // Use range to find all cache entries for this session with requestId <= lowestRequestId
+      // Range is [from, until), so to include lowestRequestId, we use lowestRequestId.next as upper bound
       val keysToRemove = state.range["cache"](
         (sessionId, RequestId.zero),
-        (sessionId, lowestRequestId)
-      ).map(_._1)
+        (sessionId, lowestRequestId.next)
+      ).map((key, _) => key)
 
       // Remove all old cache entries in one efficient operation
       state.removedAll["cache"](keysToRemove)
     }
 
-  /** Dirty read helper (FR-027) - check if ANY session has pending requests needing retry.
+  /** Dirty read helper - check if ANY session has pending requests needing retry.
     *
     * This method can be called directly (outside Raft consensus) to optimize the retry process. The retry process
     * performs a dirty read, applies policy locally, and only sends GetRequestsForRetry command if retries are needed.

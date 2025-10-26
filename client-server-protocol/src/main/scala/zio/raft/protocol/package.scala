@@ -86,6 +86,8 @@ package object protocol {
       def isLowerThan(other: RequestId): Boolean = value < other.value
 
       def isGreaterThan(other: RequestId): Boolean = value > other.value
+
+      def increaseBy(x: Int) = RequestId(value + x)
     }
   }
 

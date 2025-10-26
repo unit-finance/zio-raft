@@ -55,7 +55,7 @@ package object sessionstatemachine:
 
   /** Server request with assigned ID after being added to state.
     */
-  case class ServerRequestWithContext[SR](
+  case class ServerRequestEnvelope[SR](
     sessionId: SessionId,
     requestId: RequestId,
     payload: SR
@@ -140,8 +140,8 @@ package object sessionstatemachine:
     /** Response was cached but has been evicted. Client must create a new session.
       *
       * This error occurs when:
-      *   1. Client retries a request with requestId < highestLowestRequestIdSeen for the session 2. The response is not
-      *      in the cache (was evicted via cleanupCache)
+      *   1. Client retries a request with requestId <= highestLowestRequestIdSeen for the session 2. The response is
+      *      not in the cache (was evicted via cleanupCache)
       *
       * Per Raft dissertation Chapter 6.3, the client should create a new session and retry the operation.
       */
@@ -168,9 +168,9 @@ package object sessionstatemachine:
     *   - No data duplication: sessionId and requestId are not stored in the value, only in the key
     *
     * The highestLowestRequestIdSeen prefix enables detection of evicted responses:
-    *   - Client sends lowestRequestId indicating "I have received all responses < this ID"
+    *   - Client sends lowestRequestId indicating "I have received all responses <= this ID (inclusive)"
     *   - We track the highest lowestRequestId value we've seen from the client
-    *   - When a ClientRequest arrives, we check if requestId < highestLowestRequestIdSeen
+    *   - When a ClientRequest arrives, we check if requestId <= highestLowestRequestIdSeen
     *   - If yes and response is not in cache, we know it was evicted (client already acknowledged it)
     *   - This correctly handles out-of-order requests while preventing re-execution of acknowledged commands
     */

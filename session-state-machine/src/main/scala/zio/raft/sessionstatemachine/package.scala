@@ -108,6 +108,7 @@ package object sessionstatemachine:
       *   (log, finalState, value)
       */
     def runStateLog(s: S1): (Chunk[W], S2, A) =
+      // Safe: E = Nothing, so ZPure cannot fail and Right is always present. The @unchecked annotation is justified.
       val (log, Right((state, value))) = zpure.runAll(s): @unchecked
       (log, state, value)
 

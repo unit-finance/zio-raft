@@ -8,14 +8,14 @@ import zio.raft.protocol.RequestId.RequestIdSyntax
 import zio.stream.Stream
 import java.time.Instant
 
-/** Abstract base class for session-aware state machines using the template pattern.
+/** Trait for session-aware state machines using the template pattern.
   *
-  * This class implements Chapter 6.3 of the Raft dissertation (Implementing linearizable semantics) by providing
+  * This trait implements Chapter 6.3 of the Raft dissertation (Implementing linearizable semantics) by providing
   * automatic session management, idempotency checking, and response caching.
   *
   * ## Template Pattern
   *
-  * Users extend this class and implement 3 protected abstract methods:
+  * Users extend this trait and implement 3 protected abstract methods:
   *   - `applyCommand`: Business logic for processing user commands (returns StateWriter)
   *   - `handleSessionCreated`: Session initialization logic (returns StateWriter)
   *   - `handleSessionExpired`: Session cleanup logic (returns StateWriter)
@@ -23,13 +23,13 @@ import java.time.Instant
   * The StateWriter monad combines State for state transitions with Writer for accumulating server-initiated requests.
   * Users call `.log(serverRequest)` to emit server requests instead of manually collecting them in tuples.
   *
-  * The base class provides the final `apply` template method that orchestrates:
+  * This trait provides the final `apply` template method that orchestrates:
   *   - Idempotency checking via (sessionId, requestId) pairs
   *   - Response caching for duplicate requests
   *   - Server-initiated request management with cumulative acknowledgment
   *   - Session lifecycle coordination
-  *   - State narrowing (users see only HMap[UserSchema])
-  *   - State merging (user changes merged back to combined state)
+  *   - Cache cleanup driven by client-provided lowestRequestId (inclusive: removes requestId <= lowestRequestId)
+  *   - Evicted response detection: if requestId <= highestLowestRequestIdSeen and not in cache, return RequestError.ResponseEvicted
   *
   * ## Type Parameters
   *
@@ -86,7 +86,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
   /** Apply a user command to the state.
     *
     * This method receives ONLY the user schema state (UserSchema), not session management state. Session management
-    * prefixes are handled by the base class automatically.
+    * prefixes are handled by this trait automatically.
     *
     * Use `.log(serverRequest)` to emit server-initiated requests. Server requests MUST be wrapped in
     * ServerRequestForSession to specify target sessionId. This allows sending requests to ANY session, not just the
@@ -175,7 +175,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     * @note
     *   Receives complete schema state
     * @note
-    *   Session metadata and cache are automatically removed by base class
+    *   Session metadata and cache are automatically removed by this trait
     * @note
     *   Must be pure and deterministic
     * @note
@@ -188,7 +188,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
   ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Unit]
 
   // ====================================================================================
-  // StateMachine INTERFACE - Implemented by base class
+  // StateMachine INTERFACE - Implemented by this trait
   // ====================================================================================
 
   /** Empty state with no sessions or data.
@@ -429,7 +429,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
   /** Add server requests to state and assign monotonically increasing IDs.
     *
     * Each request is stored with a composite key (SessionId, RequestId) for efficiency. sessionId comes from
-    * ServerRequestForSession, not as a parameter!
+    * ServerRequestForSession.
     *
     * @param createdAt
     *   Timestamp when the command was created (for lastSentAt)

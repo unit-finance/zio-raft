@@ -7,11 +7,11 @@ import java.time.Instant
 
 /** Session State Machine Framework package.
   *
-  * This package provides the SessionStateMachine abstract base class and related types for implementing linearizable,
-  * exactly-once state machines based on Chapter 6.3 of the Raft dissertation.
+  * This package provides the SessionStateMachine trait and related types for implementing linearizable, exactly-once
+  * state machines based on Chapter 6.3 of the Raft dissertation.
   *
   * Key types:
-  *   - SessionStateMachine: Abstract base class (template pattern)
+  *   - SessionStateMachine: Trait using template pattern
   *   - SessionSchema: Fixed 4-prefix schema for session management
   *   - Schema: Type-level concatenation of SessionSchema + UserSchema
   *   - SessionCommand: ADT of commands the session state machine accepts

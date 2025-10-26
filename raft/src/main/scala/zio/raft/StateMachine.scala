@@ -14,4 +14,4 @@ trait StateMachine[S, A <: Command]:
 
   def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[S]
 
-  def shouldTakeSnapshot(lastSnaphotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean
+  def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean

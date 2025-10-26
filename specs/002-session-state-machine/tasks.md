@@ -107,30 +107,30 @@
   - **Tests**: 2 tests passing - cache hit prevents applyCommand call, different requestIds work correctly
   - **Status**: ✅ Tests pass
 
-- [ ] **T013-NEW** Contract test for response caching with composite keys (PC-2)
+- [x] **T013-NEW** ✅ DONE - Contract test for response caching with composite keys (PC-2)
   - **File**: `session-state-machine/src/test/scala/zio/raft/sessionstatemachine/ResponseCachingSpec.scala`
   - **Tests**: First request caches at composite key, second retrieves from composite key
-  - **Status**: TODO - Write with new architecture
+  - **Status**: ✅ Tests pass
 
-- [ ] **T014-NEW** Contract test for cumulative acknowledgment with composite keys (PC-3)
+- [x] **T014-NEW** ✅ DONE - Contract test for cumulative acknowledgment with composite keys (PC-3)
   - **File**: `session-state-machine/src/test/scala/zio/raft/sessionstatemachine/CumulativeAckSpec.scala`
   - **Tests**: Ack N removes all serverRequests where (sessionId, requestId <= N), use range queries
-  - **Status**: TODO - Write with new architecture
+  - **Status**: ✅ Tests pass
 
-- [ ] **T015-NEW** Contract test for server request cross-session targeting
+- [x] **T015-NEW** ✅ DONE - Contract test for server request cross-session targeting
   - **File**: `session-state-machine/src/test/scala/zio/raft/sessionstatemachine/ServerRequestTargetingSpec.scala`
   - **Tests**: ServerRequestForSession allows targeting ANY session, verify requests go to correct sessions
-  - **Status**: TODO - Write with new architecture
+  - **Status**: ✅ Tests pass
 
-- [ ] **T016-NEW** Contract test for Chunk-based server request handling
+- [x] **T016-NEW** ✅ DONE - Contract test for Chunk-based server request handling
   - **File**: `session-state-machine/src/test/scala/zio/raft/sessionstatemachine/ServerRequestChunkSpec.scala`
   - **Tests**: Verify Chunk is kept through pipeline, no List conversions
-  - **Status**: TODO - Write with new architecture
+  - **Status**: ✅ Tests pass
 
-- [ ] **T017-NEW** Contract test for session lifecycle with cross-session server requests
+- [x] **T017-NEW** ✅ DONE - Contract test for session lifecycle with cross-session server requests
   - **File**: `session-state-machine/src/test/scala/zio/raft/sessionstatemachine/SessionLifecycleSpec.scala`
   - **Tests**: CreateSession and SessionExpired can emit server requests for OTHER sessions
-  - **Status**: TODO - Write with new architecture
+  - **Status**: ✅ Tests pass
 
 ### Implementation - ALREADY COMPLETE ✅
 
@@ -169,15 +169,15 @@
 
 ### Unit Tests (Write FIRST - Must Fail)
 
-- [ ] **T029** [P] Unit test for KVStateMachine with SessionStateMachine
+- [x] **T029** [P] ✅ DONE - Unit test for KVStateMachine with SessionStateMachine
   - **File**: `kvstore/src/test/scala/zio/kvstore/KVStateMachineSpec.scala`
   - **Tests**: Set, Get operations, idempotency checking
-  - **Status**: MUST FAIL (SessionStateMachine integration doesn't exist)
+  - **Status**: ✅ Tests pass
 
-- [ ] **T030** [P] Unit test for KV with session lifecycle
+- [x] **T030** [P] ✅ DONE - Unit test for KV with session lifecycle
   - **File**: `kvstore/src/test/scala/zio/kvstore/KVSessionSpec.scala`
   - **Tests**: Session creation, expiration, state isolation
-  - **Status**: MUST FAIL
+  - **Status**: ✅ Tests pass
 
 ### Implementation (After Tests Fail)
 
@@ -226,11 +226,11 @@
 
 ### Additional Unit Tests
 
-- [ ] **T037** Snapshot/restore unit test
+- [x] **T037** ✅ DONE - Snapshot/restore unit test
   - **File**: `session-state-machine/src/test/scala/zio/raft/sessionstatemachine/SnapshotSpec.scala`
   - **Tests**: Take snapshot, restore, verify state consistency (unit level, no Raft integration)
   - **Note**: Uses test implementation of SessionStateMachine with user-provided serialization
-  - **Success**: Snapshot/restore works correctly
+  - **Success**: ✅ Snapshot/restore works correctly
 
 ### Documentation
 
@@ -384,18 +384,19 @@ Before marking phase complete:
 - [x] ✅ hasPendingRequests for dirty read optimization
 - [x] ✅ Composable State monad design with .withLog
 - [x] ✅ Idempotency tests: 2 tests passing
-- [ ] ⚠️ Additional behavior tests recommended (cumulative ack, session lifecycle, etc.)
+- [x] ✅ Additional behavior tests added (cumulative ack, session lifecycle, chunk)
+  - Covered by: `CumulativeAckSpec.scala`, `SessionLifecycleSpec.scala`, `ServerRequestChunkSpec.scala`
 
 ### Phase 3.4 (KVStore Integration)
-- [ ] KVStateMachine extends SessionStateMachine
-- [ ] 3 abstract methods implemented
-- [ ] User provides serialization (scodec)
-- [ ] HMap[KVSchema] used for state
-- [ ] Idempotency demonstrated
+- [x] ✅ KVStateMachine extends SessionStateMachine
+- [x] ✅ 3 abstract methods implemented
+- [x] ✅ User provides serialization (scodec)
+- [x] ✅ HMap[KVSchema] used for state (via `KVCompleteSchema` combination)
+- [x] ✅ Idempotency demonstrated
 - [ ] kvstore application runs correctly
 
 ### Phase 3.5 (Tests & Polish)
-- [ ] Unit tests for snapshot/restore pass
+- [x] ✅ Unit tests for snapshot/restore pass
 - [ ] Documentation complete
 - [ ] Constitution compliance verified
 - [ ] Code review complete

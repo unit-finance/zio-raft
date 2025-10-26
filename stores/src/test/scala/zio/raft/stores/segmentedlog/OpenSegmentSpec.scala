@@ -31,8 +31,8 @@ object OpenSegmentSpec extends ZIOSpecDefault:
   def multipleBatchesGen =
 
     def loop(
-        entries: List[CommandLogEntry[TestCommand]],
-        acc: List[List[CommandLogEntry[TestCommand]]]
+      entries: List[CommandLogEntry[TestCommand]],
+      acc: List[List[CommandLogEntry[TestCommand]]]
     ): Gen[Any, List[List[CommandLogEntry[TestCommand]]]] =
       entries match
         case Nil => Gen.const(acc.reverse)
@@ -55,9 +55,9 @@ object OpenSegmentSpec extends ZIOSpecDefault:
   /** Get entries from the segment.
     */
   def getEntries(
-      segment: OpenSegment[TestCommand],
-      from: Index,
-      to: Index
+    segment: OpenSegment[TestCommand],
+    from: Index,
+    to: Index
   ): ZIO[Scope, Throwable, List[LogEntry[TestCommand]]] =
     segment.stream(from, to).runCollect.map(_.toList)
 
@@ -76,10 +76,10 @@ object OpenSegmentSpec extends ZIOSpecDefault:
   /** Write bytes at a specific position from the end of the file.
     */
   def writeLastBytes(
-      directory: Path,
-      fileName: String,
-      bytesFromEnd: Long,
-      data: Array[Byte]
+    directory: Path,
+    fileName: String,
+    bytesFromEnd: Long,
+    data: Array[Byte]
   ): ZIO[Scope, Throwable, Unit] =
     for
       currentSize <- Files.size(Path(directory.toString(), fileName))
@@ -185,7 +185,11 @@ object OpenSegmentSpec extends ZIOSpecDefault:
           segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
 
           // Add two batches of entries - this adds checksums after each batch
-          _ <- segment.flatMap(_.writeEntries(List(CommandLogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))))
+          _ <- segment.flatMap(_.writeEntries(List(CommandLogEntry[TestCommand](
+            TestCommand("batch1"),
+            Term.one,
+            Index.one
+          ))))
           entries2Size <- segment.flatMap(
             _.writeEntries(List(CommandLogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne)))
           )
@@ -217,12 +221,13 @@ object OpenSegmentSpec extends ZIOSpecDefault:
           _ <- segment.flatMap(_.writeEntries(entries))
           fileSizeBeforeRecover <- segment.flatMap(_.size)
           _ <- segment.flatMap(_.close())
-          
+
           // Corrupt the checksum
-          _ <- writeLastBytes(tempDirectory, "0.log", 5, Array[Byte](0xFF.toByte, 0xFF.toByte))
-          
+          _ <- writeLastBytes(tempDirectory, "0.log", 5, Array[Byte](0xff.toByte, 0xff.toByte))
+
           // Open the existing segment and recover from crash
-          recoveredSegment <- OpenSegment.openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+          recoveredSegment <-
+            OpenSegment.openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
           _ <- recoveredSegment.recoverFromCrash
           fileSizeAfterRecover <- recoveredSegment.size
           recoveredEntries <- recoveredSegment.getEntry(Index.one)
@@ -235,19 +240,24 @@ object OpenSegmentSpec extends ZIOSpecDefault:
         for
           tempDirectory <- Files.createTempDirectoryScoped(None, Seq.empty)
           segment <- OpenSegment.createNewSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
-          _ <- segment.flatMap(_.writeEntries(List(CommandLogEntry[TestCommand](TestCommand("batch1"), Term.one, Index.one))))
+          _ <- segment.flatMap(_.writeEntries(List(CommandLogEntry[TestCommand](
+            TestCommand("batch1"),
+            Term.one,
+            Index.one
+          ))))
           entries2Size <- segment.flatMap(
             _.writeEntries(List(CommandLogEntry[TestCommand](TestCommand("batch2"), Term.one, Index.one.plusOne)))
           )
 
           fileSizeBeforeRecover <- segment.flatMap(_.size)
           _ <- segment.flatMap(_.close())
-          
+
           // Truncate half of the checksum to make it undecodable
           _ <- truncateFileBySize(tempDirectory, "0.log", BaseTransducer.checksumSize / 2)
-          
+
           // Open the existing segment and recover from crash
-          recoveredSegment <- OpenSegment.openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
+          recoveredSegment <-
+            OpenSegment.openSegment[TestCommand](tempDirectory.toString(), "0.log", Index.one, Term.zero)
           _ <- recoveredSegment.recoverFromCrash
           fileSizeAfterRecover <- recoveredSegment.size
           recoveredEntries <- getEntries(recoveredSegment, Index.one, Index.one).map(_.collect {

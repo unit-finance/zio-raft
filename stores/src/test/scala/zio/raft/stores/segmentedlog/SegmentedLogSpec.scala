@@ -176,3 +176,4 @@ object SegmentedLogSpec extends ZIOSpecDefault:
     // 17. discardLogUpTo ...
     // 18. recover from corruption (all cases)
   }.provideSomeLayer(zio.lmdb.Environment.test)
+end SegmentedLogSpec

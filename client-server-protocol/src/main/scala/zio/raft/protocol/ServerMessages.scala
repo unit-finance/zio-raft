@@ -86,6 +86,19 @@ case class ClientResponse(
   result: ByteVector
 ) extends ServerMessage
 
+/** RequestError indicates the server could not return the original response because it was deterministically evicted
+  * per lowestPendingRequestId. Session ID is implied by routing.
+  *
+  * @param requestId
+  *   The client request ID this error refers to
+  * @param reason
+  *   The error reason (currently only ResponseEvicted)
+  */
+case class RequestError(
+  requestId: RequestId,
+  reason: RequestErrorReason
+) extends ServerMessage
+
 /** Server-initiated work dispatch to client (one-way pattern). Server targets via ZeroMQ routing ID, no session ID
   * needed.
   *
@@ -150,4 +163,12 @@ object SessionCloseReason {
   /** Session expired due to client inactivity (no keep-alive messages).
     */
   case object SessionExpired extends SessionCloseReason
+}
+
+/** Reasons for RequestError.
+  */
+sealed trait RequestErrorReason
+
+object RequestErrorReason {
+  case object ResponseEvicted extends RequestErrorReason
 }

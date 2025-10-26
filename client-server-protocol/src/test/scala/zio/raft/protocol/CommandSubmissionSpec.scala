@@ -26,6 +26,7 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
               val payload = ByteVector.fromValidHex("deadbeef")
               val request = ClientRequest(
                 requestId = requestId,
+                lowestPendingRequestId = requestId,
                 payload = payload,
                 createdAt = Instant.parse("2023-01-01T00:00:00Z")
               )
@@ -53,12 +54,14 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
       test("should support both read and write operations") {
         val writeRequest = ClientRequest(
           requestId = RequestId.fromLong(1L),
+          lowestPendingRequestId = RequestId.fromLong(1L),
           payload = ByteVector.fromValidHex("cafebabe"), // write command
           createdAt = Instant.parse("2023-01-01T00:00:00Z")
         )
 
         val readRequest = ClientRequest(
           requestId = RequestId.fromLong(2L),
+          lowestPendingRequestId = RequestId.fromLong(1L),
           payload = ByteVector.fromValidHex("feedface"), // read query
           createdAt = Instant.parse("2023-01-01T00:00:00Z")
         )
@@ -100,8 +103,8 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
               val payload = ByteVector.fromValidHex("deadbeef")
 
               // Same request sent twice (retry scenario)
-              val request1 = ClientRequest(requestId, payload, Instant.parse("2023-01-01T00:00:00Z"))
-              val request2 = ClientRequest(requestId, payload, Instant.parse("2023-01-01T00:00:00Z"))
+              val request1 = ClientRequest(requestId, requestId, payload, Instant.parse("2023-01-01T00:00:00Z"))
+              val request2 = ClientRequest(requestId, requestId, payload, Instant.parse("2023-01-01T00:00:00Z"))
 
               // Should be considered identical for deduplication
               request1.requestId == request2.requestId &&
@@ -117,6 +120,7 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
         // Test that requests can be queued when not connected
         val request = ClientRequest(
           requestId = RequestId.fromLong(1L),
+          lowestPendingRequestId = RequestId.fromLong(1L),
           payload = ByteVector.fromValidHex("deadbeef"),
           createdAt = Instant.parse("2023-01-01T00:00:00Z")
         )
@@ -134,6 +138,7 @@ object CommandSubmissionSpec extends ZIOSpecDefault {
             ZIO.attempt {
               ClientRequest(
                 requestId = RequestId.fromLong(i.toLong),
+                lowestPendingRequestId = RequestId.fromLong(i.toLong),
                 payload = ByteVector.fromValidHex(f"$i%08x"),
                 createdAt = Instant.parse("2023-01-01T00:00:00Z")
               )

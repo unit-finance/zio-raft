@@ -55,6 +55,8 @@ case class KeepAlive(
   *
   * @param requestId
   *   Unique identifier for request deduplication and correlation
+  * @param lowestPendingRequestId
+  *   Lowest request ID for which client has not yet received a response; used for deterministic cache eviction
   * @param payload
   *   Binary payload containing the actual command or query
   * @param createdAt
@@ -62,6 +64,7 @@ case class KeepAlive(
   */
 case class ClientRequest(
   requestId: RequestId,
+  lowestPendingRequestId: RequestId,
   payload: ByteVector,
   createdAt: Instant
 ) extends ClientMessage

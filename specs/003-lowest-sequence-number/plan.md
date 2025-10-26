@@ -1,8 +1,8 @@
 
-# Implementation Plan: [FEATURE]
+# Implementation Plan: Lowest Sequence Number Protocol for Client-Server
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+**Branch**: `003-lowest-sequence-number` | **Date**: October 26, 2025 | **Spec**: `/specs/003-lowest-sequence-number/spec.md`
+**Input**: Feature specification from `/specs/003-lowest-sequence-number/spec.md`
 
 ## Execution Flow (/plan command scope)
 ```
@@ -31,47 +31,47 @@
 - Phase 3-4: Implementation execution (manual or via tools)
 
 ## Summary
-[Extract from feature spec: primary requirement + technical approach from research]
+Introduce a mandatory `lowestPendingRequestId` on both ClientRequest representations: (1) the protocol-level ClientRequest (client → server message) and (2) the server-internal `RaftAction.ClientRequest`. This enables deterministic server-side cache eviction for all cached responses with requestId < K within a session, preventing unbounded cache growth while preserving exactly-once semantics. The server-side behavior is implemented inside the `SessionStateMachine` (not the client-server server). The server must: (1) evict entries < K atomically with request processing, (2) return RequestError without re-execution for duplicates below K (via a new server action `ServerAction.SendRequestError`), and (3) on receiving a RequestError, fail the pending request and terminate the app if still pending; otherwise ignore. On the client, K is computed as the minimum requestId from the client's `pendingRequests` set for the session.
 
 ## Technical Context
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
-**Project Type**: [single/web/mobile - determines source structure]  
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**Language/Version**: Scala 3.3+  
+**Primary Dependencies**: ZIO 2.1+, existing client-server-protocol, session-state-machine  
+**Storage**: Raft log + snapshots (unchanged)  
+**Testing**: ZIO Test  
+**Target Platform**: JVM  
+**Project Type**: Single backend library (protocol + server)  
+**Performance Goals**: No additional round-trips; O(1) eviction decision per request  
+**Constraints**: Field is mandatory; no legacy client support  
+**Scale/Scope**: Applies to all sessions and requests; no cache size limits needed when protocol enforced
 
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
 ### I. Functional Purity & Type Safety
-- [ ] All new code uses immutable data structures and ZIO effect types
-- [ ] No unsafe operations (casting, reflection) introduced
-- [ ] Type safety preserved throughout implementation
+- [x] All new code uses immutable data structures and ZIO effect types
+- [x] No unsafe operations (casting, reflection) introduced
+- [x] Type safety preserved throughout implementation
 
 ### II. Explicit Error Handling
-- [ ] All external interactions have explicit error handling
-- [ ] Business logic errors use ZIO.fail or Either types, not exceptions
-- [ ] Timeout and resource failures properly modeled
+- [x] All external interactions have explicit error handling
+- [x] Business logic errors use ZIO.fail or Either types, not exceptions
+- [x] Timeout and resource failures properly modeled
 
 ### III. Existing Code Preservation (NON-NEGOTIABLE)
-- [ ] Core interfaces (StateMachine, RPC, LogStore) not modified without architectural review
-- [ ] Backward compatibility maintained for public APIs
-- [ ] No performance degradation without measurement and justification
+- [x] Core interfaces (StateMachine, RPC, LogStore) not modified without architectural review
+- [x] Backward compatibility maintained for public APIs (protocol add is additive but mandatory moving forward)
+- [x] No performance degradation without measurement and justification
 
 ### IV. ZIO Ecosystem Consistency
-- [ ] ZIO primitives used for all concurrent operations
-- [ ] ZStream used for streaming, no external streaming libraries
-- [ ] Resource management follows ZIO Scope patterns
-- [ ] `suiteAll` is used instead of `suite`
+- [x] ZIO primitives used for all concurrent operations
+- [x] ZStream used for streaming, no external streaming libraries
+- [x] Resource management follows ZIO Scope patterns
+- [x] `suiteAll` is used instead of `suite`
 
 ### V. Test-Driven Maintenance
-- [ ] Bug fixes include reproducing test cases
-- [ ] Performance changes include benchmark tests
-- [ ] Complex Raft scenarios have property-based tests
+- [x] Bug fixes include reproducing test cases
+- [x] Performance changes include benchmark tests (eviction counters)
+- [x] Complex Raft scenarios have property-based tests (monotonic K, duplicate below K → RequestError)
 
 ## Project Structure
 
@@ -104,7 +104,7 @@ specs/[###-feature]/
    - Rationale: [why chosen]
    - Alternatives considered: [what else evaluated]
 
-**Output**: research.md with all NEEDS CLARIFICATION resolved
+**Output**: research.md with all NEEDS CLARIFICATION resolved (none remaining; proceed-without-clarifications approved)
 
 ## Phase 1: Design
 *Prerequisites: research.md complete*
@@ -127,7 +127,7 @@ specs/[###-feature]/
    - Keep under 150 lines for token efficiency
    - Output to repository root
 
-**Output**: data-model.md, failing tests, quickstart.md, agent-specific file
+**Output**: data-model.md, quickstart.md, contracts/
 
 ## Phase 2: Task Planning Approach
 *This section describes what the /tasks command will do - DO NOT execute during /plan*
@@ -144,7 +144,13 @@ specs/[###-feature]/
 - Dependency order: Models before services before UI
 - Mark [P] for parallel execution (independent files)
 
-**Estimated Output**: 25-30 numbered, ordered tasks in tasks.md
+**Estimated Output**: 12-18 numbered, ordered tasks in tasks.md (protocol evolution scope)
+
+## Scope Notes
+- Server logic for eviction and duplicate handling is implemented in `session-state-machine` (inside `SessionStateMachine`), not in the `client-server-server` transport.
+- Protocol changes occur in `client-server-protocol`: add `lowestPendingRequestId` to protocol ClientRequest.
+- Server internal action changes: add `lowestPendingRequestId` to `RaftAction.ClientRequest`; introduce new server action `ServerAction.SendRequestError`; ensure mapping protocol → action preserves the field.
+- Client logic: compute `lowestPendingRequestId` as `min(pendingRequests)` per session.
 
 **IMPORTANT**: This phase is executed by the /tasks command, NOT by /plan
 
@@ -168,17 +174,17 @@ specs/[###-feature]/
 *This checklist is updated during execution flow*
 
 **Phase Status**:
-- [ ] Phase 0: Research complete (/plan command)
-- [ ] Phase 1: Design complete (/plan command)
+- [x] Phase 0: Research complete (/plan command)
+- [x] Phase 1: Design complete (/plan command)
 - [ ] Phase 2: Task planning complete (/plan command - describe approach only)
 - [ ] Phase 3: Tasks generated (/tasks command)
 - [ ] Phase 4: Implementation complete
 - [ ] Phase 5: Validation passed
 
 **Gate Status**:
-- [ ] Initial Constitution Check: PASS
-- [ ] Post-Design Constitution Check: PASS
-- [ ] All NEEDS CLARIFICATION resolved
+- [x] Initial Constitution Check: PASS
+- [x] Post-Design Constitution Check: PASS
+- [x] All NEEDS CLARIFICATION resolved (override approved; FR-007 specified: ClientRequest)
 - [ ] Complexity deviations documented
 
 ---

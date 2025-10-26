@@ -10,7 +10,6 @@
    → Extract: tech stack, libraries, structure
 2. Load optional design documents:
    → data-model.md: Extract entities → model tasks
-   → contracts/: Each file → contract test task
    → research.md: Extract decisions → setup tasks
 3. Generate tasks by category:
    → Setup: project init, dependencies, linting
@@ -49,38 +48,37 @@
 
 ## Phase 3.2: Tests First (TDD) ⚠️ MUST COMPLETE BEFORE 3.3
 **CRITICAL: These tests MUST be written and MUST FAIL before ANY implementation**
-- [ ] T004 [P] Contract test for new functionality using ZIO Test framework
-- [ ] T005 [P] Property-based tests for complex logic using ZIO Test Gen
-- [ ] T006 [P] Integration tests for external interactions (RPC, storage)
-- [ ] T007 [P] Performance benchmark tests for critical paths
+- [ ] T004 [P] Property-based tests for complex logic using ZIO Test Gen
+- [ ] T005 [P] Integration tests for external interactions (RPC, storage)
+- [ ] T006 [P] Performance benchmark tests for critical paths
 
 ## Phase 3.3: Core Implementation (ONLY after tests are failing)
-- [ ] T008 [P] Immutable data models with proper type safety
-- [ ] T009 [P] Service layer using ZIO effects and explicit error types
-- [ ] T010 [P] Extend existing abstractions (StateMachine, RPC, LogStore) without breaking changes
-- [ ] T011 Implement functionality using ZIO ecosystem (ZStream, ZLayer, etc.)
-- [ ] T012 Add explicit error handling for all external interactions
-- [ ] T013 Input validation using ZIO Prelude or similar type-safe validation
-- [ ] T014 Resource management using ZIO Scope patterns
+- [ ] T007 [P] Immutable data models with proper type safety
+- [ ] T008 [P] Service layer using ZIO effects and explicit error types
+- [ ] T009 [P] Extend existing abstractions (StateMachine, RPC, LogStore) without breaking changes
+- [ ] T010 Implement functionality using ZIO ecosystem (ZStream, ZLayer, etc.)
+- [ ] T011 Add explicit error handling for all external interactions
+- [ ] T012 Input validation using ZIO Prelude or similar type-safe validation
+- [ ] T013 Resource management using ZIO Scope patterns
 
 ## Phase 3.4: Integration
-- [ ] T015 Integrate with existing storage abstractions using ZIO patterns
-- [ ] T016 Add distributed system error handling (timeouts, retries)
-- [ ] T017 Implement observability using ZIO logging and metrics
-- [ ] T018 Ensure backward compatibility and performance preservation
+- [ ] T014 Integrate with existing storage abstractions using ZIO patterns
+- [ ] T015 Add distributed system error handling (timeouts, retries)
+- [ ] T016 Implement observability using ZIO logging and metrics
+- [ ] T017 Ensure backward compatibility and performance preservation
 
 ## Phase 3.5: Polish
-- [ ] T019 [P] Unit tests covering edge cases and error scenarios
-- [ ] T020 Performance validation and benchmark comparison with baseline
-- [ ] T021 [P] Update documentation and API specifications
-- [ ] T022 Code review for ZIO ecosystem consistency and functional purity
-- [ ] T023 Constitution compliance verification checklist
+- [ ] T018 [P] Unit tests covering edge cases and error scenarios
+- [ ] T019 Performance validation and benchmark comparison with baseline
+- [ ] T020 [P] Update documentation and API specifications
+- [ ] T021 Code review for ZIO ecosystem consistency and functional purity
+- [ ] T022 Constitution compliance verification checklist
 
 ## Dependencies
-- Tests (T004-T007) before implementation (T008-T014)
-- T008 blocks T009, T015
-- T016 blocks T018
-- Implementation before polish (T019-T023)
+- Tests (T004-T006) before implementation (T008-T014)
+- T007 blocks T008, T014
+- T015 blocks T017
+- Implementation before polish (T018-T022)
 
 ## Parallel Example
 ```

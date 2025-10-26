@@ -14,7 +14,7 @@ import scodec.bits.ByteVector
   * Tests RaftServer (SERVER socket) by acting as a client (CLIENT socket). This validates actual ZeroMQ integration,
   * message serialization, and all server flows.
   */
-object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
+object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext]:
 
   override def bootstrap: ZLayer[Any, Any, TestEnvironment & ZContext] =
     testEnvironment ++ ZContext.live
@@ -25,31 +25,29 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
   /** Send a client message to the server
     */
-  def sendClientMessage(socket: ZSocket, message: ClientMessage): Task[Unit] = {
-    for {
+  def sendClientMessage(socket: ZSocket, message: ClientMessage): Task[Unit] =
+    for
       bytes <- ZIO.attempt(clientMessageCodec.encode(message).require.toByteArray)
       _ <- socket.send(bytes)
-    } yield ()
-  }
+    yield ()
 
   /** Receive a server message from the server
     */
-  def receiveServerMessage(socket: ZSocket): Task[ServerMessage] = {
-    for {
+  def receiveServerMessage(socket: ZSocket): Task[ServerMessage] =
+    for
       chunk <- socket.receive
       bytes = ByteVector(chunk.toArray)
       message <- ZIO
         .fromEither(serverMessageCodec.decode(bytes.bits).toEither.map(_.value))
         .mapError(err => new RuntimeException(s"Failed to decode: $err"))
-    } yield message
-  }
+    yield message
 
   /** Wait for specific message type with timeout
     */
   def waitForMessage[A <: ServerMessage](socket: ZSocket, timeout: Duration = 3.seconds)(implicit
-      tt: scala.reflect.TypeTest[ServerMessage, A],
-      ct: scala.reflect.ClassTag[A]
-  ): Task[A] = {
+    tt: scala.reflect.TypeTest[ServerMessage, A],
+    ct: scala.reflect.ClassTag[A]
+  ): Task[A] =
     receiveServerMessage(socket).timeout(timeout).flatMap {
       case Some(msg: A) => ZIO.succeed(msg)
       case Some(other) =>
@@ -57,7 +55,6 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
           .fail(new RuntimeException(s"Expected ${ct.runtimeClass.getSimpleName}, got ${other.getClass.getSimpleName}"))
       case None => ZIO.fail(new RuntimeException(s"Timeout waiting for ${ct.runtimeClass.getSimpleName}"))
     }
-  }
 
   val testPort = 25555
   val serverAddress = s"tcp://127.0.0.1:$testPort"
@@ -69,7 +66,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
     suiteAll("Follower State") {
       test("should reject CreateSession when not leader") {
-        for {
+        for
           // Start server as follower
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis) // Let server start
@@ -84,12 +81,12 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Expect SessionRejected with NotLeader
           rejection <- waitForMessage[SessionRejected](client)
-        } yield assertTrue(rejection.reason == RejectionReason.NotLeader) &&
+        yield assertTrue(rejection.reason == RejectionReason.NotLeader) &&
           assertTrue(rejection.nonce == nonce)
       }
 
       test("should reject ContinueSession when not leader") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
 
@@ -101,11 +98,11 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
           _ <- sendClientMessage(client, ContinueSession(sessionId, nonce))
 
           rejection <- waitForMessage[SessionRejected](client)
-        } yield assertTrue(rejection.reason == RejectionReason.NotLeader)
+        yield assertTrue(rejection.reason == RejectionReason.NotLeader)
       }
 
       test("should reject ClientRequest when not leader") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
 
@@ -113,15 +110,11 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
           _ <- client.connect(serverAddress)
 
           timestamp <- Clock.instant
-          request = ClientRequest(
-            RequestId.fromLong(1L),
-            ByteVector.fromValidHex("deadbeef"),
-            timestamp
-          )
-          _ <- sendClientMessage(client, request)
+          rid = RequestId.fromLong(1L)
+          _ <- sendClientMessage(client, ClientRequest(rid, rid, ByteVector.fromValidHex("deadbeef"), timestamp))
 
           error <- waitForMessage[SessionClosed](client)
-        } yield assertTrue(error.reason == SessionCloseReason.NotLeaderAnymore)
+        yield assertTrue(error.reason == SessionCloseReason.NotLeaderAnymore)
       }
     }
 
@@ -131,7 +124,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
     suiteAll("Leader - Session Creation") {
       test("should create session and send SessionCreated after Raft confirmation") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
 
@@ -159,7 +152,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Expect SessionCreated
           created <- waitForMessage[SessionCreated](client)
-        } yield assertTrue(created.sessionId == sessionId) &&
+        yield assertTrue(created.sessionId == sessionId) &&
           assertTrue(created.nonce == nonce)
       }
     }
@@ -170,7 +163,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
     suiteAll("Leader - Session Continuation") {
       test("should reconnect existing session") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
 
@@ -190,11 +183,11 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Expect SessionContinued
           continued <- waitForMessage[SessionContinued](client)
-        } yield assertTrue(continued.nonce == nonce)
+        yield assertTrue(continued.nonce == nonce)
       }
 
       test("should reject ContinueSession for non-existent session") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
           _ <- server.stepUp(Map.empty)
@@ -208,12 +201,12 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
           _ <- sendClientMessage(client, ContinueSession(fakeSessionId, nonce))
 
           rejection <- waitForMessage[SessionRejected](client)
-        } yield assertTrue(rejection.reason == RejectionReason.SessionExpired) &&
+        yield assertTrue(rejection.reason == RejectionReason.SessionExpired) &&
           assertTrue(rejection.nonce == nonce)
       }
 
       test("should handle reconnection from new socket (different routing ID)") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
 
@@ -225,7 +218,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // First client connects
           _ <- ZIO.scoped {
-            for {
+            for
               client1 <- ZSocket.client
               _ <- client1.connect(serverAddress)
               nonce1 <- Nonce.generate()
@@ -235,7 +228,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
               // Send ConnectionClosed before scope closes
               _ <- sendClientMessage(client1, ConnectionClosed)
               _ <- ZIO.sleep(100.millis)
-            } yield ()
+            yield ()
           }
 
           // New client reconnects (different socket = different routing ID)
@@ -246,7 +239,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Should successfully reconnect
           continued <- waitForMessage[SessionContinued](client2)
-        } yield assertTrue(continued.nonce == nonce2)
+        yield assertTrue(continued.nonce == nonce2)
       }
     }
 
@@ -256,7 +249,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
     suiteAll("Leader - Keep-Alive") {
       test("should respond to keep-alive for connected session") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
 
@@ -280,14 +273,14 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Expect KeepAliveResponse
           response <- waitForMessage[KeepAliveResponse](client)
-        } yield
+        yield
           // Timestamp might lose precision in serialization (nanoseconds → milliseconds)
           val diff = java.time.Duration.between(keepAliveTime, response.timestamp).abs().toMillis
           assertTrue(diff < 10) // Within 10ms is fine
       }
 
       test("should reject keep-alive for unknown session") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
           _ <- server.stepUp(Map.empty)
@@ -302,7 +295,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Expect SessionClosed error
           error <- waitForMessage[SessionClosed](client)
-        } yield assertTrue(error.reason == SessionCloseReason.SessionError)
+        yield assertTrue(error.reason == SessionCloseReason.SessionError)
       }
     }
 
@@ -312,7 +305,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
     suiteAll("Leader - Client Requests") {
       test("should forward ClientRequest to Raft") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
 
@@ -334,20 +327,20 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
           requestId = RequestId.fromLong(42L)
           payload = ByteVector.fromValidHex("cafebabe")
           requestTime <- Clock.instant
-          _ <- sendClientMessage(client, ClientRequest(requestId, payload, requestTime))
+          _ <- sendClientMessage(client, ClientRequest(requestId, requestId, payload, requestTime))
 
           // Verify RaftAction was queued
           _ <- ZIO.sleep(100.millis)
           action <- server.raftActions.take(1).runCollect.map(_.head)
-        } yield assertTrue(action.isInstanceOf[RaftAction.ClientRequest]) &&
-          assertTrue(action.asInstanceOf[RaftAction.ClientRequest].sessionId == sessionId) &&
-          assertTrue(action.asInstanceOf[RaftAction.ClientRequest].requestId == requestId) &&
-          assertTrue(action.asInstanceOf[RaftAction.ClientRequest].payload == payload)
-
+          clientReq = action.asInstanceOf[RaftAction.ClientRequest]
+        yield assertTrue(clientReq.sessionId == sessionId) &&
+          assertTrue(clientReq.requestId == requestId) &&
+          assertTrue(clientReq.lowestPendingRequestId == requestId) &&
+          assertTrue(clientReq.payload == payload)
       }
 
       test("should send ClientResponse back to client") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
 
@@ -371,9 +364,41 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Client receives response
           response <- waitForMessage[ClientResponse](client)
-        } yield assertTrue(response.requestId == requestId) &&
+        yield assertTrue(response.requestId == requestId) &&
           assertTrue(response.result == result)
 
+      }
+    }
+
+    suiteAll("Leader - RequestError") {
+      test("should send protocol RequestError to client when ServerAction.SendRequestError is emitted") {
+        for
+          server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
+          _ <- ZIO.sleep(300.millis)
+
+          // Become leader and create a session
+          _ <- server.stepUp(Map.empty)
+          _ <- ZIO.sleep(100.millis)
+
+          client <- ZSocket.client
+          _ <- client.connect(serverAddress)
+
+          // Connect session
+          nonce <- Nonce.generate()
+          _ <- sendClientMessage(client, CreateSession(Map("test" -> "v1"), nonce))
+          _ <- ZIO.sleep(100.millis)
+          action <- server.raftActions.take(1).runCollect.map(_.head)
+          sessionId = action.asInstanceOf[RaftAction.CreateSession].sessionId
+          _ <- server.confirmSessionCreation(sessionId)
+          _ <- waitForMessage[SessionCreated](client)
+
+          // Send RequestError from server
+          reqId = RequestId.fromLong(10L)
+          _ <- server.sendRequestError(sessionId, RequestError(reqId, RequestErrorReason.ResponseEvicted))
+
+          // Expect RequestError at client
+          err <- waitForMessage[RequestError](client)
+        yield assertTrue(err.requestId == reqId) && assertTrue(err.reason == RequestErrorReason.ResponseEvicted)
       }
     }
 
@@ -383,7 +408,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
     suiteAll("Session Closure") {
       test("should remove session on CloseSession and notify Raft") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
 
@@ -407,13 +432,13 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Check RaftAction.ExpireSession was queued
           action <- server.raftActions.take(1).runCollect.map(_.head)
-        } yield assertTrue(action.isInstanceOf[RaftAction.ExpireSession]) &&
+        yield assertTrue(action.isInstanceOf[RaftAction.ExpireSession]) &&
           assertTrue(action.asInstanceOf[RaftAction.ExpireSession].sessionId == sessionId)
 
       }
 
       test("session cannot be reconnected after CloseSession") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
 
@@ -425,7 +450,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // First client connects and closes
           _ <- ZIO.scoped {
-            for {
+            for
               client1 <- ZSocket.client
               _ <- client1.connect(serverAddress)
               nonce1 <- Nonce.generate()
@@ -433,7 +458,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
               _ <- waitForMessage[SessionContinued](client1)
               _ <- sendClientMessage(client1, CloseSession(CloseReason.ClientShutdown))
               _ <- ZIO.sleep(100.millis)
-            } yield ()
+            yield ()
           }
 
           // Drain expire action
@@ -446,7 +471,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
           _ <- sendClientMessage(client2, ContinueSession(sessionId, nonce2))
 
           rejection <- waitForMessage[SessionRejected](client2)
-        } yield assertTrue(rejection.reason == RejectionReason.SessionExpired)
+        yield assertTrue(rejection.reason == RejectionReason.SessionExpired)
 
       }
     }
@@ -457,7 +482,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
     suiteAll("ConnectionClosed Handling") {
       test("should preserve session and allow reconnection after ConnectionClosed") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
 
@@ -469,7 +494,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // First client connects and sends ConnectionClosed
           _ <- ZIO.scoped {
-            for {
+            for
               client1 <- ZSocket.client
               _ <- client1.connect(serverAddress)
               nonce1 <- Nonce.generate()
@@ -477,7 +502,7 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
               _ <- waitForMessage[SessionContinued](client1)
               _ <- sendClientMessage(client1, ConnectionClosed)
               _ <- ZIO.sleep(100.millis)
-            } yield ()
+            yield ()
           }
 
           // New client reconnects (different routing ID due to new socket)
@@ -488,12 +513,12 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Should successfully reconnect
           continued <- waitForMessage[SessionContinued](client2)
-        } yield assertTrue(continued.nonce == nonce2)
+        yield assertTrue(continued.nonce == nonce2)
 
       }
 
       test("ConnectionClosed should NOT send RaftAction.ExpireSession") {
-        for {
+        for
           server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
           _ <- ZIO.sleep(300.millis)
 
@@ -516,9 +541,9 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext] {
 
           // Try to collect Raft actions with timeout - should be empty
           actions <- server.raftActions.take(1).runCollect.timeout(500.millis)
-        } yield assertTrue(actions.isEmpty) // No ExpireSession action
+        yield assertTrue(actions.isEmpty) // No ExpireSession action
 
       }
     }
   } @@ TestAspect.sequential @@ TestAspect.withLiveClock
-}
+end RaftServerSpec

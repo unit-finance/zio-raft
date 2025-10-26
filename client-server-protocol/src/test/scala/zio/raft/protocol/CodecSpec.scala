@@ -73,6 +73,7 @@ object CodecSpec extends ZIOSpecDefault {
           val requestId = RequestId.fromLong(1L)
           val message = ClientRequest(
             requestId = requestId,
+            lowestPendingRequestId = requestId,
             payload = ByteVector.fromValidHex("deadbeef"),
             createdAt = Instant.parse("2023-01-01T00:00:00Z")
           )
@@ -149,7 +150,12 @@ object CodecSpec extends ZIOSpecDefault {
           val createSession = CreateSession(Map("test" -> "v1"), Nonce.fromLong(123L))
           val keepAlive = KeepAlive(Instant.parse("2023-01-01T00:00:00Z"))
           val clientRequest =
-            ClientRequest(RequestId.fromLong(1L), ByteVector.empty, Instant.parse("2023-01-01T00:00:00Z"))
+            ClientRequest(
+              RequestId.fromLong(1L),
+              RequestId.fromLong(1L),
+              ByteVector.empty,
+              Instant.parse("2023-01-01T00:00:00Z")
+            )
 
           val encoded1 = clientMessageCodec.encode(createSession)
           val encoded2 = clientMessageCodec.encode(keepAlive)
@@ -199,6 +205,7 @@ object CodecSpec extends ZIOSpecDefault {
                 .attempt {
                   val message = ClientRequest(
                     requestId = RequestId.fromLong(1L),
+                    lowestPendingRequestId = RequestId.fromLong(1L),
                     payload = ByteVector.fromValidHex(f"$i%08x"),
                     createdAt = Instant.parse("2023-01-01T00:00:00Z")
                   )
@@ -219,6 +226,7 @@ object CodecSpec extends ZIOSpecDefault {
           val smallMessage = KeepAlive(Instant.parse("2023-01-01T00:00:00Z"))
           val largeMessage = ClientRequest(
             requestId = RequestId.fromLong(1L),
+            lowestPendingRequestId = RequestId.fromLong(1L),
             payload = ByteVector.fill(1000)(0xff.toByte), // 1KB payload
             createdAt = Instant.parse("2023-01-01T00:00:00Z")
           )

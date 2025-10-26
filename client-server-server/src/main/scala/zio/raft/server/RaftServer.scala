@@ -16,6 +16,7 @@ object RaftServer:
   object ServerAction:
     case class SendResponse(sessionId: SessionId, response: ClientResponse) extends ServerAction
     case class SendServerRequest(sessionId: SessionId, request: ServerRequest) extends ServerAction
+    case class SendRequestError(sessionId: SessionId, error: RequestError) extends ServerAction
     case class SessionCreationConfirmed(sessionId: SessionId) extends ServerAction
     case class StepUp(sessions: Map[SessionId, SessionMetadata]) extends ServerAction
     case class StepDown(leaderId: Option[MemberId]) extends ServerAction
@@ -26,7 +27,12 @@ object RaftServer:
 
   object RaftAction:
     case class CreateSession(sessionId: SessionId, capabilities: Map[String, String]) extends RaftAction
-    case class ClientRequest(sessionId: SessionId, requestId: RequestId, payload: ByteVector) extends RaftAction
+    case class ClientRequest(
+      sessionId: SessionId,
+      requestId: RequestId,
+      lowestPendingRequestId: RequestId,
+      payload: ByteVector
+    ) extends RaftAction
     case class ServerRequestAck(sessionId: SessionId, requestId: RequestId) extends RaftAction
     case class ExpireSession(sessionId: SessionId) extends RaftAction
 
@@ -57,6 +63,10 @@ object RaftServer:
       */
     def sendServerRequest(sessionId: SessionId, request: ServerRequest): UIO[Unit] =
       actionQueue.offer(ServerAction.SendServerRequest(sessionId, request)).unit
+
+    /** Send request error to a client. */
+    def sendRequestError(sessionId: SessionId, error: RequestError): UIO[Unit] =
+      actionQueue.offer(ServerAction.SendRequestError(sessionId, error)).unit
 
     /** Confirm that a session has been committed by Raft.
       */
@@ -172,6 +182,9 @@ object RaftServer:
               now <- Clock.instant
             yield Leader(sessions = Sessions.fromMetadata(sessions, config, now))
 
+          case StreamEvent.Action(ServerAction.SendRequestError(_, _)) =>
+            ZIO.succeed(this)
+
           case StreamEvent.Action(ServerAction.StepDown(_)) =>
             ZIO.succeed(this)
 
@@ -268,6 +281,13 @@ object RaftServer:
               case None =>
                 ZIO.logWarning(s"Cannot send server request - session $sessionId not found").as(this)
 
+          case StreamEvent.Action(ServerAction.SendRequestError(sessionId, error)) =>
+            sessions.getRoutingId(sessionId) match
+              case Some(routingId) =>
+                transport.sendMessage(routingId, error).orDie.as(this)
+              case None =>
+                ZIO.logWarning(s"Cannot send request error - session $sessionId not found").as(this)
+
           case StreamEvent.Action(ServerAction.SessionCreationConfirmed(sessionId)) =>
             for
               now <- Clock.instant
@@ -358,7 +378,12 @@ object RaftServer:
               case Some(sessionId) =>
                 for
                   _ <- raftActionsOut.offer(
-                    RaftAction.ClientRequest(sessionId, clientRequest.requestId, clientRequest.payload)
+                    RaftAction.ClientRequest(
+                      sessionId,
+                      clientRequest.requestId,
+                      clientRequest.lowestPendingRequestId,
+                      clientRequest.payload
+                    )
                   )
                 yield this
               case None =>

@@ -987,6 +987,8 @@ class Raft[S, A <: Command](
       result <- promise.await
     yield result
 
+  def readStateDirty: ZIO[Any, Nothing, S] = appStateRef.get
+
   // bootstrap the node and wait until the node would become the leader, only works when the current term is zero
   def bootstrap =
     for

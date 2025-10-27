@@ -14,7 +14,7 @@ import java.time.Instant
   * @tparam SR
   *   Server-initiated request payload type
   */
-sealed trait SessionCommand[UC <: Command, SR] extends Command
+sealed trait SessionCommand[+UC <: Command, SR] extends Command
 
 object SessionCommand:
 
@@ -123,5 +123,5 @@ object SessionCommand:
     createdAt: Instant,
     lastSentBefore: Instant
   ) extends SessionCommand[Nothing, SR]:
-    type Response = List[PendingServerRequest[SR]]
+    type Response = List[ServerRequestEnvelope[SR]]
 end SessionCommand

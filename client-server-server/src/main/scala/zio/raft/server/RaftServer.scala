@@ -49,6 +49,13 @@ final class RaftServer(
   def stepDown(leaderId: Option[MemberId]): UIO[Unit] =
     actionQueue.offer(RaftServer.ServerAction.StepDown(leaderId)).unit
 
+  /** Notify server that this node has changed leader.
+    * @param leaderId
+    *   The new leader ID
+    */
+  def leaderChanged(leaderId: MemberId): UIO[Unit] =
+    actionQueue.offer(RaftServer.ServerAction.LeaderChanged(leaderId)).unit
+
 object RaftServer:
 
   /** Actions initiated by the server (internal or from Raft).

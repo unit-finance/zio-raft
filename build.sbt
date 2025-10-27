@@ -120,7 +120,7 @@ lazy val kvstore = project
     ),
     excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
-  .dependsOn(raft, raftZmq, stores, sessionStateMachine, clientServerProtocol)
+  .dependsOn(raft, raftZmq, stores, sessionStateMachine, clientServerProtocol, clientServerServer)
 
 lazy val raftZmq = project
   .in(file("raft-zmq"))

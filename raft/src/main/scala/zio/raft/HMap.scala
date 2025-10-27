@@ -181,7 +181,7 @@ final case class HMap[M <: Tuple](private val m: TreeMap[Array[Byte], Any] =
     * hmap.get["invalid"](...)  // ERROR: Prefix 'invalid' is not allowed
     * }}}
     */
-  def get[P <: String & Singleton: ValueOf](key: KeyAt[M, P])(using
+  inline def get[P <: String & Singleton: ValueOf](key: KeyAt[M, P])(using
     Contains[M, P],
     KeyLike[KeyAt[M, P]]
   ): Option[ValueAt[M, P]] =
@@ -564,7 +564,7 @@ object HMap:
     * type BadType = HMap.KeyAt[Schema, "invalid"]      // Nothing
     *   }}}
     */
-  type KeyAt[M <: Tuple, P <: String] = M match
+  type KeyAt[M <: Tuple, P <: String & Singleton] = M match
     case (P, k, v) *: t => k
     case (?, ?, ?) *: t => KeyAt[t, P]
     case EmptyTuple     => Nothing

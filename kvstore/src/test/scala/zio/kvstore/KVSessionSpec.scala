@@ -41,6 +41,6 @@ object KVSessionSpec extends ZIOSpecDefault:
       )
       val (_, result) = sm.apply(get).run(s3)
       val Right((resp, _)) = result.asInstanceOf[Either[Any, (KVResponse, List[Any])]]: @unchecked
-      assertTrue(resp == GetResult(Some("v")))
+      assertTrue(resp == KVResponse.GetResult(Some("v")))
     }
   )

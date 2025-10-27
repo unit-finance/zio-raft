@@ -23,7 +23,7 @@ object StreamItem:
     val command: A
     val promise: CommandPromise[command.Response]
 
-class Raft[S, A <: Command](
+class Raft[W, S, A <: Command](
   val memberId: MemberId,
   peers: Peers,
   private[raft] val raftState: Ref[State[S]],
@@ -32,7 +32,7 @@ class Raft[S, A <: Command](
   private[raft] val logStore: LogStore[A],
   snapshotStore: SnapshotStore,
   rpc: RPC[A],
-  stateMachine: StateMachine[S, A],
+  stateMachine: StateMachine[W, S, A],
   appStateRef: Ref[S]
 ):
   val rpcTimeout = 50.millis
@@ -1010,14 +1010,14 @@ object Raft:
   val electionTimeout = 150
   val heartbeartInterval = (electionTimeout / 2).millis
 
-  def make[S, A <: Command](
+  def make[W, S, A <: Command](
     memberId: MemberId,
     peers: Peers,
     stable: Stable,
     logStore: LogStore[A],
     snapshotStore: SnapshotStore,
     rpc: RPC[A],
-    stateMachine: StateMachine[S, A]
+    stateMachine: StateMachine[W, S, A]
   ) =
     for
       now <- zio.Clock.instant
@@ -1047,7 +1047,7 @@ object Raft:
       )
       commandsQueue <- Queue.unbounded[StreamItem[A, S]] // TODO: should this be bounded for back-pressure?
 
-      raft = new Raft[S, A](
+      raft = new Raft[W, S, A](
         memberId,
         peers,
         state,
@@ -1061,14 +1061,14 @@ object Raft:
       )
     yield raft
 
-  def makeScoped[S, A <: Command](
+  def makeScoped[W, S, A <: Command](
     memberId: MemberId,
     peers: Peers,
     stable: Stable,
     logStore: LogStore[A],
     snapshotStore: SnapshotStore,
     rpc: RPC[A],
-    stateMachine: StateMachine[S, A]
+    stateMachine: StateMachine[W, S, A]
   ) =
     for
       raft <- make(

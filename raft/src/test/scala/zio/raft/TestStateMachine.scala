@@ -3,16 +3,17 @@ package zio.raft
 import zio.UIO
 import zio.stream.{Stream, ZStream}
 import zio.prelude.State
+import zio.prelude.fx.ZPure
 
 sealed trait TestCommands extends Command:
   type Response = Int
 case object Increase extends TestCommands
 case object Get extends TestCommands
 
-case class TestStateMachine(enableSnapshot: Boolean) extends StateMachine[Int, TestCommands]:
+case class TestStateMachine(enableSnapshot: Boolean) extends StateMachine[Any, Int, TestCommands]:
   override def emptyState: Int = 0
 
-  def apply(command: TestCommands): State[Int, command.Response] =
+  def apply(command: TestCommands): ZPure[Any, Int, Int, Any, Nothing, command.Response] =
     command match
       case Increase => State.modify(s => (s + 1, s + 1))
       case Get      => State.get

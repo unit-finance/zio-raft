@@ -7,6 +7,48 @@ import zio.zmq.RoutingId
 import scodec.bits.ByteVector
 import zio.zmq.ZContext
 
+final class RaftServer(
+  transport: ServerTransport,
+  config: ServerConfig,
+  actionQueue: Queue[RaftServer.ServerAction],
+  raftActionsOut: Queue[RaftServer.RaftAction],
+  stateRef: Ref[RaftServer.ServerState]
+):
+
+  /** Stream of actions to forward to Raft state machine.
+    */
+  def raftActions: ZStream[Any, Nothing, RaftServer.RaftAction] =
+    ZStream.fromQueue(raftActionsOut)
+
+  /** Submit a response from Raft back to a client.
+    */
+  def sendClientResponse(sessionId: SessionId, response: ClientResponse): UIO[Unit] =
+    actionQueue.offer(RaftServer.ServerAction.SendResponse(sessionId, response)).unit
+
+  /** Send server-initiated request to a client.
+    */
+  def sendServerRequest(sessionId: SessionId, request: ServerRequest): UIO[Unit] =
+    actionQueue.offer(RaftServer.ServerAction.SendServerRequest(sessionId, request)).unit
+
+  /** Send request error to a client. */
+  def sendRequestError(sessionId: SessionId, error: RequestError): UIO[Unit] =
+    actionQueue.offer(RaftServer.ServerAction.SendRequestError(sessionId, error)).unit
+
+  /** Confirm that a session has been committed by Raft.
+    */
+  def confirmSessionCreation(sessionId: SessionId): UIO[Unit] =
+    actionQueue.offer(RaftServer.ServerAction.SessionCreationConfirmed(sessionId)).unit
+
+  /** Notify server that this node has become the leader.
+    */
+  def stepUp(sessions: Map[SessionId, SessionMetadata]): UIO[Unit] =
+    actionQueue.offer(RaftServer.ServerAction.StepUp(sessions)).unit
+
+  /** Notify server that this node has stepped down from leadership.
+    */
+  def stepDown(leaderId: Option[MemberId]): UIO[Unit] =
+    actionQueue.offer(RaftServer.ServerAction.StepDown(leaderId)).unit
+
 object RaftServer:
 
   /** Actions initiated by the server (internal or from Raft).
@@ -35,53 +77,6 @@ object RaftServer:
     ) extends RaftAction
     case class ServerRequestAck(sessionId: SessionId, requestId: RequestId) extends RaftAction
     case class ExpireSession(sessionId: SessionId) extends RaftAction
-
-  /** Simplified RaftServer using pure functional state machine.
-    *
-    * Similar to RaftClient, the server uses a unified stream that merges all events. Each ServerState knows how to
-    * handle events and transition to new states.
-    */
-  class RaftServer(
-    transport: ServerTransport,
-    config: ServerConfig,
-    actionQueue: Queue[ServerAction],
-    raftActionsOut: Queue[RaftAction],
-    stateRef: Ref[ServerState]
-  ):
-
-    /** Stream of actions to forward to Raft state machine.
-      */
-    def raftActions: ZStream[Any, Nothing, RaftAction] =
-      ZStream.fromQueue(raftActionsOut)
-
-    /** Submit a response from Raft back to a client.
-      */
-    def sendClientResponse(sessionId: SessionId, response: ClientResponse): UIO[Unit] =
-      actionQueue.offer(ServerAction.SendResponse(sessionId, response)).unit
-
-    /** Send server-initiated request to a client.
-      */
-    def sendServerRequest(sessionId: SessionId, request: ServerRequest): UIO[Unit] =
-      actionQueue.offer(ServerAction.SendServerRequest(sessionId, request)).unit
-
-    /** Send request error to a client. */
-    def sendRequestError(sessionId: SessionId, error: RequestError): UIO[Unit] =
-      actionQueue.offer(ServerAction.SendRequestError(sessionId, error)).unit
-
-    /** Confirm that a session has been committed by Raft.
-      */
-    def confirmSessionCreation(sessionId: SessionId): UIO[Unit] =
-      actionQueue.offer(ServerAction.SessionCreationConfirmed(sessionId)).unit
-
-    /** Notify server that this node has become the leader.
-      */
-    def stepUp(sessions: Map[SessionId, SessionMetadata]): UIO[Unit] =
-      actionQueue.offer(ServerAction.StepUp(sessions)).unit
-
-    /** Notify server that this node has stepped down from leadership.
-      */
-    def stepDown(leaderId: Option[MemberId]): UIO[Unit] =
-      actionQueue.offer(ServerAction.StepDown(leaderId)).unit
 
   def make(bindAddress: String): ZIO[Scope & ZContext, Throwable, RaftServer] =
     val config = ServerConfig.make(bindAddress)

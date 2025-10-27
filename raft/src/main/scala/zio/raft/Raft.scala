@@ -61,11 +61,11 @@ class Raft[S, A <: Command](
       )
 
       _ <- (currentState, leaderId) match
-        case (l: Leader[S], _) => 
+        case (l: Leader[S], _) =>
           stateNotificationsQueue.offer(StateNotification.SteppedDown(leaderId))
-        case (f: State.Follower[S], Some(leaderId)) if f.leaderId != Some(leaderId) => 
+        case (f: State.Follower[S], Some(leaderId)) if f.leaderId != Some(leaderId) =>
           stateNotificationsQueue.offer(StateNotification.LeaderChanged(leaderId))
-        case (c: State.Candidate[S], Some(leaderId)) => 
+        case (c: State.Candidate[S], Some(leaderId)) =>
           stateNotificationsQueue.offer(StateNotification.LeaderChanged(leaderId))
         case _ => ZIO.unit
     yield newTerm
@@ -83,7 +83,7 @@ class Raft[S, A <: Command](
             _ <- ZIO.logDebug(
               s"memberId=${this.memberId} Following $leaderId $currentTerm"
             )
-            
+
             // Leader changed, so let's notify
             _ <- stateNotificationsQueue.offer(StateNotification.LeaderChanged(leaderId))
           yield ()
@@ -532,6 +532,8 @@ class Raft[S, A <: Command](
             PendingCommands.empty
           )
         )
+
+        _ <- stateNotificationsQueue.offer(StateNotification.SteppedUp)
       yield ()
 
     for

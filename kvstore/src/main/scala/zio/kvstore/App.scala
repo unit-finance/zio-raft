@@ -8,7 +8,6 @@ import zio.raft.{Command, Index, MemberId, Raft, SnapshotStore, StateMachine}
 import zio.stream.{Stream, ZStream}
 import zio.zmq.ZContext
 import zio.{Chunk, UIO, ZIO, ZIOAppArgs, ZLayer}
-import zio.prelude.State
 
 import scodec.Codec
 import scodec.bits.BitVector
@@ -56,8 +55,8 @@ class KVStateMachine extends StateMachine[Any, Map[String, String], KVCommand]:
   override def apply(command: KVCommand)
     : ZPure[Any, Map[String, String], Map[String, String], Any, Nothing, command.Response] =
     (command match
-      case Set(k, v) => State.update((map: Map[String, String]) => map.updated(k, v))
-      case Get(k)    => State.get.map((map: Map[String, String]) => map.get(k).getOrElse(""))
+      case Set(k, v) => ZPure.update((map: Map[String, String]) => map.updated(k, v))
+      case Get(k)    => ZPure.get.map((map: Map[String, String]) => map.get(k).getOrElse(""))
     ).map(_.asInstanceOf[command.Response])
 
 class HttpServer(raft: Raft[Any, Map[String, String], KVCommand]):

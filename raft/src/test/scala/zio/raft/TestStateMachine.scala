@@ -2,7 +2,6 @@ package zio.raft
 
 import zio.UIO
 import zio.stream.{Stream, ZStream}
-import zio.prelude.State
 import zio.prelude.fx.ZPure
 
 sealed trait TestCommands extends Command:
@@ -15,8 +14,8 @@ case class TestStateMachine(enableSnapshot: Boolean) extends StateMachine[Any, I
 
   def apply(command: TestCommands): ZPure[Any, Int, Int, Any, Nothing, command.Response] =
     command match
-      case Increase => State.modify(s => (s + 1, s + 1))
-      case Get      => State.get
+      case Increase => ZPure.modify(s => (s + 1, s + 1))
+      case Get      => ZPure.get
 
   override def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[Int] =
     stream.runCollect.map(b => new String(b.toArray).toInt)

@@ -100,7 +100,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
     } yield response == expectedResult
   }
 
-  override def spec: Spec[ZContext with TestEnvironment with Scope, Any] = suiteAll("RaftClient with Real ZMQ") {
+  override def spec: Spec[ZContext & TestEnvironment & Scope, Any] = suiteAll("RaftClient with Real ZMQ") {
 
     // ==========================================================================
     // Session Creation Tests
@@ -252,7 +252,7 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
           assertTrue(clientReq.requestId == RequestId.fromLong(1L))
       }
 
-      test("T002: includes lowestPendingRequestId = min(pending) on ClientRequest") {
+      test("includes lowestPendingRequestId = min(pending) on ClientRequest") {
         val port = findOpenPort
         for {
           mockServer <- ZSocket.server

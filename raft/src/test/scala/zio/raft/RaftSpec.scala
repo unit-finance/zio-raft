@@ -17,8 +17,11 @@ object RaftSpec extends ZIOSpecDefault:
   //     )
   //   )) ++ testEnvironment
 
-
-  def makeRaft(memberId: MemberId, peers: Peers, enableSnapshot: Boolean): ZIO[Any, Nothing, (Raft[Int, TestCommands], MockRpc[TestCommands])] =
+  def makeRaft(
+    memberId: MemberId,
+    peers: Peers,
+    enableSnapshot: Boolean
+  ): ZIO[Any, Nothing, (Raft[Int, TestCommands], MockRpc[TestCommands])] =
     (for
       stable <- Stable.makeInMemory
       logStore <- LogStore.makeInMemory[TestCommands]
@@ -57,22 +60,22 @@ object RaftSpec extends ZIOSpecDefault:
         leaderId
       case _: State.Candidate[Int] => None
       case State.Leader(
-            nextIndex,
-            matchIndex,
-            heartbeatDue,
-            replicationStatus,
-            commitIndex,
-            lastApplied,
-            pendingReads,
-            pendingCommands
-          ) =>
+          nextIndex,
+          matchIndex,
+          heartbeatDue,
+          replicationStatus,
+          commitIndex,
+          lastApplied,
+          pendingReads,
+          pendingCommands
+        ) =>
         Some(raft.memberId)
 
   def handleHeartbeat(
-      raft: Raft[Int, TestCommands],
-      term: Term,
-      leaderId: MemberId,
-      commitIndex: Index
+    raft: Raft[Int, TestCommands],
+    term: Term,
+    leaderId: MemberId,
+    commitIndex: Index
   ) =
     raft.handleStreamItem(
       StreamItem.Message[TestCommands, Int](
@@ -81,9 +84,9 @@ object RaftSpec extends ZIOSpecDefault:
     )
 
   def handleVoteGranted(
-      raft: Raft[Int, TestCommands],
-      term: Term,
-      memberId: MemberId
+    raft: Raft[Int, TestCommands],
+    term: Term,
+    memberId: MemberId
   ) =
     raft.handleStreamItem(
       StreamItem.Message[TestCommands, Int](
@@ -92,13 +95,13 @@ object RaftSpec extends ZIOSpecDefault:
     )
 
   def handelAppendEntries(
-      raft: Raft[Int, TestCommands],
-      term: Term,
-      leaderId: MemberId,
-      previousIndex: Index,
-      previousTerm: Term,
-      entries: List[LogEntry[TestCommands]],
-      leaderCommitIndex: Index
+    raft: Raft[Int, TestCommands],
+    term: Term,
+    leaderId: MemberId,
+    previousIndex: Index,
+    previousTerm: Term,
+    entries: List[LogEntry[TestCommands]],
+    leaderCommitIndex: Index
   ) =
     raft.handleStreamItem(
       StreamItem.Message[TestCommands, Int](
@@ -122,10 +125,10 @@ object RaftSpec extends ZIOSpecDefault:
   def sendCommand(raft: Raft[Int, TestCommands], commandArg: TestCommands) =
     for
       promiseArg <- zio.Promise.make[NotALeaderError, Int]
-      _ <- raft.handleStreamItem(new CommandMessage[TestCommands, Int] {
+      _ <- raft.handleStreamItem(new CommandMessage[TestCommands, Int]:
         val command: TestCommands = commandArg
         val promise: CommandPromise[Int] = promiseArg
-      })
+      )
     yield ()
 
   def bootstrap(raft: Raft[Int, TestCommands]) =

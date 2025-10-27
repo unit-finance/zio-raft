@@ -18,19 +18,27 @@ import scala.jdk.CollectionConverters.*
 object RaftIntegrationSpec extends ZIOSpecDefault:
 
   // We use TestLogger instead of ZTestLogger because ZTestLogger can cause duplicated log lines which causes flakiness in our tests.
-  class TestLogger extends ZLogger[String, Unit] {
+  class TestLogger extends ZLogger[String, Unit]:
     val messages: ConcurrentLinkedQueue[String] = new ConcurrentLinkedQueue()
-    override def apply(trace: Trace, fiberId: FiberId, logLevel: LogLevel, message: () => String, cause: Cause[Any], context: FiberRefs, spans: List[LogSpan], annotations: Map[String, String]): Unit =
+    override def apply(
+      trace: Trace,
+      fiberId: FiberId,
+      logLevel: LogLevel,
+      message: () => String,
+      cause: Cause[Any],
+      context: FiberRefs,
+      spans: List[LogSpan],
+      annotations: Map[String, String]
+    ): Unit =
       messages.add(message())
-    
+
     def getMessages: List[String] = messages.asScala.toList
-  }
 
   private def findTheNewLeader(
-      currentLeader: Raft[Int, TestCommands],
-      raft1: Raft[Int, TestCommands],
-      raft2: Raft[Int, TestCommands],
-      raft3: Raft[Int, TestCommands]
+    currentLeader: Raft[Int, TestCommands],
+    raft1: Raft[Int, TestCommands],
+    raft2: Raft[Int, TestCommands],
+    raft3: Raft[Int, TestCommands]
   ) =
     for
       r1IsLeader <- raft1.isTheLeader
@@ -43,10 +51,10 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
       else None
 
   private def waitForNewLeader(
-      currentLeader: Raft[Int, TestCommands],
-      raft1: Raft[Int, TestCommands],
-      raft2: Raft[Int, TestCommands],
-      raft3: Raft[Int, TestCommands]
+    currentLeader: Raft[Int, TestCommands],
+    raft1: Raft[Int, TestCommands],
+    raft2: Raft[Int, TestCommands],
+    raft3: Raft[Int, TestCommands]
   ) =
     findTheNewLeader(currentLeader, raft1, raft2, raft3)
       .tap:
@@ -192,7 +200,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         actualState <- leader.sendCommand(Get)
         logs = leader.logStore.stream(Index.one, Index(10))
         actualLogs <- logs.runCollect.map(_.map {
-          case a: NoopLogEntry => None
+          case a: NoopLogEntry       => None
           case a: CommandLogEntry[?] => Some(a.command)
         }.toList)
         expectedLogs = List(None, Some(Increase), None, Some(Increase), Some(Get))
@@ -210,16 +218,18 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch3
         ) <- makeRaft().provideSomeLayer(zio.Runtime.removeDefaultLoggers >>> zio.Runtime.addLogger(testLogger))
 
-        // Making sure we call readState while there are queued write commands is difficult, 
+        // Making sure we call readState while there are queued write commands is difficult,
         // we use this approach to make sure there are some unhandled commands before we call readState, hopefully it won't be too flaky
         _ <- r1.sendCommand(Increase).fork.repeatN(99)
 
         readResult1 <- r1.readState
-        
+
         messages = testLogger.getMessages
         pendingHeartbeatLogCount = messages.count(_.contains("memberId=MemberId(peer1) read pending heartbeat"))
         pendingCommandLogCount = messages.count(_.contains("memberId=MemberId(peer1) read pending command"))
-      yield assertTrue(readResult1 > 0) && assertTrue(pendingHeartbeatLogCount == 0) && assertTrue(pendingCommandLogCount == 1)
+      yield assertTrue(readResult1 > 0) && assertTrue(pendingHeartbeatLogCount == 0) && assertTrue(
+        pendingCommandLogCount == 1
+      )
     } @@ TestAspect.flaky, // TODO (eran): because of the way this test is structured it is currently flaky, we'll need to find another way to send commands so the readState will have pending commands
 
     test("read returns the correct state when there are no pending writes.") {
@@ -233,19 +243,20 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           r3,
           killSwitch3
         ) <- makeRaft().provideSomeLayer(zio.Runtime.removeDefaultLoggers >>> zio.Runtime.addLogger(testLogger))
-        
+
         _ <- r1.sendCommand(Increase)
 
         // When this runs we should have no writes in the queue since the sendCommand call is blocking
         readResult <- r1.readState
-        
-        // verify read waits for heartbeat and not a write/noop command 
+
+        // verify read waits for heartbeat and not a write/noop command
         messages = testLogger.getMessages
         pendingHeartbeatLogCount = messages.count(_.contains("memberId=MemberId(peer1) read pending heartbeat"))
         pendingCommandLogCount = messages.count(_.contains("memberId=MemberId(peer1) read pending command"))
-      yield assertTrue(readResult == 1) && assertTrue(pendingHeartbeatLogCount == 1) && assertTrue(pendingCommandLogCount == 0)
+      yield assertTrue(readResult == 1) && assertTrue(pendingHeartbeatLogCount == 1) && assertTrue(
+        pendingCommandLogCount == 0
+      )
     },
-
     test("read returns the correct state when there are no writes and one follower is down.") {
       for
         (
@@ -257,11 +268,9 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch3
         ) <- makeRaft()
 
-
         _ <- r1.sendCommand(Increase)
         _ <- killSwitch2.set(false)
         readResult <- r1.readState
-        
       yield assertTrue(readResult == 1)
     },
     test("read fails when not leader") {
@@ -274,10 +283,9 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           r3,
           killSwitch3
         ) <- makeRaft()
-                
+
         // Try to read from a non-leader node (should fail with NotALeaderError)
         readResult <- r2.readState.either
-        
       yield assertTrue(
         readResult.isLeft && readResult.left.exists(_.isInstanceOf[NotALeaderError])
       )
@@ -292,26 +300,27 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           r3,
           killSwitch3
         ) <- makeRaft()
-        
+
         // Verify r1 is the leader initially
         _ <- r1.sendCommand(Increase)
         initialState <- r1.readState
-        
+
         // Isolate the leader (r1) from the rest of the cluster
         _ <- killSwitch1.set(false)
-        
+
         // Try to send a command to the isolated leader
-        // This can either timeout (if leader hasn't detected isolation yet) 
+        // This can either timeout (if leader hasn't detected isolation yet)
         // or fail with NotALeaderError (if leader has stepped down)
         commandResult <- r1.sendCommand(Increase).timeout(2.seconds).either
-        
       yield assertTrue(
         initialState == 1 && // Verify initial command worked
-        (commandResult match {
-          case Right(None) => true // Command timed out - leader couldn't commit
-          case Left(_: NotALeaderError) => true // Leader stepped down due to isolation
-          case _ => false // Any other result is unexpected
-        })
+          (commandResult match
+              case Right(None)              => true // Command timed out - leader couldn't commit
+              case Left(_: NotALeaderError) => true // Leader stepped down due to isolation
+              case _                        => false
+            // Any other result is unexpected
+          )
       )
     } @@ TestAspect.timeout(5.seconds)
   ) @@ withLiveClock
+end RaftIntegrationSpec

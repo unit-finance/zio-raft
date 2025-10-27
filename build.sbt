@@ -80,7 +80,7 @@ lazy val commonScalacOptions = Def.setting{
 
 lazy val root = project
   .in(file("."))
-  .aggregate(raft, kvstore, zio1zmq, zio2zmq, raftZmq, stores, ziolmdb, clientServerProtocol, clientServerServer, clientServerClient)
+  .aggregate(raft, kvstore, zio1zmq, zio2zmq, raftZmq, stores, ziolmdb, clientServerProtocol, clientServerServer, clientServerClient, sessionStateMachine)
   .settings(
     publish / skip := true,
     crossScalaVersions := Nil
@@ -115,10 +115,12 @@ lazy val kvstore = project
       "dev.zio" %% "zio" % zio2Version,
       "dev.zio" %% "zio-prelude" % zioPreludeVersion,
       "dev.zio" %% "zio-http" % "3.0.0-RC8",
+      "dev.zio" %% "zio-test" % zio2Version % Test,
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test
     ),
     excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
-  .dependsOn(raft, raftZmq, stores)
+  .dependsOn(raft, raftZmq, stores, sessionStateMachine, clientServerProtocol)
 
 lazy val raftZmq = project
   .in(file("raft-zmq"))
@@ -275,3 +277,24 @@ lazy val clientServerClient = project
     })
   )
   .dependsOn(clientServerProtocol, zio2zmq)
+
+lazy val sessionStateMachine = project
+  .in(file("session-state-machine"))
+  .settings(
+    name := "zio-raft-session-state-machine",
+    scalaVersion := mainScalaVersion,
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
+    scalacOptions ++= commonScalacOptions.value ++ Seq(
+      "-Wvalue-discard",
+      "-Xfatal-warnings"
+    ),
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio" % zio2Version,
+      "dev.zio" %% "zio-prelude" % zioPreludeVersion,
+      "org.scodec" %% "scodec-core" % "2.2.2",
+      "dev.zio" %% "zio-test" % zio2Version % Test,
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test
+    ),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
+  )
+  .dependsOn(raft, clientServerProtocol)

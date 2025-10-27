@@ -60,6 +60,8 @@ package object protocol {
       */
     val zero: RequestId = RequestId(0L)
 
+    val max: RequestId = RequestId(Long.MaxValue)
+
     /** Create a RequestId from a long value (for testing/deserialization).
       */
     def fromLong(id: Long): RequestId = {
@@ -80,6 +82,12 @@ package object protocol {
       def value: Long = RequestId.unwrap(requestId)
 
       def isLowerOrEqual(other: RequestId): Boolean = value <= other.value
+
+      def isLowerThan(other: RequestId): Boolean = value < other.value
+
+      def isGreaterThan(other: RequestId): Boolean = value > other.value
+
+      def increaseBy(x: Int) = RequestId(value + x)
     }
   }
 

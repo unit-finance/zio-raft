@@ -9,7 +9,7 @@ object TestRpc:
     make[A](1).map(_.head._1)
 
   def make[A <: Command](
-      numberOfPeers: Int
+    numberOfPeers: Int
   ): ZIO[Any, Nothing, List[Tuple2[RPC[A], Ref[Boolean]]]] =
     for
       peer1 <- zio.Queue.unbounded[RPCMessage[A]]
@@ -40,28 +40,28 @@ object TestRpc:
     )
 
 case class TestRpc[A <: Command](
-    myQueue: zio.Queue[RPCMessage[A]],
-    isResponding: zio.Ref[Boolean],
-    peers: zio.Ref[Map[MemberId, zio.Queue[RPCMessage[A]]]]
+  myQueue: zio.Queue[RPCMessage[A]],
+  isResponding: zio.Ref[Boolean],
+  peers: zio.Ref[Map[MemberId, zio.Queue[RPCMessage[A]]]]
 ) extends RPC[A]:
   override def sendRequestVoteResponse(
-      candidateId: MemberId,
-      response: RequestVoteResult[A]
+    candidateId: MemberId,
+    response: RequestVoteResult[A]
   ): UIO[Unit] = peers.get
     .flatMap(_.get(candidateId).get.offer(response))
     .unlessZIO(isResponding.get.map(!_))
     .unit
   override def sendAppendEntriesResponse(
-      leaderId: MemberId,
-      response: AppendEntriesResult[A]
+    leaderId: MemberId,
+    response: AppendEntriesResult[A]
   ): UIO[Unit] =
     peers.get
       .flatMap(_.get(leaderId).get.offer(response))
       .unlessZIO(isResponding.get.map(!_))
       .unit
   override def sendAppendEntries(
-      peer: MemberId,
-      request: AppendEntriesRequest[A]
+    peer: MemberId,
+    request: AppendEntriesRequest[A]
   ): UIO[Boolean] =
     for
       isResponding <- isResponding.get
@@ -73,8 +73,8 @@ case class TestRpc[A <: Command](
     yield result
 
   override def sendRequestVote(
-      peer: MemberId,
-      m: RequestVoteRequest[A]
+    peer: MemberId,
+    m: RequestVoteRequest[A]
   ): UIO[Unit] =
     peers.get
       .flatMap(_.get(peer).get.offer(m))
@@ -94,16 +94,16 @@ case class TestRpc[A <: Command](
       .unit
 
   override def sendInstallSnapshot(
-      peer: MemberId,
-      m: InstallSnapshotRequest[A]
+    peer: MemberId,
+    m: InstallSnapshotRequest[A]
   ): UIO[Unit] =
     peers.get
       .flatMap(_.get(peer).get.offer(m))
       .unlessZIO(isResponding.get.map(!_))
       .unit
   override def sendInstallSnapshotResponse(
-      leaderId: MemberId,
-      response: InstallSnapshotResult[A]
+    leaderId: MemberId,
+    response: InstallSnapshotResult[A]
   ): UIO[Unit] =
     peers.get
       .flatMap(_.get(leaderId).get.offer(response))
@@ -114,3 +114,4 @@ case class TestRpc[A <: Command](
     ZStream
       .fromQueue(myQueue)
       .filterZIO(x => isResponding.get)
+end TestRpc

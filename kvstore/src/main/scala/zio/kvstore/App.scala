@@ -8,13 +8,13 @@ import zio.raft.{Command, Index, MemberId, Raft, SnapshotStore, StateMachine}
 import zio.stream.{Stream, ZStream}
 import zio.zmq.ZContext
 import zio.{Chunk, UIO, ZIO, ZIOAppArgs, ZLayer}
+import zio.prelude.State
 
 import scodec.Codec
 import scodec.bits.BitVector
 import scodec.codecs.{ascii, discriminated, fixedSizeBytes, utf8_32}
 import zio.raft.stores.FileStable
 import zio.raft.stores.segmentedlog.SegmentedLog
-import zio.prelude.fx.ZPure
 
 sealed trait KVCommand extends Command
 
@@ -34,7 +34,7 @@ object KVCommand:
     .typecase("S", setCodec)
     .typecase("G", getCodec)
 
-class KVStateMachine extends StateMachine[Any, Map[String, String], KVCommand]:
+class KVStateMachine extends StateMachine[Map[String, String], KVCommand]:
 
   override def emptyState: Map[String, String] = Map.empty
 
@@ -52,14 +52,13 @@ class KVStateMachine extends StateMachine[Any, Map[String, String], KVCommand]:
   override def shouldTakeSnapshot(lastSnaphotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean = false
   // commitIndex.value - lastSnaphotIndex.value > 2
 
-  override def apply(command: KVCommand)
-    : ZPure[Any, Map[String, String], Map[String, String], Any, Nothing, command.Response] =
+  override def apply(command: KVCommand): State[Map[String, String], command.Response] =
     (command match
-      case Set(k, v) => ZPure.update((map: Map[String, String]) => map.updated(k, v))
-      case Get(k)    => ZPure.get.map((map: Map[String, String]) => map.get(k).getOrElse(""))
+      case Set(k, v) => State.update((map: Map[String, String]) => map.updated(k, v))
+      case Get(k)    => State.get.map((map: Map[String, String]) => map.get(k).getOrElse(""))
     ).map(_.asInstanceOf[command.Response])
 
-class HttpServer(raft: Raft[Any, Map[String, String], KVCommand]):
+class HttpServer(raft: Raft[Map[String, String], KVCommand]):
 
   val app = Routes(
     GET / "" -> handler(ZIO.succeed(Response.text("Hello World!"))),

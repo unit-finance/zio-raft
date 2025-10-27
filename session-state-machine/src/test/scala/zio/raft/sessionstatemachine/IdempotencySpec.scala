@@ -55,8 +55,9 @@ object IdempotencySpec extends ZIOSpecDefault:
     var callCount = 0 // Track how many times applyCommand is called
 
     protected def applyCommand(
-      cmd: TestCommand,
-      createdAt: Instant
+      createdAt: Instant,
+      sessionId: SessionId,
+      cmd: TestCommand
     ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], cmd.Response & TestResponse] =
       callCount += 1
       cmd match
@@ -70,16 +71,16 @@ object IdempotencySpec extends ZIOSpecDefault:
           yield newValue.asInstanceOf[cmd.Response & TestResponse]
 
     protected def handleSessionCreated(
+      createdAt: Instant,
       sid: SessionId,
-      caps: Map[String, String],
-      createdAt: Instant
+      caps: Map[String, String]
     ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
       StateWriter.succeed(())
 
     protected def handleSessionExpired(
+      createdAt: Instant,
       sid: SessionId,
-      capabilities: Map[String, String],
-      createdAt: Instant
+      capabilities: Map[String, String]
     ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
       StateWriter.succeed(())
 

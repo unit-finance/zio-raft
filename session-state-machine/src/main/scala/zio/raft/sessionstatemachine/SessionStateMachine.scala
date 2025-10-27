@@ -94,10 +94,12 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     * ServerRequestForSession to specify target sessionId. This allows sending requests to ANY session, not just the
     * current one!
     *
-    * @param command
-    *   The user command to process
     * @param createdAt
     *   The timestamp when the command was created (use this instead of adding to command)
+    * @param sessionId
+    *   The session id that originated the command
+    * @param command
+    *   The user command to process
     * @return
     *   StateWriter monad yielding the response (must be subtype of R) and accumulating server requests via log
     *
@@ -119,7 +121,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     * case class GetCmd(key: String) extends Command:
     *   type Response = GetResponse  // Must be subtype of MyResponse!
     *
-    * protected def applyCommand(cmd: UC, createdAt: Instant): StateWriter[HMap[Schema], ServerRequestForSession[SR], cmd.Response & MyResponse] =
+    * protected def applyCommand(createdAt: Instant, sessionId: SessionId, cmd: UC): StateWriter[HMap[Schema], ServerRequestForSession[SR], cmd.Response & MyResponse] =
     *   for {
     *     state <- StateWriter.get[HMap[Schema]]
     *     result = GetResponse(state.get["kv"](key))  // Response is GetResponse & MyResponse
@@ -128,8 +130,9 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     *   }}}
     */
   protected def applyCommand(
-    command: UC,
-    createdAt: Instant
+    createdAt: Instant,
+    sessionId: SessionId,
+    command: UC
   ): StateWriter[HMap[Schema], ServerRequestForSession[SR], command.Response & R]
 
   /** Handle session creation event.
@@ -139,6 +142,8 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     *
     * Use `.log(ServerRequestForSession(targetSessionId, payload))` to emit server requests.
     *
+    * @param createdAt
+    *   The time the session was created
     * @param sessionId
     *   The newly created session ID
     * @param capabilities
@@ -154,9 +159,9 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     *   Server requests must specify target sessionId (can be different from current session)
     */
   protected def handleSessionCreated(
+    createdAt: Instant,
     sessionId: SessionId,
-    capabilities: Map[String, String],
-    createdAt: Instant
+    capabilities: Map[String, String]
   ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Unit]
 
   /** Handle session expiration event.
@@ -167,6 +172,8 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     * Use `.log(ServerRequestForSession(targetSessionId, payload))` to emit server requests. Server requests can target
     * ANY session, not just the expiring one!
     *
+    * @param createdAt
+    *   The time the session was created
     * @param sessionId
     *   The expired session ID
     * @param capabilities
@@ -184,9 +191,9 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     *   Server requests can be for OTHER sessions (e.g., notify admin session)
     */
   protected def handleSessionExpired(
+    createdAt: Instant,
     sessionId: SessionId,
-    capabilities: Map[String, String],
-    createdAt: Instant
+    capabilities: Map[String, String]
   ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Unit]
 
   // ====================================================================================
@@ -300,7 +307,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
               // Update highestLowestPendingRequestIdSeen ONLY when actually executing a new request
               _ <- updateHighestLowestPendingRequestIdSeen(cmd.sessionId, cmd.lowestPendingRequestId)
               _ <- cleanupCache(cmd.sessionId, cmd.lowestPendingRequestId)
-              (serverRequestsLog, response) <- applyCommand(cmd.command, cmd.createdAt).withLog
+              (serverRequestsLog, response) <- applyCommand(cmd.createdAt, cmd.sessionId, cmd.command).withLog
               assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
               _ <- cacheResponse((cmd.sessionId, cmd.requestId), response)
             yield Right((response, assignedRequests))
@@ -370,7 +377,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     : State[HMap[Schema], List[ServerRequestEnvelope[SR]]] =
     for
       _ <- createSessionMetadata(cmd.sessionId, cmd.capabilities, cmd.createdAt)
-      (serverRequestsLog, _) <- handleSessionCreated(cmd.sessionId, cmd.capabilities, cmd.createdAt).withLog
+      (serverRequestsLog, _) <- handleSessionCreated(cmd.createdAt, cmd.sessionId, cmd.capabilities).withLog
       assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
     yield assignedRequests
 
@@ -389,7 +396,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     : State[HMap[Schema], List[ServerRequestEnvelope[SR]]] =
     for
       capabilities <- getSessionCapabilities(cmd.sessionId)
-      (serverRequestsLog, _) <- handleSessionExpired(cmd.sessionId, capabilities, cmd.createdAt).withLog
+      (serverRequestsLog, _) <- handleSessionExpired(cmd.createdAt, cmd.sessionId, capabilities).withLog
       assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
       _ <- expireSession(cmd.sessionId)
     yield assignedRequests

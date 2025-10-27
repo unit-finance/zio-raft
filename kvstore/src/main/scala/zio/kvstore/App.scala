@@ -78,8 +78,9 @@ class KVStateMachine extends SessionStateMachine[KVCommand, KVResponse, KVServer
   val codecs = summon[HMap.TypeclassMap[Schema, Codec]]
 
   protected def applyCommand(
-    command: KVCommand,
-    createdAt: Instant
+    createdAt: Instant,
+    sessionId: SessionId,
+    command: KVCommand
   ): StateWriter[HMap[KVCompleteSchema], ServerRequestForSession[KVServerRequest], command.Response & KVResponse] =
     command match
       case set @ KVCommand.Set(key, value) =>
@@ -96,16 +97,16 @@ class KVStateMachine extends SessionStateMachine[KVCommand, KVResponse, KVServer
         yield GetResult(result).asResponseType(command, get)
 
   protected def handleSessionCreated(
+    createdAt: Instant,
     sessionId: SessionId,
-    capabilities: Map[String, String],
-    createdAt: Instant
+    capabilities: Map[String, String]
   ): StateWriter[HMap[KVCompleteSchema], ServerRequestForSession[KVServerRequest], Unit] =
     StateWriter.succeed(())
 
   protected def handleSessionExpired(
+    createdAt: Instant,
     sessionId: SessionId,
-    capabilities: Map[String, String],
-    createdAt: Instant
+    capabilities: Map[String, String]
   ): StateWriter[HMap[KVCompleteSchema], ServerRequestForSession[KVServerRequest], Unit] =
     StateWriter.succeed(())
 

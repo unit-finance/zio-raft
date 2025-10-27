@@ -27,10 +27,10 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
   }
 
   private def findTheNewLeader(
-      currentLeader: Raft[Int, TestCommands],
-      raft1: Raft[Int, TestCommands],
-      raft2: Raft[Int, TestCommands],
-      raft3: Raft[Int, TestCommands]
+      currentLeader: Raft[Any, Int, TestCommands],
+      raft1: Raft[Any, Int, TestCommands],
+      raft2: Raft[Any, Int, TestCommands],
+      raft3: Raft[Any, Int, TestCommands]
   ) =
     for
       r1IsLeader <- raft1.isTheLeader
@@ -43,10 +43,10 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
       else None
 
   private def waitForNewLeader(
-      currentLeader: Raft[Int, TestCommands],
-      raft1: Raft[Int, TestCommands],
-      raft2: Raft[Int, TestCommands],
-      raft3: Raft[Int, TestCommands]
+      currentLeader: Raft[Any, Int, TestCommands],
+      raft1: Raft[Any, Int, TestCommands],
+      raft2: Raft[Any, Int, TestCommands],
+      raft3: Raft[Any, Int, TestCommands]
   ) =
     findTheNewLeader(currentLeader, raft1, raft2, raft3)
       .tap:
@@ -75,7 +75,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
       snapshotStore1 <- SnapshotStore.makeInMemory
       snapshotStore2 <- SnapshotStore.makeInMemory
       snapshotStore3 <- SnapshotStore.makeInMemory
-      raft1 <- Raft.makeScoped[Int, TestCommands](
+      raft1 <- Raft.makeScoped[Any, Int, TestCommands](
         MemberId("peer1"),
         peers.filter(_ != MemberId("peer1")),
         stable1,

@@ -2,13 +2,13 @@ package zio.raft
 
 import zio.UIO
 import zio.stream.Stream
-import zio.prelude.State
+import zio.prelude.fx.ZPure
 
-trait StateMachine[S, A <: Command]:
+trait StateMachine[W, S, A <: Command]:
 
   def emptyState: S
 
-  def apply(command: A): State[S, command.Response]
+  def apply(command: A): ZPure[W, S, S, Any, Nothing, command.Response]
 
   def takeSnapshot(state: S): Stream[Nothing, Byte]
 

@@ -61,11 +61,11 @@ class Raft[S, A <: Command](
       )
 
       _ <- (currentState, leaderId) match
-        case (l: Leader[S], _) =>
+        case (_: Leader[S], _) =>
           stateNotificationsQueue.offer(StateNotification.SteppedDown(leaderId))
         case (f: State.Follower[S], Some(leaderId)) if f.leaderId != Some(leaderId) =>
           stateNotificationsQueue.offer(StateNotification.LeaderChanged(leaderId))
-        case (c: State.Candidate[S], Some(leaderId)) =>
+        case (_: State.Candidate[S], Some(leaderId)) =>
           stateNotificationsQueue.offer(StateNotification.LeaderChanged(leaderId))
         case _ => ZIO.unit
     yield newTerm

@@ -969,6 +969,12 @@ class Raft[S, A <: Command](
               ZIO
                 .logDebug(s"memberId=${this.memberId} read pending command index=$index")
                 .as(l.withReadPendingCommand(r.promise, index))
+            case None if peers.size == 0 =>
+              for
+                _ <- ZIO.logDebug("No peers, returning state")
+                appState <- appStateRef.get
+                _ <- r.promise.succeed(appState)
+              yield l
             case None =>
               for
                 now <- zio.Clock.instant
@@ -986,6 +992,8 @@ class Raft[S, A <: Command](
       _ <- commandsQueue.offer(Read[A, S](promise))
       result <- promise.await
     yield result
+
+  def readStateDirty: ZIO[Any, Nothing, S] = appStateRef.get
 
   // bootstrap the node and wait until the node would become the leader, only works when the current term is zero
   def bootstrap =

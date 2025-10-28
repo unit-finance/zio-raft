@@ -299,7 +299,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
           // If requestId < highestLowestPendingRequestIdSeen, client has acknowledged receiving this response
           if cmd.requestId.isLowerThan(highestLowestSeen) then
             // Client said "I have responses for all requestIds < highestLowestPending", so this was evicted
-            State.succeed(Left(RequestError.ResponseEvicted(cmd.sessionId, cmd.requestId)))
+            State.succeed(Left(RequestError.ResponseEvicted))
           else
             // requestId >= highestLowestPendingRequestIdSeen
             // This is a valid request (not yet acknowledged), execute the command
@@ -414,18 +414,18 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     * iterating through all pending requests.
     */
   private def handleGetRequestsForRetry(cmd: SessionCommand.GetRequestsForRetry[SR])
-    : State[HMap[Schema], List[PendingServerRequest[SR]]] =
+    : State[HMap[Schema], List[ServerRequestEnvelope[SR]]] =
     State.modify { state =>
       // Use foldRight to collect updated requests and build new state
       // This avoids vars and the need to reverse at the end
-      state.iterator["serverRequests"].foldRight((List.empty[PendingServerRequest[SR]], state)) {
+      state.iterator["serverRequests"].foldRight((List.empty[ServerRequestEnvelope[SR]], state)) {
         case (((sessionId, requestId), pending), (accumulated, currentState)) =>
           // Check if this request needs retry (lastSentAt before threshold)
           if pending.lastSentAt.isBefore(cmd.lastSentBefore) then
             // Update lastSentAt and add to accumulated list
             val updatedReq = pending.copy(lastSentAt = cmd.createdAt)
             val updatedState = currentState.updated["serverRequests"]((sessionId, requestId), updatedReq)
-            (updatedReq :: accumulated, updatedState)
+            (ServerRequestEnvelope(sessionId, requestId, updatedReq.payload) :: accumulated, updatedState)
           else
             (accumulated, currentState)
       }
@@ -552,27 +552,20 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
       // Remove all old cache entries in one efficient operation
       state.removedAll["cache"](keysToRemove)
     }
-
-  /** Dirty read helper - check if ANY session has pending requests needing retry.
-    *
-    * This method can be called directly (outside Raft consensus) to optimize the retry process. The retry process
-    * performs a dirty read, applies policy locally, and only sends GetRequestsForRetry command if retries are needed.
-    *
-    * Uses HMap.exists for efficient short-circuit evaluation - stops as soon as it finds ANY request (across all
-    * sessions) that needs retry.
-    *
-    * @param state
-    *   Current state (can be stale - dirty read)
-    * @param lastSentBefore
-    *   Retry threshold - check for requests sent before this time
-    * @return
-    *   true if any pending requests (across ALL sessions) have lastSentAt < lastSentBefore
-    */
-  def hasPendingRequests(
-    state: HMap[Schema],
+end SessionStateMachine
+object SessionStateMachine:
+  def hasPendingRequests[R, SR, UserSchema <: Tuple](
+    state: HMap[Tuple.Concat[SessionSchema[R, SR], UserSchema]],
     lastSentBefore: Instant
   ): Boolean =
     state.exists["serverRequests"] { (_, pending) =>
       pending.lastSentAt.isBefore(lastSentBefore)
     }
-end SessionStateMachine
+
+  def getSessions[R, SR, UserSchema <: Tuple](
+    state: HMap[Tuple.Concat[SessionSchema[R, SR], UserSchema]]
+  ): Map[SessionId, SessionMetadata] =
+    state.iterator["metadata"].collect {
+      case (sessionId: SessionId, metadata) =>
+        (sessionId, SessionMetadata(metadata.capabilities, metadata.createdAt))
+    }.toMap

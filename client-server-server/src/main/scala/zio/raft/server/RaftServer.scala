@@ -49,6 +49,13 @@ final class RaftServer(
   def stepDown(leaderId: Option[MemberId]): UIO[Unit] =
     actionQueue.offer(RaftServer.ServerAction.StepDown(leaderId)).unit
 
+  /** Notify server that this node has changed leader.
+    * @param leaderId
+    *   The new leader ID
+    */
+  def leaderChanged(leaderId: MemberId): UIO[Unit] =
+    actionQueue.offer(RaftServer.ServerAction.LeaderChanged(leaderId)).unit
+
 object RaftServer:
 
   /** Actions initiated by the server (internal or from Raft).
@@ -62,6 +69,7 @@ object RaftServer:
     case class SessionCreationConfirmed(sessionId: SessionId) extends ServerAction
     case class StepUp(sessions: Map[SessionId, SessionMetadata]) extends ServerAction
     case class StepDown(leaderId: Option[MemberId]) extends ServerAction
+    case class LeaderChanged(leaderId: MemberId) extends ServerAction
 
   /** Actions to forward to Raft state machine.
     */
@@ -183,6 +191,9 @@ object RaftServer:
           case StreamEvent.Action(ServerAction.StepDown(_)) =>
             ZIO.succeed(this)
 
+          case StreamEvent.Action(ServerAction.LeaderChanged(leaderId)) =>
+            ZIO.succeed(this.copy(leaderId = Some(leaderId)))
+
           case StreamEvent.Action(ServerAction.SendResponse(_, _)) =>
             ZIO.logWarning("Cannot send response - not leader").as(this)
 
@@ -261,6 +272,9 @@ object RaftServer:
               _ <- ZIO.logInfo("Lost leadership, closing all sessions")
               _ <- sessions.stepDown(transport, leaderId)
             yield Follower(leaderId)
+
+          case StreamEvent.Action(ServerAction.LeaderChanged(leaderId)) =>
+            ZIO.logWarning(s"We received LeaderChanged event while in Leader state, this should not happen").as(this)
 
           case StreamEvent.Action(ServerAction.SendResponse(sessionId, response)) =>
             sessions.getRoutingId(sessionId) match

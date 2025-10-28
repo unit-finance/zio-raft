@@ -22,6 +22,7 @@ import zio.nio.channels.AsynchronousFileChannel
 import java.nio.file.StandardOpenOption
 import zio.nio.Buffer
 import zio.stream.ZStream
+import org.lmdbjava.DbiFlags
 
 class FileSnapshotStore(
   environment: Environment,
@@ -222,7 +223,7 @@ object FileSnapshotStore:
   def make(directory: Path): ZIO[Environment, Nothing, FileSnapshotStore] =
     for
       environment <- ZIO.service[Environment]
-      database <- Database.open("snapshots").orDie
+      database <- Database.open("snapshots", DbiFlags.MDB_CREATE).orDie
       latest <- environment
         .transact(
           database.stream

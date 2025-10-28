@@ -146,7 +146,7 @@ package object sessionstatemachine:
       *
       * Per Raft dissertation Chapter 6.3, the client should create a new session and retry the operation.
       */
-    case ResponseEvicted(sessionId: SessionId, requestId: RequestId)
+    case ResponseEvicted
 
   /** Fixed schema for session management state with typed keys.
     *
@@ -185,7 +185,7 @@ package object sessionstatemachine:
 
   /** KeyLike instance for SessionId keys. Used by metadata, serverRequests, and lastServerRequestId prefixes.
     */
-  given HMap.KeyLike[SessionId] = HMap.KeyLike.forNewtype(SessionId)
+  given sessionIdKeyLike: HMap.KeyLike[SessionId] = HMap.KeyLike.forNewtype(SessionId)
 
   /** Helper type to concatenate SessionSchema with user schema.
     *

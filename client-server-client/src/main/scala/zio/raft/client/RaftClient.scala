@@ -82,7 +82,7 @@ object RaftClient {
 
       // Register finalizer to cleanly close session on scope exit
       _ <- ZIO.addFinalizer(
-        zmqTransport.sendMessage(CloseSession(CloseReason.ClientShutdown)).orDie
+        zmqTransport.sendMessage(CloseSession(CloseReason.ClientShutdown)).ignore
       )
 
     } yield client

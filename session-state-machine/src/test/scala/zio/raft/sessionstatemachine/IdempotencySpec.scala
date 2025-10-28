@@ -188,10 +188,8 @@ object IdempotencySpec extends ZIOSpecDefault:
       val (state5, result4) = sm.apply(cmd4).run(state4)
 
       (result4.asInstanceOf[Either[RequestError, (Int, List[Any])]]: @unchecked) match
-        case Left(RequestError.ResponseEvicted(sid, rid)) =>
+        case Left(RequestError.ResponseEvicted) =>
           assertTrue(
-            sid == sessionId &&
-              rid == RequestId(1) &&
               sm.callCount == 3 // Command was NOT executed again (only 3 commands processed)
           )
         case Right(_) =>

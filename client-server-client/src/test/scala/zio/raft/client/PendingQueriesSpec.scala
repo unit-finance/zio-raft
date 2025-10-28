@@ -19,10 +19,10 @@ object PendingQueriesSpec extends ZIOSpecDefault {
           pq = PendingQueries.empty.add(CorrelationId.fromString("c1"), ByteVector(1,2,3), p, now)
           sentRef <- Ref.make(0)
           transport = new ClientTransport {
-            def connect(address: String) = ZIO.unit
-            def disconnect() = ZIO.unit
-            def sendMessage(message: ClientMessage) = sentRef.update(_ + 1).unit
-            def incomingMessages = ZStream.empty
+            override def connect(address: String): ZIO[Any, Throwable, Unit] = ZIO.unit
+            override def disconnect(): ZIO[Any, Throwable, Unit] = ZIO.unit
+            override def sendMessage(message: ClientMessage): ZIO[Any, Throwable, Unit] = sentRef.update(_ + 1).unit
+            override def incomingMessages: ZStream[Any, Throwable, ServerMessage] = ZStream.empty
           }
           _ <- pq.resendAll(transport)
           sent <- sentRef.get
@@ -44,10 +44,10 @@ object PendingQueriesSpec extends ZIOSpecDefault {
         for {
           sentRef <- Ref.make(0)
           transport = new ClientTransport {
-            def connect(address: String) = ZIO.unit
-            def disconnect() = ZIO.unit
-            def sendMessage(message: ClientMessage) = sentRef.update(_ + 1).unit
-            def incomingMessages = ZStream.empty
+            override def connect(address: String): ZIO[Any, Throwable, Unit] = ZIO.unit
+            override def disconnect(): ZIO[Any, Throwable, Unit] = ZIO.unit
+            override def sendMessage(message: ClientMessage): ZIO[Any, Throwable, Unit] = sentRef.update(_ + 1).unit
+            override def incomingMessages: ZStream[Any, Throwable, ServerMessage] = ZStream.empty
           }
 
           now <- Clock.instant

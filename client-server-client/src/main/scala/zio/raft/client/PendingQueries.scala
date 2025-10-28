@@ -62,5 +62,3 @@ object PendingQueries {
     lastSentAt: Instant
   )
 }
-
-

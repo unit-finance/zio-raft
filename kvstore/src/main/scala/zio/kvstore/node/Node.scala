@@ -92,8 +92,6 @@ final case class Node(
             }
           case _ => ZIO.unit
 
-          
-
       case NodeAction.FromServer(KVServerAction.ServerRequestAck(sessionId, requestId)) =>
         for
           now <- Clock.instant

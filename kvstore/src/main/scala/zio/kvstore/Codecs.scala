@@ -27,7 +27,7 @@ object Codecs:
   given kvKeySetCodec: Codec[Set[KVKey]] =
     scodec.codecs.listOfN(scodec.codecs.uint16, utf8_32).xmap(_.map(KVKey(_)).toSet, _.toList.map(KVKey.unwrap))
 
-  // Command codecs  
+  // Command codecs
   private val setCodec: Codec[KVCommand.Set] = (utf8_32 :: utf8_32).as[KVCommand.Set]
   private val watchCodec: Codec[KVCommand.Watch] = utf8_32.as[KVCommand.Watch]
   given Codec[KVCommand] =

@@ -60,6 +60,7 @@ final class RaftServer(
     */
   def leaderChanged(leaderId: MemberId): UIO[Unit] =
     actionQueue.offer(RaftServer.ServerAction.LeaderChanged(leaderId)).unit
+end RaftServer
 
 object RaftServer:
 
@@ -91,6 +92,7 @@ object RaftServer:
     ) extends RaftAction
     case class ServerRequestAck(sessionId: SessionId, requestId: RequestId) extends RaftAction
     case class ExpireSession(sessionId: SessionId) extends RaftAction
+
     /** Read-only Query forwarded to the application/handler layer. */
     case class Query(sessionId: SessionId, correlationId: CorrelationId, payload: ByteVector) extends RaftAction
 

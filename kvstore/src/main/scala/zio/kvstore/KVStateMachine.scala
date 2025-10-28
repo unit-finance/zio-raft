@@ -76,8 +76,6 @@ class KVStateMachine extends SessionStateMachine[KVCommand, KVResponse, zio.kvst
           }
         yield KVResponse.SetDone.asResponseType(command, set)
 
-      
-
       case watch @ KVCommand.Watch(key) =>
         val k = KVKey(key)
         for

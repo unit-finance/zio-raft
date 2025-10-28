@@ -165,7 +165,7 @@ object RaftClient {
 
           case StreamEvent.Action(ClientAction.SubmitCommand(_, promise)) =>
             promise.die(new IllegalStateException("Not connected")).ignore.as(this)
-          
+
           case StreamEvent.Action(ClientAction.SubmitQuery(_, promise)) =>
             promise.die(new IllegalStateException("Not connected")).ignore.as(this)
 
@@ -266,7 +266,7 @@ object RaftClient {
               now <- Clock.instant
               newPending = pendingRequests.add(requestId, payload, promise, now)
             } yield copy(pendingRequests = newPending)
-          
+
           case StreamEvent.Action(ClientAction.SubmitQuery(payload, promise)) =>
             // Queue query while connecting (handled after session established)
             for {
@@ -425,7 +425,7 @@ object RaftClient {
               correlationId <- Random.nextUUID.map(u => CorrelationId.fromString(u.toString))
               newPending = pendingQueries.add(correlationId, payload, promise, now)
             } yield copy(pendingQueries = newPending)
-          
+
           case StreamEvent.TimeoutCheck =>
             for {
               now <- Clock.instant
@@ -551,7 +551,7 @@ object RaftClient {
               // correlationId via client-side generator (to be implemented in T024)
               correlationId <- Random.nextUUID.map(u => CorrelationId.fromString(u.toString))
               newPending = pendingQueries.add(correlationId, payload, promise, now)
-              _ <- transport.sendMessage(Query(correlationId, payload, now)).orDie              
+              _ <- transport.sendMessage(Query(correlationId, payload, now)).orDie
             } yield copy(pendingQueries = newPending)
 
           case StreamEvent.ServerMsg(ClientResponse(requestId, result)) =>

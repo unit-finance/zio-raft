@@ -561,3 +561,11 @@ object SessionStateMachine:
     state.exists["serverRequests"] { (_, pending) =>
       pending.lastSentAt.isBefore(lastSentBefore)
     }
+
+  def getSessions[R, SR, UserSchema <: Tuple](
+    state: HMap[Tuple.Concat[SessionSchema[R, SR], UserSchema]]
+  ): Map[SessionId, SessionMetadata] =
+    state.iterator["metadata"].collect {
+      case (sessionId: SessionId, metadata) =>
+        (sessionId, SessionMetadata(metadata.capabilities, metadata.createdAt))
+    }.toMap

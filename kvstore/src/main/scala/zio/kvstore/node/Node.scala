@@ -7,12 +7,21 @@ import zio.kvstore.protocol.KVServerRequest
 import zio.raft.Raft
 import zio.raft.protocol.*
 import zio.raft.sessionstatemachine.{SessionCommand, PendingServerRequest, SessionStateMachine}
-import zio.raft.sessionstatemachine.given
+import zio.raft.sessionstatemachine.Codecs.given
 import scodec.Codec
 import scodec.bits.ByteVector
 import zio.raft.server.RaftServer
 import zio.raft.server.RaftServer.RaftAction
 import java.time.Instant
+import zio.kvstore.Codecs.given
+import zio.kvstore.protocol.KVServerRequest.given
+import zio.kvstore.node.Node.NodeAction
+import zio.kvstore.node.Node.NodeAction.*
+import zio.raft.Peers
+import zio.raft.stores.LmdbStable
+import zio.raft.stores.segmentedlog.SegmentedLog
+import zio.raft.stores.FileSnapshotStore
+import zio.raft.zmq.ZmqRpc
 
 /** Node wiring RaftServer, Raft core, and KV state machine. */
 final case class Node(
@@ -20,13 +29,8 @@ final case class Node(
   raft: zio.raft.Raft[
     zio.raft.HMap[Tuple.Concat[zio.raft.sessionstatemachine.SessionSchema[KVResponse, KVServerRequest], KVSchema]],
     SessionCommand[KVCommand, KVServerRequest]
-  ],
-  stateMachine: KVStateMachine
+  ]
 ):
-
-  // Bring codecs for (de)serialization of commands/responses/server-requests
-  import zio.kvstore.Codecs.given
-  import zio.kvstore.protocol.KVServerRequest.given
 
   private def encodeServerRequestPayload(req: KVServerRequest): ByteVector =
     summon[Codec[KVServerRequest]].encode(req).require.bytes
@@ -42,21 +46,6 @@ final case class Node(
       val payload = encodeServerRequestPayload(env.payload)
       raftServer.sendServerRequest(env.sessionId, ServerRequest(env.requestId, payload, now))
     }
-
-  // Unified stream pattern (@stream-architecture-pattern): define actions, merge streams, handle in one fold
-  private sealed trait NodeAction
-  private object NodeAction:
-    case class CreateSession(sessionId: SessionId, capabilities: Map[String, String]) extends NodeAction
-    case class ClientRequest(
-      sessionId: SessionId,
-      requestId: RequestId,
-      lowestPendingRequestId: RequestId,
-      command: KVCommand
-    ) extends NodeAction
-    case class ServerRequestAck(sessionId: SessionId, requestId: RequestId) extends NodeAction
-    case class ExpireSession(sessionId: SessionId) extends NodeAction
-    case class RetryTick(now: Instant) extends NodeAction
-    case class StateNotificationReceived(notification: zio.raft.StateNotification) extends NodeAction
 
   private def handleAction(action: NodeAction): UIO[Unit] =
     action match
@@ -113,7 +102,7 @@ final case class Node(
         for
           now <- Clock.instant
           cmd = SessionCommand.ServerRequestAck[KVServerRequest](now, sessionId, requestId)
-          _ <- raft.sendCommand(cmd).either.unit
+          _ <- raft.sendCommand(cmd).ignore
         yield ()
 
       case NodeAction.ExpireSession(sessionId) =>
@@ -151,14 +140,11 @@ final case class Node(
           case zio.raft.StateNotification.SteppedUp =>
             raft.readState.either.flatMap {
               case Right(state) =>
-                val sessionsSSM = state.iterator["metadata"].toList.collect {
-                  case (sid: SessionId, md: zio.raft.sessionstatemachine.SessionMetadata) => (sid, md)
-                }.toMap
-                val sessionsServer: Map[zio.raft.protocol.SessionId, zio.raft.server.SessionMetadata] =
-                  sessionsSSM.map { case (sid, md) =>
-                    (sid, zio.raft.server.SessionMetadata(md.capabilities, md.createdAt))
-                  }
-                raftServer.stepUp(sessionsServer)
+                val sessions = SessionStateMachine.getSessions[KVResponse, KVServerRequest, KVSchema](state).map {
+                  case (sessionId: SessionId, metadata) =>
+                    (sessionId, zio.raft.server.SessionMetadata(metadata.capabilities, metadata.createdAt))
+                }
+                raftServer.stepUp(sessions)
               case Left(_) => ZIO.unit
             }
           case zio.raft.StateNotification.SteppedDown(leaderId) =>
@@ -180,6 +166,7 @@ final case class Node(
         case RaftAction.ExpireSession(sessionId) =>
           NodeAction.ExpireSession(sessionId)
       },
+      // TODO: filter this is we are not the leader
       ZStream.tick(10.seconds).mapZIO(_ => Clock.instant.map(NodeAction.RetryTick.apply)),
       raft.stateNotifications.map(NodeAction.StateNotificationReceived.apply)
     )
@@ -220,3 +207,49 @@ final case class Node(
     ZIO.logInfo("Node started") *>
       unifiedStream.mapZIO(handleAction).runDrain
 end Node
+
+object Node:
+
+  def make(
+    serverBindAddress: String,
+    clusterBindAddress: String,
+    logDirectory: String,
+    snapshotDirectory: String,
+    memberId: zio.raft.MemberId,
+    peers: Peers
+  ) =
+    for
+      stable <- LmdbStable.make
+      logStore <- SegmentedLog.make[SessionCommand[KVCommand, KVServerRequest]](logDirectory)
+      snapshotStore <- FileSnapshotStore.make(zio.nio.file.Path(snapshotDirectory))
+      rpc <- ZmqRpc.make[SessionCommand[KVCommand, KVServerRequest]](
+        clusterBindAddress,
+        peers.map(p => (p, clusterBindAddress)).toMap
+      )
+
+      raft <- Raft.make(
+        memberId = memberId,
+        peers = peers,
+        stable = stable,
+        logStore = logStore,
+        snapshotStore = snapshotStore,
+        rpc = rpc,
+        stateMachine = new KVStateMachine()
+      )
+      raftServer <- RaftServer.make(serverBindAddress)
+      node = Node(raftServer, raft)
+    yield node
+
+  sealed trait NodeAction
+  object NodeAction:
+    case class CreateSession(sessionId: SessionId, capabilities: Map[String, String]) extends NodeAction
+    case class ClientRequest(
+      sessionId: SessionId,
+      requestId: RequestId,
+      lowestPendingRequestId: RequestId,
+      command: KVCommand
+    ) extends NodeAction
+    case class ServerRequestAck(sessionId: SessionId, requestId: RequestId) extends NodeAction
+    case class ExpireSession(sessionId: SessionId) extends NodeAction
+    case class RetryTick(now: Instant) extends NodeAction
+    case class StateNotificationReceived(notification: zio.raft.StateNotification) extends NodeAction

@@ -74,7 +74,7 @@ case class PendingRequests(
 
   /** Die all pending requests with the given error. */
   def dieAll(error: Throwable): UIO[Unit] =
-    ZIO.foreach(requests.values)(data => data.promise.die(error).ignore).unit
+    ZIO.foreachDiscard(requests.values)(data => data.promise.die(error).ignore)
 }
 
 object PendingRequests {

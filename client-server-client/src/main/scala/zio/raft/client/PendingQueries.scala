@@ -53,7 +53,7 @@ case class PendingQueries(
 
   /** Die all pending queries with the given error. */
   def dieAll(error: Throwable): UIO[Unit] =
-    ZIO.foreach(queries.values)(data => data.promise.die(error).ignore).unit
+    ZIO.foreachDiscard(queries.values)(data => data.promise.die(error).ignore)
 }
 
 object PendingQueries {

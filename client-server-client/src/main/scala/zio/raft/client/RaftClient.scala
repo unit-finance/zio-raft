@@ -547,7 +547,7 @@ object RaftClient {
             } yield copy(pendingRequests = newPending)
           case StreamEvent.Action(ClientAction.SubmitQuery(payload, promise)) =>
             for {
-              now <- Clock.instant              
+              now <- Clock.instant
               correlationId <- Random.nextUUID.map(u => CorrelationId.fromString(u.toString))
               newPending = pendingQueries.add(correlationId, payload, promise, now)
               _ <- transport.sendMessage(Query(correlationId, payload, now)).orDie

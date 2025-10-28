@@ -5,6 +5,7 @@ import zio.raft.HMap
 import zio.raft.protocol.{RequestId, SessionId}
 import zio.raft.sessionstatemachine.SessionCommand
 import java.time.Instant
+import zio.kvstore.protocol.KVServerRequest
 
 object KVStateMachineSpec extends ZIOSpecDefault:
 

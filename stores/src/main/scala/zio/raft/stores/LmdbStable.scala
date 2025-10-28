@@ -9,6 +9,7 @@ import zio.UIO
 import zio.ZIO
 import zio.lmdb.Environment
 import scodec.bits.BitVector
+import org.lmdbjava.DbiFlags
 
 class LmdbStable(environment: Environment, ref: Ref[(Term, Option[MemberId])], database: Database, key: Array[Byte])
     extends Stable:
@@ -37,7 +38,7 @@ object LmdbStable:
   def make: ZIO[Environment, Nothing, LmdbStable] =
     for
       environment <- ZIO.service[Environment]
-      database <- Database.open("stable").orDie
+      database <- Database.open("stable", DbiFlags.MDB_CREATE).orDie
       key = "stable".getBytes("UTF-8")
       bytes <- environment.transactReadOnly(database.get(key)).orDie
       tuple <- bytes match

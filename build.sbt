@@ -62,25 +62,39 @@ scalaVersion := mainScalaVersion
 resolvers +=
   "Sonatype OSS Snapshots" at "https://central.sonatype.com/repository/maven-snapshots/"
 
-lazy val commonScalacOptions = Def.setting{
+lazy val commonScalacOptions = Def.setting {
   CrossVersion.partialVersion(scalaVersion.value) match {
     case Some((2, n)) => List(
-      "-Xsource:3.7-migration", 
-      "-Ymacro-annotations", 
-      "-Wunused:imports"
+        "-Xsource:3.7-migration",
+        "-Ymacro-annotations",
+        "-Wunused:imports"
       )
     case Some((3, n)) => List(
-      "-Wunused:imports",
-      "-source:future",
-      "-deprecation",
+        "-Wunused:imports",
+        "-source:future",
+        "-deprecation"
       )
-    case _            => List()
+    case _ => List()
   }
 }
 
 lazy val root = project
   .in(file("."))
-  .aggregate(raft, kvstore, zio1zmq, zio2zmq, raftZmq, stores, ziolmdb, clientServerProtocol, clientServerServer, clientServerClient, sessionStateMachine)
+  .aggregate(
+    raft,
+    kvstore,
+    kvstoreCli,
+    kvstoreProtocol,
+    zio1zmq,
+    zio2zmq,
+    raftZmq,
+    stores,
+    ziolmdb,
+    clientServerProtocol,
+    clientServerServer,
+    clientServerClient,
+    sessionStateMachine
+  )
   .settings(
     publish / skip := true,
     crossScalaVersions := Nil
@@ -99,7 +113,7 @@ lazy val raft = project
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "dev.zio" %% "zio-nio" % "2.0.0",
-      "dev.zio" %% "zio-prelude" % zioPreludeVersion,      
+      "dev.zio" %% "zio-prelude" % zioPreludeVersion
     ),
     excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
@@ -114,13 +128,15 @@ lazy val kvstore = project
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,
       "dev.zio" %% "zio-prelude" % zioPreludeVersion,
-      "dev.zio" %% "zio-http" % "3.0.0-RC8",
+      "dev.zio" %% "zio-config" % "4.0.4",
+      "dev.zio" %% "zio-config-magnolia" % "4.0.4",
+      "dev.zio" %% "zio-logging" % "2.5.1",
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test
     ),
     excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
-  .dependsOn(raft, raftZmq, stores, sessionStateMachine, clientServerProtocol, clientServerServer)
+  .dependsOn(raft, raftZmq, stores, sessionStateMachine, clientServerProtocol, clientServerServer, kvstoreProtocol)
 
 lazy val raftZmq = project
   .in(file("raft-zmq"))
@@ -190,7 +206,7 @@ lazy val ziolmdb = project
       "dev.zio" %% "zio-nio" % "2.0.0",
       "dev.zio" %% "zio-streams" % zio2Version,
       "dev.zio" %% "zio-test" % zio2Version % Test,
-      "dev.zio" %% "zio-test-sbt" % zio2Version % Test,    
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "org.lmdbjava" % "lmdbjava" % "0.9.0"
     )
   )
@@ -227,11 +243,11 @@ lazy val clientServerProtocol = project
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test
     ) ++ (CrossVersion.partialVersion(scalaVersion.value) match {
       case Some((2, _)) => Seq(
-        "org.scodec" %% "scodec-core" % "1.11.10"
-      )
+          "org.scodec" %% "scodec-core" % "1.11.10"
+        )
       case Some((3, _)) => Seq(
-        "org.scodec" %% "scodec-core" % "2.3.2"
-      )
+          "org.scodec" %% "scodec-core" % "2.3.2"
+        )
       case _ => Seq.empty
     }),
     excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
@@ -298,3 +314,35 @@ lazy val sessionStateMachine = project
     excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
   .dependsOn(raft, clientServerProtocol)
+
+lazy val kvstoreProtocol = project
+  .in(file("kvstore-protocol"))
+  .settings(
+    name := "kvstore-protocol",
+    publish / skip := true,
+    scalaVersion := mainScalaVersion,
+    scalacOptions ++= commonScalacOptions.value,
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio" % zio2Version,
+      "org.scodec" %% "scodec-core" % "2.3.2",
+      "org.scodec" %% "scodec-bits" % "1.1.37"
+    )
+  )
+
+lazy val kvstoreCli = project
+  .in(file("kvstore-cli"))
+  .settings(
+    name := "kvstore-cli",
+    publish / skip := true,
+    scalaVersion := mainScalaVersion,
+    scalacOptions ++= commonScalacOptions.value,
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio" % zio2Version,
+      "dev.zio" %% "zio-streams" % zio2Version,
+      "dev.zio" %% "zio-cli" % "0.7.3",
+      "dev.zio" %% "zio-test" % zio2Version % Test,
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test
+    ),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
+  )
+  .dependsOn(kvstore, clientServerClient, kvstoreProtocol)

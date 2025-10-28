@@ -3,7 +3,7 @@ package zio.raft.sessionstatemachine
 import zio.raft.protocol.RequestId
 import scodec.Codec
 import java.time.Instant
-import scodec.codecs.{utf8_32, list, uint8, discriminated}
+import scodec.codecs.{utf8_32, listOfN, uint8, discriminated, int32}
 import zio.raft.protocol.Codecs.{sessionIdCodec, requestIdCodec as requestIdCodecProtocol, instantCodec}
 
 /** Scodec codec definitions for SessionStateMachine types.
@@ -81,7 +81,7 @@ object Codecs:
 
     val createSessionV0: Codec[SessionCommand.CreateSession[SR]] =
       val capabilitiesCodec: Codec[Map[String, String]] =
-        list(utf8_32 :: utf8_32).xmap(_.toMap, _.toList)
+        listOfN(int32, (utf8_32 :: utf8_32).as[(String, String)]).xmap(_.toMap, _.toList)
       (instantCodec :: sessionIdCodec :: capabilitiesCodec).as[SessionCommand.CreateSession[SR]]
     val createSessionCodec: Codec[SessionCommand.CreateSession[SR]] =
       (uint8 :: createSessionV0).xmap(

@@ -14,6 +14,8 @@ import zio.raft.protocol.Codecs.{sessionIdCodec, requestIdCodec as requestIdCode
   *   - PendingServerRequest[SR] (automatically derived from payload codec)
   */
 object Codecs:
+  val capabilitiesCodec: Codec[Map[String, String]] =
+    listOfN(int32, (utf8_32 :: utf8_32).as[(String, String)]).xmap(_.toMap, _.toList)
 
   /** Codec for SessionMetadata.
     *
@@ -21,7 +23,7 @@ object Codecs:
     */
   given sessionMetadataCodec: Codec[SessionMetadata] =
     import scodec.codecs.*
-    (list(utf8_32 :: utf8_32).xmap(_.toMap, _.toList) :: int64).xmap(
+    (capabilitiesCodec :: int64).xmap(
       { case (caps, ts) => SessionMetadata(caps, Instant.ofEpochMilli(ts)) },
       sm => (sm.capabilities, sm.createdAt.toEpochMilli)
     )
@@ -80,8 +82,6 @@ object Codecs:
       )
 
     val createSessionV0: Codec[SessionCommand.CreateSession[SR]] =
-      val capabilitiesCodec: Codec[Map[String, String]] =
-        listOfN(int32, (utf8_32 :: utf8_32).as[(String, String)]).xmap(_.toMap, _.toList)
       (instantCodec :: sessionIdCodec :: capabilitiesCodec).as[SessionCommand.CreateSession[SR]]
     val createSessionCodec: Codec[SessionCommand.CreateSession[SR]] =
       (uint8 :: createSessionV0).xmap(

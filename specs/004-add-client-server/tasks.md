@@ -38,13 +38,13 @@
 - [X] T014 Implement `Node` 10s retry stream: periodically check `hasPendingRequests` (dirty read) and when true initiate `SessionCommand.GetRequestsForRetry`; publish resulting actions via the same `RaftServer` methods.
 - [X] T015 Implement `Node` raft state notifications stream: consume Raft core `stateNotifications` and map to `RaftServer.stepUp`/`stepDown` to reflect leadership changes.
 - [X] T016 Compose `Node.run` to run raftActions stream, retry stream, and state notifications stream concurrently; ensure backpressure/termination semantics; publish all outputs via appropriate `RaftServer` methods.
-- [ ] T017 Create `kvstore-cli` skeleton at `/Users/somdoron/git/zio-raft/kvstore-cli/src/main/scala/zio/kvstore/cli/Main.scala`; initialize client connection to Raft cluster using `client-server-client`. Read endpoints from `--endpoints` flag or `KVSTORE_ENDPOINTS`; default to localhost if unspecified.
-- [ ] T018 Implement `set` command in CLI: parse args and send set request via client; print confirmation.
-- [ ] T019 Implement `get` command in CLI: parse args and fetch value; print key/value.
-- [ ] T020 Implement `watch` command in CLI: parse args, subscribe to key; print initial value and stream subsequent updates until session ends.
+- [X] T017 Create `kvstore-cli` skeleton at `/Users/somdoron/git/zio-raft/kvstore-cli/src/main/scala/zio/kvstore/cli/Main.scala`; initialize client connection to Raft cluster using `client-server-client`. Read endpoints from `--endpoints` flag or `KVSTORE_ENDPOINTS`; default to localhost if unspecified.
+- [X] T018 Implement `set` command in CLI: parse args and send set request via client; print confirmation.
+- [X] T019 Implement `get` command in CLI: parse args and fetch value; print key/value.
+- [X] T020 Implement `watch` command in CLI: parse args, subscribe to key; print initial value and stream subsequent updates until session ends.
 
 ## Phase 3.4: Integration
-- [ ] T021 Wire `KVStoreServerApp` to start the Raft server and run `Node` (raftActions, retry, and state notifications streams) and expose graceful shutdown.
+- [X] T021 Wire `KVStoreServerApp` to start the Raft server and run `Node` (raftActions, retry, and state notifications streams) and expose graceful shutdown.
 - [ ] T022 Ensure subscriptions are removed on session expiry by updating `handleSessionExpired` in `KVStateMachine` and validating via logs/tests.
 - [ ] T023 Add minimal logging and metrics using ZIO logging for watch and Node retry/state paths.
 

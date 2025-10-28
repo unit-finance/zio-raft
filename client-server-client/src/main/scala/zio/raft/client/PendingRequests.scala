@@ -71,6 +71,10 @@ case class PendingRequests(
       case Some(data) => data.promise.die(error).ignore.as(copy(requests = requests.removed(requestId)))
       case None       => ZIO.succeed(this)
     }
+
+  /** Die all pending requests with the given error. */
+  def dieAll(error: Throwable): UIO[Unit] =
+    ZIO.foreach(requests.values)(data => data.promise.die(error).ignore).unit
 }
 
 object PendingRequests {

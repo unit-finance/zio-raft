@@ -250,10 +250,14 @@ object RaftClient {
                   connectToMember(leaderId, transport, s"Not leader at $currentMemberId")
 
                 case RejectionReason.SessionExpired =>
-                  ZIO.dieMessage("Session not found - cannot continue")
+                  pendingRequests.dieAll(new RuntimeException("Session expired")) *>
+                    pendingQueries.dieAll(new RuntimeException("Session expired")) *>
+                    ZIO.dieMessage("Session not found - cannot continue")
 
                 case RejectionReason.InvalidCapabilities =>
-                  ZIO.dieMessage(s"Invalid capabilities - cannot connect: ${capabilities}")
+                  pendingRequests.dieAll(new RuntimeException("Invalid capabilities")) *>
+                    pendingQueries.dieAll(new RuntimeException("Invalid capabilities")) *>
+                    ZIO.dieMessage(s"Invalid capabilities - cannot connect: ${capabilities}")
               }
             } else {
               ZIO.logWarning("Nonce mismatch, ignoring SessionRejected").as(this)
@@ -399,12 +403,15 @@ object RaftClient {
                   connectToMember(leaderId, transport, s"Not leader at $currentMemberId")
 
                 case RejectionReason.SessionExpired =>
-                  ZIO.logWarning("Session not found - cannot continue") *> ZIO.dieMessage(
-                    "Session not found - cannot continue"
-                  )
+                  pendingRequests.dieAll(new RuntimeException("Session expired")) *>
+                    pendingQueries.dieAll(new RuntimeException("Session expired")) *>
+                    ZIO.logWarning("Session not found - cannot continue") *>
+                    ZIO.dieMessage("Session not found - cannot continue")
 
                 case RejectionReason.InvalidCapabilities =>
-                  ZIO.dieMessage(s"Invalid capabilities - cannot connect: ${capabilities}")
+                  pendingRequests.dieAll(new RuntimeException("Invalid capabilities")) *>
+                    pendingQueries.dieAll(new RuntimeException("Invalid capabilities")) *>
+                    ZIO.dieMessage(s"Invalid capabilities - cannot connect: ${capabilities}")
               }
             } else {
               ZIO.logWarning("Nonce mismatch, ignoring SessionRejected").as(this)
@@ -561,7 +568,8 @@ object RaftClient {
           case StreamEvent.ServerMsg(RequestError(requestId, RequestErrorReason.ResponseEvicted)) =>
             if (pendingRequests.contains(requestId))
               ZIO.logError(s"RequestError: ResponseEvicted for request $requestId, terminating client") *>
-                pendingRequests.die(requestId, new RuntimeException("ResponseEvicted")) *>
+                pendingRequests.dieAll(new RuntimeException("ResponseEvicted")) *>
+                pendingQueries.dieAll(new RuntimeException("ResponseEvicted")) *>
                 ZIO.dieMessage("ResponseEvicted")
             else
               ZIO.logWarning(s"RequestError for non-pending request $requestId, ignoring").as(this)
@@ -621,9 +629,10 @@ object RaftClient {
             )
 
           case StreamEvent.ServerMsg(SessionClosed(SessionCloseReason.SessionExpired, _)) =>
-            ZIO.logWarning("Session closed due to timeout, terminating client") *> ZIO.dieMessage(
-              "Session timed out: shutting down client."
-            )
+            pendingRequests.dieAll(new RuntimeException("Session expired")) *>
+              pendingQueries.dieAll(new RuntimeException("Session expired")) *>
+              ZIO.logWarning("Session closed due to timeout, terminating client") *>
+              ZIO.dieMessage("Session timed out: shutting down client.")
 
           case StreamEvent.KeepAliveTick =>
             for {

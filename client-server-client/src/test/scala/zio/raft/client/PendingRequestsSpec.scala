@@ -88,5 +88,35 @@ object PendingRequestsSpec extends ZIOSpecDefault {
         pending1 <- pending.die(rid, new RuntimeException("boom"))
       } yield assertTrue(pending1 == pending)
     }
+
+    test("dieAll completes all pending promises with death") {
+      val rid1 = RequestId.fromLong(1L)
+      val rid2 = RequestId.fromLong(2L)
+      val rid3 = RequestId.fromLong(3L)
+      for {
+        p1 <- Promise.make[Nothing, ByteVector]
+        p2 <- Promise.make[Nothing, ByteVector]
+        p3 <- Promise.make[Nothing, ByteVector]
+        now <- Clock.instant
+        pending = PendingRequests.empty
+          .add(rid1, ByteVector.fromValidHex("aa"), p1, now)
+          .add(rid2, ByteVector.fromValidHex("bb"), p2, now)
+          .add(rid3, ByteVector.fromValidHex("cc"), p3, now)
+        _ <- pending.dieAll(new RuntimeException("all dead"))
+        fiber1 <- p1.await.fork
+        fiber2 <- p2.await.fork
+        fiber3 <- p3.await.fork
+        exit1 <- fiber1.await
+        exit2 <- fiber2.await
+        exit3 <- fiber3.await
+      } yield assertTrue(exit1.isFailure) && assertTrue(exit2.isFailure) && assertTrue(exit3.isFailure)
+    }
+
+    test("dieAll on empty pending requests succeeds") {
+      for {
+        pending <- ZIO.succeed(PendingRequests.empty)
+        _ <- pending.dieAll(new RuntimeException("boom"))
+      } yield assertTrue(true)
+    }
   }
 }

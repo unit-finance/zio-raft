@@ -155,7 +155,7 @@ final case class Node(
   private val unifiedStream: ZStream[Any, Nothing, NodeAction] =
     ZStream.mergeAllUnbounded(16)(
       kvServer.stream.map(NodeAction.FromServer.apply),
-      // TODO: filter this is we are not the leader
+      // TODO: filter this if we are not the leader
       ZStream.tick(10.seconds).mapZIO(_ => Clock.instant.map(NodeAction.RetryTick.apply)),
       raft.stateNotifications.map(NodeAction.StateNotificationReceived.apply)
     )

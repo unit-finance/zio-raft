@@ -5,7 +5,7 @@
 
 ## Run the server
 ```bash
-sbt "kvstore/runServer"
+sbt "kvstore/runMain zio.kvstore.KVStoreServerApp --serverPort 7001 --memberId node-1 --members node-1=tcp://127.0.0.1:7002"
 ```
 
 ## Run the CLI

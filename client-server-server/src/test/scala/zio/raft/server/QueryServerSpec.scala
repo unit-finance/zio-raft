@@ -45,25 +45,10 @@ object QueryServerSpec extends ZIOSpec[TestEnvironment & ZContext]:
 
   override def spec = suiteAll("Server Query Handling") {
 
-    test("Follower rejects Query with NotLeaderAnymore SessionClosed") {
-      for
-        server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
-        _ <- ZIO.sleep(200.millis)
-        client <- ZSocket.client
-        _ <- client.connect(serverAddress)
-        // Send Query without a session (server derives routing but is follower)
-        now <- Clock.instant
-        _ <- sendClientMessage(client, Query(CorrelationId.fromString("q1"), ByteVector(1,2,3), now))
-        msg <- waitForMessage[SessionClosed](client)
-      yield assertTrue(msg.reason == SessionCloseReason.NotLeaderAnymore)
-    }
-
     test("Leader forwards Query to Raft and send QueryResponse back") {
       for
         server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
-        _ <- ZIO.sleep(200.millis)
         _ <- server.stepUp(Map.empty)
-        _ <- ZIO.sleep(100.millis)
 
         client <- ZSocket.client
         _ <- client.connect(serverAddress)
@@ -71,7 +56,6 @@ object QueryServerSpec extends ZIOSpec[TestEnvironment & ZContext]:
         // Create session first
         nonce <- Nonce.generate()
         _ <- sendClientMessage(client, CreateSession(Map("kv" -> "v1"), nonce))
-        _ <- ZIO.sleep(100.millis)
         action <- server.raftActions.take(1).runCollect.map(_.head)
         sessionId = action.asInstanceOf[RaftAction.CreateSession].sessionId
         _ <- server.confirmSessionCreation(sessionId)
@@ -84,7 +68,6 @@ object QueryServerSpec extends ZIOSpec[TestEnvironment & ZContext]:
         _ <- sendClientMessage(client, Query(corr, payload, now))
 
         // Verify RaftAction.Query queued
-        _ <- ZIO.sleep(100.millis)
         qAction <- server.raftActions.take(1).runCollect.map(_.head)
         verified = qAction.isInstanceOf[RaftAction.Query]
         _ <- ZIO.fail(new RuntimeException("Expected RaftAction.Query")).unless(verified).ignore

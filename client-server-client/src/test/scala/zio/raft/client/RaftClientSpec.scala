@@ -178,6 +178,45 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
       }
     }
 
+    // ==================================================================
+    // Query Submission Tests
+    // ==================================================================
+
+    suiteAll("Query Submission") {
+      test("should send Query and complete promise when QueryResponse received") {
+        val port = findOpenPort
+        for {
+          mockServer <- ZSocket.server
+          _ <- mockServer.bind(s"tcp://0.0.0.0:$port")
+
+          client <- RaftClient.make(
+            clusterMembers = Map(MemberId.fromString("node1") -> s"tcp://127.0.0.1:$port"),
+            capabilities = Map("test" -> "v1")
+          )
+          _ <- client.run().forkScoped
+          _ <- client.connect()
+
+          (routingId, createMsg) <- expectMessage[CreateSession](mockServer)
+
+          sessionId <- SessionId.generate()
+          _ <- sendServerMessage(mockServer, routingId, SessionCreated(sessionId, createMsg.nonce))
+
+          // Issue a query from the client
+          payload = ByteVector.fromValidHex("c0ffee")
+          queryFiber <- client.query(payload).fork
+
+          // Wait for Query message
+          (_, queryMsg) <- waitForMessage[Query](mockServer)
+
+          // Respond with matching correlationId
+          result = ByteVector.fromValidHex("beaded")
+          _ <- sendServerMessage(mockServer, routingId, QueryResponse(queryMsg.correlationId, result))
+
+          response <- queryFiber.join
+        } yield assertTrue(response == result)
+      }
+    }
+
     // ==========================================================================
     // Request Submission Tests
     // ==========================================================================

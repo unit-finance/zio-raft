@@ -6,7 +6,7 @@ import zio.raft.client.RaftClient
 import zio.raft.protocol.MemberId
 import scodec.Codec
 import scodec.bits.ByteVector
-import zio.kvstore.protocol.{KVClientRequest, KVClientResponse, KVServerRequest}
+import zio.kvstore.protocol.{KVClientRequest, KVClientResponse, KVServerRequest, KVQuery}
 import zio.kvstore.protocol.KVClientRequest.given
 import zio.kvstore.protocol.KVClientResponse.given
 import zio.kvstore.protocol.KVServerRequest.given
@@ -22,8 +22,8 @@ final class KVClient private (private val raft: RaftClient):
     raft.submitCommand(payload).map(bytes => summon[Codec[Unit]].decode(bytes.bits).require.value)
 
   def get(key: String): ZIO[Any, Throwable, Option[String]] =
-    val payload: ByteVector = summon[Codec[KVClientRequest]].encode(KVClientRequest.Get(key)).require.bytes
-    raft.submitCommand(payload).map(bytes => summon[Codec[Option[String]]].decode(bytes.bits).require.value)
+    val payload: ByteVector = summon[Codec[KVQuery]].encode(KVQuery.Get(key)).require.bytes
+    raft.query(payload).map(bytes => summon[Codec[Option[String]]].decode(bytes.bits).require.value)
 
   // Registers the watch on the server; notifications are emitted via `notifications` stream
   def watch(key: String): ZIO[Any, Throwable, Unit] =

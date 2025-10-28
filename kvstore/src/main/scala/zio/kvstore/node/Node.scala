@@ -4,7 +4,7 @@ import zio.*
 import zio.stream.*
 import zio.kvstore.*
 import zio.kvstore.protocol.KVServerRequest
-import zio.kvstore.protocol.KVClientRequest
+import zio.kvstore.protocol.{KVClientRequest, KVQuery}
 import zio.kvstore.protocol.KVClientResponse.given
 import zio.raft.Raft
 import zio.raft.protocol.*
@@ -12,10 +12,10 @@ import zio.raft.sessionstatemachine.{SessionCommand, SessionStateMachine}
 import zio.raft.sessionstatemachine.Codecs.given
 import zio.kvstore.KVServer.KVServerAction
 import java.time.Instant
-import zio.kvstore.Codecs.given
+import zio.kvstore.given
+import zio.kvstore.Codecs.given scodec.Codec[zio.kvstore.KVCommand]
 import zio.kvstore.node.Node.NodeAction
 import zio.kvstore.node.Node.NodeAction.*
-import zio.raft.Peers
 import zio.raft.stores.LmdbStable
 import zio.raft.stores.segmentedlog.SegmentedLog
 import zio.raft.stores.FileSnapshotStore
@@ -72,16 +72,6 @@ final case class Node(
                 case Some(_) => kvServer.reply(sessionId, requestId, ())
                 case _       => ZIO.unit
             yield ()
-
-          case KVClientRequest.Get(k) =>
-            val cmd = KVCommand.Get(k)
-            for
-              maybe <- applyCommand(sessionId, requestId, lowestPendingRequestId, cmd)
-              _ <- maybe match
-                case Some(result) => kvServer.reply(sessionId, requestId, result.value)
-                case _            => ZIO.unit
-            yield ()
-
           case KVClientRequest.Watch(k) =>
             val cmd = KVCommand.Watch(k)
             for
@@ -90,6 +80,17 @@ final case class Node(
                 case Some(_) => kvServer.reply(sessionId, requestId, ())
                 case _       => ZIO.unit
             yield ()
+
+      case NodeAction.FromServer(KVServerAction.Query(sessionId, correlationId, query)) =>
+        query match
+          case KVQuery.Get(k) =>
+            raft.readState.either.flatMap {
+              case Right(state) =>
+                val value = state.get["kv"](KVKey(k))
+                kvServer.replyQuery(sessionId, correlationId, value)
+              case Left(_) => ZIO.unit
+            }
+          case _ => ZIO.unit
 
       case NodeAction.FromServer(KVServerAction.ServerRequestAck(sessionId, requestId)) =>
         for

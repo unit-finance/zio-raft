@@ -9,8 +9,6 @@ package object kvstore:
   object KVCommand:
     final case class Set(key: String, value: String) extends KVCommand:
       type Response = KVResponse.SetDone.type
-    final case class Get(key: String) extends KVCommand:
-      type Response = KVResponse.GetResult
     final case class Watch(key: String) extends KVCommand:
       type Response = KVResponse.WatchDone.type
 

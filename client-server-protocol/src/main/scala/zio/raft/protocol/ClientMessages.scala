@@ -69,6 +69,19 @@ case class ClientRequest(
   createdAt: Instant
 ) extends ClientMessage
 
+/** Read-only client query. Server derives session ID from ZeroMQ routing ID.
+  *
+  * @param correlationId
+  *   Opaque client-generated identifier to correlate QueryResponse
+  * @param payload
+  *   Binary payload describing the query
+  */
+case class Query(
+  correlationId: CorrelationId,
+  payload: ByteVector,
+  createdAt: Instant
+) extends ClientMessage
+
 /** Acknowledgment of server-initiated request receipt. Server derives session ID from ZeroMQ routing ID.
   *
   * @param requestId

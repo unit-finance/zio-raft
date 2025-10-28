@@ -10,6 +10,8 @@ Auto-generated from all feature plans. Last updated: 2025-09-24
 - **Code Quality**: scalafmt, scalafix, unused import warnings
 - Scala 3.3+ + ZIO 2.1+, scodec (for serialization), existing client-server-server library (002-composable-raft-state)
 - State maintained in Raft log + snapshots; uses shared Map[String, ByteVector] dictionary with key prefixes (002-composable-raft-state)
+- Scala 3 + ZIO 2, existing zio-raft client/server libraries (005-client-server-libraries)
+- N/A (read-only Query, no persistence change) (005-client-server-libraries)
 
 ## Project Structure
 ```
@@ -41,6 +43,7 @@ All code changes must adhere to ZIO Raft Constitution v1.0.0:
 - Functional programming patterns (no var, mutable collections)
 
 ## Recent Changes
+- 005-client-server-libraries: Added Scala 3 + ZIO 2, existing zio-raft client/server libraries
 - 002-composable-raft-state: Added Scala 3.3+ + ZIO 2.1+, scodec (for serialization), existing client-server-server library
 - 001-implement-client-server: Added Scala 3.3+ with ZIO 2.1+ + ZeroMQ (zio-zmq), scodec (protocol serialization), ZIO (effects), ZIO Test (testing)
 

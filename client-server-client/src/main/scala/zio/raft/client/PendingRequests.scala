@@ -18,7 +18,7 @@ case class PendingRequests(
   def add(
     requestId: RequestId,
     payload: ByteVector,
-    promise: Promise[Throwable, ByteVector],
+    promise: Promise[Nothing, ByteVector],
     sentAt: Instant
   ): PendingRequests =
     copy(requests = requests.updated(requestId, PendingRequests.PendingRequestData(payload, promise, sentAt, sentAt)))
@@ -78,7 +78,7 @@ object PendingRequests {
 
   case class PendingRequestData(
     payload: ByteVector,
-    promise: Promise[Throwable, ByteVector],
+    promise: Promise[Nothing, ByteVector],
     createdAt: Instant,
     lastSentAt: Instant
   )

@@ -51,10 +51,20 @@ class RaftClient private (
   def connect(): UIO[Unit] =
     actionQueue.offer(ClientAction.Connect).unit
 
-  def submitCommand(payload: ByteVector): Task[ByteVector] =
+  def submitCommand(payload: ByteVector): UIO[ByteVector] =
     for {
-      promise <- Promise.make[Throwable, ByteVector]
+      promise <- Promise.make[Nothing, ByteVector]
       action = ClientAction.SubmitCommand(payload, promise)
+      _ <- actionQueue.offer(action)
+      result <- promise.await
+    } yield result
+
+  /** Submit a read-only Query (leader-served, linearizable).
+    */
+  def query(payload: ByteVector): UIO[ByteVector] =
+    for {
+      promise <- Promise.make[Nothing, ByteVector]
+      action = ClientAction.SubmitQuery(payload, promise)
       _ <- actionQueue.offer(action)
       result <- promise.await
     } yield result
@@ -146,14 +156,18 @@ object RaftClient {
               currentMemberId = memberId,
               createdAt = now,
               nextRequestId = nextRequestId,
-              pendingRequests = PendingRequests.empty
+              pendingRequests = PendingRequests.empty,
+              pendingQueries = PendingQueries.empty
             )
 
           case StreamEvent.ServerMsg(message) =>
             ZIO.logWarning(s"Received message while disconnected: ${message.getClass.getSimpleName}").as(this)
 
           case StreamEvent.Action(ClientAction.SubmitCommand(_, promise)) =>
-            promise.fail(new IllegalStateException("Not connected")).ignore.as(this)
+            promise.die(new IllegalStateException("Not connected")).ignore.as(this)
+
+          case StreamEvent.Action(ClientAction.SubmitQuery(_, promise)) =>
+            promise.die(new IllegalStateException("Not connected")).ignore.as(this)
 
           case StreamEvent.Action(ClientAction.Disconnect) =>
             ZIO.succeed(this)
@@ -173,7 +187,8 @@ object RaftClient {
       currentMemberId: MemberId,
       createdAt: Instant,
       nextRequestId: RequestIdRef,
-      pendingRequests: PendingRequests
+      pendingRequests: PendingRequests,
+      pendingQueries: PendingQueries
     ) extends ClientState {
       override def stateName: String = "ConnectingNewSession"
 
@@ -210,8 +225,9 @@ object RaftClient {
               for {
                 _ <- ZIO.logInfo(s"Session created: $sessionId")
                 now <- Clock.instant
-                // Send all pending requests
+                // Send all pending requests/queries
                 updatedPending <- pendingRequests.resendAll(transport)
+                updatedPendingQueries <- pendingQueries.resendAll(transport)
               } yield Connected(
                 config = config,
                 sessionId = sessionId,
@@ -220,6 +236,7 @@ object RaftClient {
                 serverRequestTracker = ServerRequestTracker(),
                 nextRequestId = nextRequestId,
                 pendingRequests = updatedPending,
+                pendingQueries = updatedPendingQueries,
                 currentMemberId = currentMemberId
               )
             } else {
@@ -250,6 +267,14 @@ object RaftClient {
               newPending = pendingRequests.add(requestId, payload, promise, now)
             } yield copy(pendingRequests = newPending)
 
+          case StreamEvent.Action(ClientAction.SubmitQuery(payload, promise)) =>
+            // Queue query while connecting (handled after session established)
+            for {
+              now <- Clock.instant
+              correlationId <- Random.nextUUID.map(u => CorrelationId.fromString(u.toString))
+              newPending = pendingQueries.add(correlationId, payload, promise, now)
+            } yield copy(pendingQueries = newPending)
+
           case StreamEvent.TimeoutCheck =>
             for {
               now <- Clock.instant
@@ -267,6 +292,9 @@ object RaftClient {
 
           case StreamEvent.ServerMsg(ClientResponse(_, _)) =>
             ZIO.logWarning("Received ClientResponse while connecting, ignoring").as(this)
+
+          case StreamEvent.ServerMsg(QueryResponse(correlationId, result)) =>
+            ZIO.logWarning("Received QueryResponse while connecting, ignoring").as(this)
 
           case StreamEvent.ServerMsg(_: RequestError) =>
             ZIO.logWarning("Received RequestError while connecting, ignoring").as(this)
@@ -305,7 +333,8 @@ object RaftClient {
       createdAt: Instant,
       serverRequestTracker: ServerRequestTracker,
       nextRequestId: RequestIdRef,
-      pendingRequests: PendingRequests
+      pendingRequests: PendingRequests,
+      pendingQueries: PendingQueries
     ) extends ClientState {
       override def stateName: String = s"ConnectingExistingSession($sessionId)"
 
@@ -345,8 +374,9 @@ object RaftClient {
                   s"Session continued: $sessionId at $currentMemberId (${currentAddr.getOrElse("unknown")})"
                 )
                 now <- Clock.instant
-                // Send all pending requests
+                // Send all pending requests/queries
                 updatedPending <- pendingRequests.resendAll(transport)
+                updatedPendingQueries <- pendingQueries.resendAll(transport)
               } yield Connected(
                 config = config,
                 sessionId = sessionId,
@@ -355,6 +385,7 @@ object RaftClient {
                 serverRequestTracker = serverRequestTracker,
                 nextRequestId = nextRequestId,
                 pendingRequests = updatedPending,
+                pendingQueries = updatedPendingQueries,
                 currentMemberId = currentMemberId
               )
             } else {
@@ -387,6 +418,14 @@ object RaftClient {
               newPending = pendingRequests.add(requestId, payload, promise, now)
             } yield copy(pendingRequests = newPending)
 
+          case StreamEvent.Action(ClientAction.SubmitQuery(payload, promise)) =>
+            // Queue query while connecting (handled after session established)
+            for {
+              now <- Clock.instant
+              correlationId <- Random.nextUUID.map(u => CorrelationId.fromString(u.toString))
+              newPending = pendingQueries.add(correlationId, payload, promise, now)
+            } yield copy(pendingQueries = newPending)
+
           case StreamEvent.TimeoutCheck =>
             for {
               now <- Clock.instant
@@ -404,6 +443,9 @@ object RaftClient {
 
           case StreamEvent.ServerMsg(ClientResponse(_, _)) =>
             ZIO.logWarning("Received ClientResponse while connecting, ignoring").as(this)
+
+          case StreamEvent.ServerMsg(QueryResponse(correlationId, result)) =>
+            ZIO.logWarning("Received QueryResponse while connecting existing session, ignoring").as(this)
 
           case StreamEvent.ServerMsg(KeepAliveResponse(_)) =>
             ZIO.succeed(this)
@@ -439,6 +481,7 @@ object RaftClient {
       serverRequestTracker: ServerRequestTracker,
       nextRequestId: RequestIdRef,
       pendingRequests: PendingRequests,
+      pendingQueries: PendingQueries,
       currentMemberId: MemberId
     ) extends ClientState {
       override def stateName: String = s"Connected($sessionId)"
@@ -472,7 +515,8 @@ object RaftClient {
           createdAt = now,
           serverRequestTracker = serverRequestTracker,
           nextRequestId = nextRequestId,
-          pendingRequests = pendingRequests
+          pendingRequests = pendingRequests,
+          pendingQueries = pendingQueries
         )
       }
 
@@ -501,9 +545,18 @@ object RaftClient {
               _ <- transport.sendMessage(request).orDie
               newPending = pendingRequests.add(requestId, payload, promise, now)
             } yield copy(pendingRequests = newPending)
+          case StreamEvent.Action(ClientAction.SubmitQuery(payload, promise)) =>
+            for {
+              now <- Clock.instant
+              correlationId <- Random.nextUUID.map(u => CorrelationId.fromString(u.toString))
+              newPending = pendingQueries.add(correlationId, payload, promise, now)
+              _ <- transport.sendMessage(Query(correlationId, payload, now)).orDie
+            } yield copy(pendingQueries = newPending)
 
           case StreamEvent.ServerMsg(ClientResponse(requestId, result)) =>
             pendingRequests.complete(requestId, result).map(newPending => copy(pendingRequests = newPending))
+          case StreamEvent.ServerMsg(QueryResponse(correlationId, result)) =>
+            pendingQueries.complete(correlationId, result).map(newPending => copy(pendingQueries = newPending))
 
           case StreamEvent.ServerMsg(RequestError(requestId, RequestErrorReason.ResponseEvicted)) =>
             if (pendingRequests.contains(requestId))
@@ -581,8 +634,9 @@ object RaftClient {
           case StreamEvent.TimeoutCheck =>
             for {
               now <- Clock.instant
-              newPending <- pendingRequests.resendExpired(transport, now, config.requestTimeout)
-            } yield copy(pendingRequests = newPending)
+              newPendingReqs <- pendingRequests.resendExpired(transport, now, config.requestTimeout)
+              newPendingQs <- pendingQueries.resendExpired(transport, now, config.requestTimeout)
+            } yield copy(pendingRequests = newPendingReqs, pendingQueries = newPendingQs)
 
           case StreamEvent.ServerMsg(SessionCreated(_, _)) =>
             ZIO.logWarning("Received SessionCreated while connected, ignoring").as(this)

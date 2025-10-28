@@ -25,6 +25,11 @@ final class RaftServer(
   def sendClientResponse(sessionId: SessionId, response: ClientResponse): UIO[Unit] =
     actionQueue.offer(RaftServer.ServerAction.SendResponse(sessionId, response)).unit
 
+  /** Submit a QueryResponse back to a client (read-only query path).
+    */
+  def sendQueryResponse(sessionId: SessionId, response: QueryResponse): UIO[Unit] =
+    actionQueue.offer(RaftServer.ServerAction.SendQueryResponse(sessionId, response)).unit
+
   /** Send server-initiated request to a client.
     */
   def sendServerRequest(sessionId: SessionId, request: ServerRequest): UIO[Unit] =
@@ -55,6 +60,7 @@ final class RaftServer(
     */
   def leaderChanged(leaderId: MemberId): UIO[Unit] =
     actionQueue.offer(RaftServer.ServerAction.LeaderChanged(leaderId)).unit
+end RaftServer
 
 object RaftServer:
 
@@ -64,6 +70,7 @@ object RaftServer:
 
   object ServerAction:
     case class SendResponse(sessionId: SessionId, response: ClientResponse) extends ServerAction
+    case class SendQueryResponse(sessionId: SessionId, response: QueryResponse) extends ServerAction
     case class SendServerRequest(sessionId: SessionId, request: ServerRequest) extends ServerAction
     case class SendRequestError(sessionId: SessionId, error: RequestError) extends ServerAction
     case class SessionCreationConfirmed(sessionId: SessionId) extends ServerAction
@@ -85,6 +92,9 @@ object RaftServer:
     ) extends RaftAction
     case class ServerRequestAck(sessionId: SessionId, requestId: RequestId) extends RaftAction
     case class ExpireSession(sessionId: SessionId) extends RaftAction
+
+    /** Read-only Query forwarded to the application/handler layer. */
+    case class Query(sessionId: SessionId, correlationId: CorrelationId, payload: ByteVector) extends RaftAction
 
   def make(bindAddress: String): ZIO[Scope & ZContext, Throwable, RaftServer] =
     val config = ServerConfig.make(bindAddress)
@@ -197,6 +207,9 @@ object RaftServer:
           case StreamEvent.Action(ServerAction.SendResponse(_, _)) =>
             ZIO.logWarning("Cannot send response - not leader").as(this)
 
+          case StreamEvent.Action(ServerAction.SendQueryResponse(_, _)) =>
+            ZIO.logWarning("Cannot send query response - not leader").as(this)
+
           case StreamEvent.Action(ServerAction.SendServerRequest(_, _)) =>
             ZIO.logWarning("Cannot send server request - not leader").as(this)
 
@@ -231,6 +244,12 @@ object RaftServer:
             yield this
 
           case _: ClientRequest =>
+            for
+              _ <- transport.sendMessage(routingId, SessionClosed(SessionCloseReason.NotLeaderAnymore, leaderId)).orDie
+              _ <- transport.disconnect(routingId).orDie
+            yield this
+
+          case _: Query =>
             for
               _ <- transport.sendMessage(routingId, SessionClosed(SessionCloseReason.NotLeaderAnymore, leaderId)).orDie
               _ <- transport.disconnect(routingId).orDie
@@ -282,6 +301,13 @@ object RaftServer:
                 transport.sendMessage(routingId, response).orDie.as(this)
               case None =>
                 ZIO.logWarning(s"Cannot send response - session $sessionId not found").as(this)
+
+          case StreamEvent.Action(ServerAction.SendQueryResponse(sessionId, response)) =>
+            sessions.getRoutingId(sessionId) match
+              case Some(routingId) =>
+                transport.sendMessage(routingId, response).orDie.as(this)
+              case None =>
+                ZIO.logWarning(s"Cannot send query response - session $sessionId not found").as(this)
 
           case StreamEvent.Action(ServerAction.SendServerRequest(sessionId, request)) =>
             sessions.getRoutingId(sessionId) match
@@ -395,6 +421,17 @@ object RaftServer:
                     )
                   )
                 yield this
+              case None =>
+                for
+                  _ <- transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionError, None)).orDie
+                  _ <- transport.disconnect(routingId).orDie
+                yield this
+
+          case query: Query =>
+            sessions.findSessionByRouting(routingId) match
+              case Some(sessionId) =>
+                // Forward Query to application layer via RaftAction.Query (read-only, no state machine involvement)
+                raftActionsOut.offer(RaftAction.Query(sessionId, query.correlationId, query.payload)).as(this)
               case None =>
                 for
                   _ <- transport.sendMessage(routingId, SessionClosed(SessionCloseReason.SessionError, None)).orDie

@@ -78,7 +78,11 @@ package object client {
     case object Disconnect extends ClientAction
     case class SubmitCommand(
       payload: scodec.bits.ByteVector,
-      promise: Promise[Throwable, scodec.bits.ByteVector]
+      promise: Promise[Nothing, scodec.bits.ByteVector]
+    ) extends ClientAction
+    case class SubmitQuery(
+      payload: scodec.bits.ByteVector,
+      promise: Promise[Nothing, scodec.bits.ByteVector]
     ) extends ClientAction
   }
 }

@@ -86,6 +86,18 @@ case class ClientResponse(
   result: ByteVector
 ) extends ServerMessage
 
+/** Response to a read-only Query. Server responds to same ZeroMQ routing ID, no session ID needed.
+  *
+  * @param correlationId
+  *   Echoed client correlation ID from Query
+  * @param result
+  *   Binary result data from query execution
+  */
+case class QueryResponse(
+  correlationId: CorrelationId,
+  result: ByteVector
+) extends ServerMessage
+
 /** RequestError indicates the server could not return the original response because it was deterministically evicted
   * per lowestPendingRequestId. Session ID is implied by routing.
   *

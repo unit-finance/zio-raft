@@ -99,6 +99,12 @@ object Codecs {
     variableSizeBytes(int32, bytes)
   }
 
+  /** Codec for correlationId (opaque string).
+    */
+  implicit val correlationIdCodec: Codec[CorrelationId] = {
+    variableSizeBytes(uint16, utf8).xmap(CorrelationId.fromString, CorrelationId.unwrap)
+  }
+
   /** Codec for string-to-string maps (capabilities).
     */
   implicit val capabilitiesCodec: Codec[Map[String, String]] = {
@@ -151,6 +157,11 @@ object Codecs {
   // ============================================================================
   // CLIENT MESSAGE CODECS
   // ============================================================================
+
+  /** Codec for Query message. */
+  implicit def queryCodec: Codec[Query] = {
+    (correlationIdCodec :: payloadCodec :: instantCodec).as[Query]
+  }
 
   /** Codec for CreateSession message.
     */
@@ -207,11 +218,17 @@ object Codecs {
       .typecase(5, serverRequestAckCodec)
       .typecase(6, closeSessionCodec)
       .typecase(7, connectionClosedClientMessageCodec)
+      .typecase(8, queryCodec)
   }
 
   // ============================================================================
   // SERVER MESSAGE CODECS
   // ============================================================================
+
+  /** Codec for QueryResponse message. */
+  implicit def queryResponseCodec: Codec[QueryResponse] = {
+    (correlationIdCodec :: payloadCodec).as[QueryResponse]
+  }
 
   /** Codec for SessionCreated message.
     */
@@ -284,6 +301,7 @@ object Codecs {
       .typecase(6, clientResponseCodec)
       .typecase(7, serverRequestCodec)
       .typecase(8, requestErrorCodec)
+      .typecase(9, queryResponseCodec)
   }
 
   // ============================================================================

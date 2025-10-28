@@ -24,7 +24,7 @@ object PendingRequestsSpec extends ZIOSpecDefault {
       val rid2 = RequestId.fromLong(2L)
       val rid3 = RequestId.fromLong(9L)
       for {
-        p <- Promise.make[Throwable, ByteVector]
+        p <- Promise.make[Nothing, ByteVector]
         now <- Clock.instant
         pending = PendingRequests.empty
           .add(rid1, ByteVector.empty, p, now)
@@ -39,7 +39,7 @@ object PendingRequestsSpec extends ZIOSpecDefault {
       for {
         sentRef <- Ref.make(List.empty[ClientMessage])
         transport = new FakeTransport(sentRef)
-        p <- Promise.make[Throwable, ByteVector]
+        p <- Promise.make[Nothing, ByteVector]
         now <- Clock.instant
         pending = PendingRequests.empty
           .add(rid2, ByteVector.fromValidHex("02"), p, now)
@@ -56,7 +56,7 @@ object PendingRequestsSpec extends ZIOSpecDefault {
       for {
         sentRef <- Ref.make(List.empty[ClientMessage])
         transport = new FakeTransport(sentRef)
-        p <- Promise.make[Throwable, ByteVector]
+        p <- Promise.make[Nothing, ByteVector]
         createdAt = Instant.parse("2023-01-01T00:00:00Z")
         pending = PendingRequests(Map(
           rid1 -> PendingRequests.PendingRequestData(ByteVector.fromValidHex("aa"), p, createdAt, createdAt),
@@ -72,7 +72,7 @@ object PendingRequestsSpec extends ZIOSpecDefault {
     test("die removes request and completes promise with death") {
       val rid = RequestId.fromLong(7L)
       for {
-        p <- Promise.make[Throwable, ByteVector]
+        p <- Promise.make[Nothing, ByteVector]
         now <- Clock.instant
         pending0 = PendingRequests.empty.add(rid, ByteVector.fromValidHex("aa"), p, now)
         pending1 <- pending0.die(rid, new RuntimeException("boom"))

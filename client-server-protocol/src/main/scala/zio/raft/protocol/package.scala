@@ -203,4 +203,23 @@ package object protocol {
   }
 
   type ClientCapabilities = ClientCapabilities.Type
+
+  // ============================================================================
+  // CORRELATION IDENTIFIERS
+  // ============================================================================
+
+  /** Type-safe correlation ID used to match Query to QueryResponse.
+    *
+    * Opaque string; UUID recommended but not required. Generation policy is owned by the client.
+    */
+  object CorrelationId extends Newtype[String] {
+
+    /** Construct from string (validation kept minimal on purpose). */
+    def fromString(value: String): CorrelationId = {
+      require(value.nonEmpty, "CorrelationId cannot be empty")
+      CorrelationId(value)
+    }
+  }
+
+  type CorrelationId = CorrelationId.Type
 }

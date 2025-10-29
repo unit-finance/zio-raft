@@ -72,6 +72,33 @@ object PendingQueriesSpec extends ZIOSpecDefault {
           assertTrue(d1.lastSentAt == currentTime) &&
           assertTrue(d2.lastSentAt == currentTime.minusSeconds(5))
       }
+
+      test("dieAll completes all pending promises with death") {
+        for {
+          p1 <- Promise.make[Nothing, ByteVector]
+          p2 <- Promise.make[Nothing, ByteVector]
+          p3 <- Promise.make[Nothing, ByteVector]
+          now <- Clock.instant
+          pq = PendingQueries.empty
+            .add(CorrelationId.fromString("c1"), ByteVector(1), p1, now)
+            .add(CorrelationId.fromString("c2"), ByteVector(2), p2, now)
+            .add(CorrelationId.fromString("c3"), ByteVector(3), p3, now)
+          _ <- pq.dieAll(new RuntimeException("all dead"))
+          fiber1 <- p1.await.fork
+          fiber2 <- p2.await.fork
+          fiber3 <- p3.await.fork
+          exit1 <- fiber1.await
+          exit2 <- fiber2.await
+          exit3 <- fiber3.await
+        } yield assertTrue(exit1.isFailure) && assertTrue(exit2.isFailure) && assertTrue(exit3.isFailure)
+      }
+
+      test("dieAll on empty pending queries succeeds") {
+        for {
+          pq <- ZIO.succeed(PendingQueries.empty)
+          _ <- pq.dieAll(new RuntimeException("boom"))
+        } yield assertTrue(true)
+      }
     }
 }
 

@@ -11,7 +11,8 @@ object HMapRangeByCompoundKeyPrefixSpec extends ZIOSpecDefault:
   // (The second component is omitted if empty.)
   // This ensures that all keys that share the same first component are in a contiguous
   // lexicographic range [firstComponentLength ++ firstComponentUtf8, ...), which is what
-  // rangeByCompoundKeyPrefix relies on by computing the upper bound via +1 on the last byte.
+  // rangeByCompoundKeyPrefix relies on by computing the upper bound using carry propagation,
+  // special handling for 0xFF bytes, and trailing zero truncation, as implemented in computePrefixUpperBound.
   given HMap.KeyLike[(String, String)] with
     def asBytes(key: (String, String)): Array[Byte] =
       val (first, second) = key

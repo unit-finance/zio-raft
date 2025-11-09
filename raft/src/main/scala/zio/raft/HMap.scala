@@ -360,8 +360,8 @@ final case class HMap[M <: Tuple](private val m: TreeMap[Array[Byte], Any] =
     * within the same first key.
     *
     * For example, for compound keys like (namespace, userId), you can fetch all keys for a given namespace:
-    * hmap.rangeByCompoundKeyPrefix["users"]((namespace, "")) This will return all user records within the `namespace`, regardless
-    * of the second component value.
+    * hmap.rangeByCompoundKeyPrefix["users"]((namespace, "")) This will return all user records within the `namespace`,
+    * regardless of the second component value.
     *
     * IMPORTANT: For this method to work correctly, the `KeyLike` implementation for the compound key type must encode
     * only the leading component(s) in the byte array when the trailing ("zero") component is empty. That is, when

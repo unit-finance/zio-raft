@@ -7,9 +7,10 @@ import java.nio.charset.StandardCharsets
 object HMapRangeByCompoundKeyPrefixSpec extends ZIOSpecDefault:
 
   // Compound key encoding:
-  // bytes = firstComponentUtf8 ++ 0x00 ++ secondComponentUtf8
+  // bytes = lengthOfFirstComponent (1 byte) ++ firstComponentUtf8 ++ [lengthOfSecondComponent (1 byte) ++ secondComponentUtf8]
+  // (The second component is omitted if empty.)
   // This ensures that all keys that share the same first component are in a contiguous
-  // lexicographic range [first ++ 0x00, first ++ 0x01), which is what
+  // lexicographic range [firstComponentLength ++ firstComponentUtf8, ...), which is what
   // rangeByCompoundKeyPrefix relies on by computing the upper bound via +1 on the last byte.
   given HMap.KeyLike[(String, String)] with
     def asBytes(key: (String, String)): Array[Byte] =

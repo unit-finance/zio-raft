@@ -187,7 +187,7 @@ object HMapPrefixRangeSpec extends ZIOSpecDefault:
     }
 
     test("computePrefixUpperBound works") {
-      val prefixBytes = Array[Byte]('t'.toByte, 'e'.toByte, 's'.toByte, 't'.toByte)      
+      val prefixBytes = Array[Byte]('t'.toByte, 'e'.toByte, 's'.toByte, 't'.toByte)
       val hmap = HMap.empty[TestSchema]
       val upper = hmap.computePrefixUpperBound(prefixBytes)
 

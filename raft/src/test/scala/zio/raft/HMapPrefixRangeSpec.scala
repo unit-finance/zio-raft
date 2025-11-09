@@ -197,7 +197,7 @@ object HMapPrefixRangeSpec extends ZIOSpecDefault:
     }
 
     test("computePrefixUpperBound for max string 0xff") {
-      val prefixBytes = Array[Byte](0xff.toByte, 0xff.toByte)        
+      val prefixBytes = Array[Byte](0xff.toByte, 0xff.toByte)
       val hmap = HMap.empty[TestSchema]
       val upper = hmap.computePrefixUpperBound(prefixBytes)
 

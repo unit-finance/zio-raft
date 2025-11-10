@@ -185,5 +185,36 @@ object HMapPrefixRangeSpec extends ZIOSpecDefault:
       assertTrue(compareUnsigned(upper, lower) > 0) &&
       assertTrue(compareUnsigned(lower, upper) < 0)
     }
+
+    test("computePrefixUpperBound works") {
+      val prefixBytes = Array[Byte]('t'.toByte, 'e'.toByte, 's'.toByte, 't'.toByte)
+      val hmap = HMap.empty[TestSchema]
+      val upper = hmap.computePrefixUpperBound(prefixBytes)
+
+      assertTrue(HMap.byteArrayOrdering.compare(upper, prefixBytes) == 1) &&
+      assertTrue(upper.length == 4) &&
+      assertTrue(upper.sameElements(Array[Byte]('t'.toByte, 'e'.toByte, 's'.toByte, 'u'.toByte)))
+    }
+
+    test("computePrefixUpperBound for max string 0xff") {
+      val prefixBytes = Array[Byte](0xff.toByte, 0xff.toByte)
+      val hmap = HMap.empty[TestSchema]
+      val upper = hmap.computePrefixUpperBound(prefixBytes)
+
+      assertTrue(HMap.byteArrayOrdering.compare(upper, prefixBytes) == 1) &&
+      assertTrue(upper.length == 3) &&
+      assertTrue(upper.sameElements(Array[Byte](0xff.toByte, 0xff.toByte, 0x00.toByte)))
+    }
+
+    test("truncate trailing zeros from computePrefixUpperBound") {
+      val prefixBytes = Array[Byte](0x01.toByte, 0xFF.toByte)
+      val hmap = HMap.empty[TestSchema]
+      val upper = hmap.computePrefixUpperBound(prefixBytes)
+
+      assertTrue(HMap.byteArrayOrdering.compare(upper, prefixBytes) == 1) &&
+      assertTrue(upper.length == 1) &&
+      assertTrue(upper.sameElements(Array[Byte](0x02.toByte)))
+    }
+
   }
 end HMapPrefixRangeSpec

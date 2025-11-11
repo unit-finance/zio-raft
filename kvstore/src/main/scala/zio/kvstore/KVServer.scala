@@ -37,7 +37,11 @@ class KVServer(server: RaftServer):
     val bytes = summon[Codec[A]].encode(response).require.bytes
     server.sendQueryResponse(sessionId, QueryResponse(correlationId, bytes))
 
-  def requestError(sessionId: SessionId, requestId: RequestId, reason: zio.raft.sessionstatemachine.RequestError) =
+  def requestError(
+    sessionId: SessionId,
+    requestId: RequestId,
+    reason: zio.raft.sessionstatemachine.RequestError[Nothing]
+  ) =
     val serverReason = reason match
       case zio.raft.sessionstatemachine.RequestError.ResponseEvicted =>
         zio.raft.protocol.RequestErrorReason.ResponseEvicted

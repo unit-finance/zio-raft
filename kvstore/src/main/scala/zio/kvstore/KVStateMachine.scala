@@ -11,12 +11,14 @@ import zio.kvstore.Codecs.given
 import zio.raft.sessionstatemachine.given
 import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
 
-class KVStateMachine extends SessionStateMachine[KVCommand, KVResponse, zio.kvstore.protocol.KVServerRequest, KVSchema]
-    with ScodecSerialization[KVResponse, zio.kvstore.protocol.KVServerRequest, KVSchema]:
+class KVStateMachine
+    extends SessionStateMachine[KVCommand, KVResponse, zio.kvstore.protocol.KVServerRequest, Nothing, KVSchema]
+    with ScodecSerialization[KVResponse, zio.kvstore.protocol.KVServerRequest, Nothing, KVSchema]:
 
   // Local alias to aid match-type reduction bug in scala 3.3
-  type Schema = Tuple.Concat[zio.raft.sessionstatemachine.SessionSchema[KVResponse, KVServerRequest], KVSchema]
-  private type SW[A] = StateWriter[HMap[Schema], ServerRequestForSession[zio.kvstore.protocol.KVServerRequest], A]
+  type Schema = Tuple.Concat[zio.raft.sessionstatemachine.SessionSchema[KVResponse, KVServerRequest, Nothing], KVSchema]
+  private type SW[A] =
+    StateWriter[HMap[Schema], ServerRequestForSession[zio.kvstore.protocol.KVServerRequest], Nothing, A]
 
   // Helpers
   private def putValue(key: KVKey, value: String): SW[Unit] =

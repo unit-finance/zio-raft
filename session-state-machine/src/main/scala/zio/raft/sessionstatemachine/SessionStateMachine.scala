@@ -71,15 +71,15 @@ import java.time.Instant
   * @see
   *   StateWriter for the state + writer monad used in abstract methods
   */
-trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
-    extends StateMachine[HMap[Tuple.Concat[SessionSchema[R, SR], UserSchema]], SessionCommand[UC, SR]]:
+trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
+    extends StateMachine[HMap[Tuple.Concat[SessionSchema[R, SR, E], UserSchema]], SessionCommand[UC, SR, E]]:
 
   /** Type alias for the complete schema (SessionSchema[R, SR] ++ UserSchema).
     *
     * This allows using `HMap[Schema]` instead of `HMap[Tuple.Concat[SessionSchema[R, SR], UserSchema]]` throughout the
     * implementation, making signatures cleaner.
     */
-  type Schema = Tuple.Concat[SessionSchema[R, SR], UserSchema]
+  type Schema = Tuple.Concat[SessionSchema[R, SR, E], UserSchema]
 
   // ====================================================================================
   // ABSTRACT METHODS - Users must implement
@@ -133,7 +133,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     createdAt: Instant,
     sessionId: SessionId,
     command: UC
-  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], command.Response & R]
+  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], E, command.Response & R]
 
   /** Handle session creation event.
     *
@@ -162,7 +162,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     createdAt: Instant,
     sessionId: SessionId,
     capabilities: Map[String, String]
-  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Unit]
+  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Nothing, Unit]
 
   /** Handle session expiration event.
     *
@@ -194,7 +194,7 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     createdAt: Instant,
     sessionId: SessionId,
     capabilities: Map[String, String]
-  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Unit]
+  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Nothing, Unit]
 
   // ====================================================================================
   // StateMachine INTERFACE - Implemented by this trait
@@ -225,9 +225,9 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     *   Response type, and the compiler cannot verify exhaustiveness due to type erasure. This is safe because we handle
     *   all sealed trait cases explicitly.
     */
-  final def apply(command: SessionCommand[UC, SR]): State[HMap[Schema], command.Response] =
+  final def apply(command: SessionCommand[UC, SR, E]): State[HMap[Schema], command.Response] =
     command match
-      case cmd: SessionCommand.ClientRequest[UC, SR] @unchecked =>
+      case cmd: SessionCommand.ClientRequest[UC, SR, E] @unchecked =>
         handleClientRequest(cmd).map(_.asResponseType(command, cmd))
 
       case cmd: SessionCommand.ServerRequestAck[SR] @unchecked =>
@@ -284,16 +284,18 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     * sequence number without a response; we can evict responses with lower numbers. We only update
     * highestLowestPendingRequestIdSeen for requests we actually process.
     */
-  private def handleClientRequest(cmd: SessionCommand.ClientRequest[UC, SR])
-    : State[HMap[Schema], Either[RequestError, (cmd.command.Response, List[ServerRequestEnvelope[SR]])]] =
+  private def handleClientRequest(cmd: SessionCommand.ClientRequest[UC, SR, E])
+    : State[HMap[Schema], Either[RequestError[E], (cmd.command.Response, List[ServerRequestEnvelope[SR]])]] =
     for
       highestLowestSeen <- getHighestLowestPendingRequestIdSeen(cmd.sessionId)
       cachedOpt <- getCachedResponse((cmd.sessionId, cmd.requestId))
       result <- cachedOpt match
-        case Some(cachedResponse) =>
+        case Some(Right(cachedResponse)) =>
           // Cache hit - return cached response without calling user method
           State.succeed(Right((cachedResponse.asInstanceOf[cmd.command.Response], Nil)))
-
+        case Some(Left(error)) =>
+          // Cache hit, but the response is an error
+          State.succeed(Left(RequestError.UserError(error)))
         case None =>
           // Cache miss - check if response was evicted
           // If requestId < highestLowestPendingRequestIdSeen, client has acknowledged receiving this response
@@ -307,22 +309,29 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
               // Update highestLowestPendingRequestIdSeen ONLY when actually executing a new request
               _ <- updateHighestLowestPendingRequestIdSeen(cmd.sessionId, cmd.lowestPendingRequestId)
               _ <- cleanupCache(cmd.sessionId, cmd.lowestPendingRequestId)
-              (serverRequestsLog, response) <- applyCommand(cmd.createdAt, cmd.sessionId, cmd.command).withLog
-              assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
+              (serverRequestsLog, response) <- applyCommand(cmd.createdAt, cmd.sessionId, cmd.command).either.withLog
               _ <- cacheResponse((cmd.sessionId, cmd.requestId), response)
-            yield Right((response, assignedRequests))
+
+              result <- response match
+                case Right(a) =>
+                  for
+                    assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
+                  yield Right((a, assignedRequests))
+                case Left(error) =>
+                  State.succeed(Left(RequestError.UserError(error)))
+            yield result
     yield result
 
   /** Get cached response for a composite key.
     */
-  private def getCachedResponse(key: (SessionId, RequestId)): State[HMap[Schema], Option[Any]] =
+  private def getCachedResponse(key: (SessionId, RequestId)): State[HMap[Schema], Option[Either[E, Any]]] =
     State.get.map(_.get["cache"](key))
 
   /** Cache a response at the given composite key.
     */
   private def cacheResponse(
     key: (SessionId, RequestId),
-    response: R
+    response: Either[E, R]
   ): State[HMap[Schema], Unit] =
     State.update(_.updated["cache"](key, response))
 
@@ -554,16 +563,16 @@ trait SessionStateMachine[UC <: Command, R, SR, UserSchema <: Tuple]
     }
 end SessionStateMachine
 object SessionStateMachine:
-  def hasPendingRequests[R, SR, UserSchema <: Tuple](
-    state: HMap[Tuple.Concat[SessionSchema[R, SR], UserSchema]],
+  def hasPendingRequests[R, SR, E, UserSchema <: Tuple](
+    state: HMap[Tuple.Concat[SessionSchema[R, SR, E], UserSchema]],
     lastSentBefore: Instant
   ): Boolean =
     state.exists["serverRequests"] { (_, pending) =>
       pending.lastSentAt.isBefore(lastSentBefore)
     }
 
-  def getSessions[R, SR, UserSchema <: Tuple](
-    state: HMap[Tuple.Concat[SessionSchema[R, SR], UserSchema]]
+  def getSessions[R, SR, E, UserSchema <: Tuple](
+    state: HMap[Tuple.Concat[SessionSchema[R, SR, E], UserSchema]]
   ): Map[SessionId, SessionMetadata] =
     state.iterator["metadata"].collect {
       case (sessionId: SessionId, metadata) =>

@@ -30,26 +30,26 @@ object SchemaSpec extends ZIOSpecDefault:
   type TestResponse = String // Simple marker type for test
   type TestServerReq = String
 
-  type CombinedSchema = Tuple.Concat[SessionSchema[TestResponse, TestServerReq], TestUserSchema]
+  type CombinedSchema = Tuple.Concat[SessionSchema[TestResponse, TestServerReq, Nothing], TestUserSchema]
 
   def spec = suite("Schema with Composite Keys")(
     test("SessionSchema has composite key for cache") {
       val sessionId = SessionId("session-1")
-      val state = HMap.empty[SessionSchema[TestResponse, TestServerReq]]
+      val state = HMap.empty[SessionSchema[TestResponse, TestServerReq, Nothing]]
 
       // Cache uses composite key (SessionId, RequestId)
       val withCache = state.updated["cache"](
         (sessionId, RequestId(1)),
-        "cached-response"
+        Right("cached-response")
       )
 
-      val retrieved: Option[Any] = withCache.get["cache"]((sessionId, RequestId(1)))
+      val retrieved: Option[Either[Nothing, String]] = withCache.get["cache"]((sessionId, RequestId(1))).asInstanceOf[Option[Either[Nothing, String]]]
 
-      assertTrue(retrieved.contains("cached-response"))
+      assertTrue(retrieved.contains(Right("cached-response")))
     },
     test("SessionSchema has composite key for serverRequests") {
       val sessionId = SessionId("session-1")
-      val state = HMap.empty[SessionSchema[TestResponse, TestServerReq]]
+      val state = HMap.empty[SessionSchema[TestResponse, TestServerReq, Nothing]]
 
       // serverRequests uses composite key (SessionId, RequestId)
       val pending = PendingServerRequest(
@@ -79,14 +79,14 @@ object SchemaSpec extends ZIOSpecDefault:
       // Can use SessionSchema prefixes with composite keys
       val withSession = state
         .updated["metadata"](sessionId, SessionMetadata(Map.empty, Instant.now()))
-        .updated["cache"]((sessionId, RequestId(1)), "value1")
+        .updated["cache"]((sessionId, RequestId(1)), Right("value1"))
 
       // Can use UserSchema prefixes
       val withUser = withSession
         .updated["counter"](CounterKey("main"), 42)
 
       val metadata: Option[SessionMetadata] = withUser.get["metadata"](sessionId)
-      val cached: Option[Any] = withUser.get["cache"]((sessionId, RequestId(1)))
+      val cached: Option[Either[Nothing, String]] = withUser.get["cache"]((sessionId, RequestId(1))).asInstanceOf[Option[Either[Nothing, String]]]
       val counter: Option[Int] = withUser.get["counter"](CounterKey("main"))
 
       assertTrue(
@@ -97,10 +97,10 @@ object SchemaSpec extends ZIOSpecDefault:
     },
     test("Composite keys enable range queries for session") {
       val sessionId = SessionId("session-1")
-      val state = HMap.empty[SessionSchema[TestResponse, TestServerReq]]
-        .updated["cache"]((sessionId, RequestId(1)), "resp1")
-        .updated["cache"]((sessionId, RequestId(5)), "resp5")
-        .updated["cache"]((sessionId, RequestId(10)), "resp10")
+      val state = HMap.empty[SessionSchema[TestResponse, TestServerReq, Nothing]]
+        .updated["cache"]((sessionId, RequestId(1)), Right("resp1"))
+        .updated["cache"]((sessionId, RequestId(5)), Right("resp5"))
+        .updated["cache"]((sessionId, RequestId(10)), Right("resp10"))
 
       // Range query: get all cache entries for session with RequestId in [0, 7)
       val rangeResults = state.range["cache"](
@@ -115,10 +115,10 @@ object SchemaSpec extends ZIOSpecDefault:
     },
     test("Numeric ordering works correctly for RequestIds") {
       val sessionId = SessionId("session-1")
-      val state = HMap.empty[SessionSchema[TestResponse, TestServerReq]]
-        .updated["cache"]((sessionId, RequestId(9)), "nine")
-        .updated["cache"]((sessionId, RequestId(42)), "forty-two")
-        .updated["cache"]((sessionId, RequestId(100)), "hundred")
+      val state = HMap.empty[SessionSchema[TestResponse, TestServerReq, Nothing]]
+        .updated["cache"]((sessionId, RequestId(9)), Right("nine"))
+        .updated["cache"]((sessionId, RequestId(42)), Right("forty-two"))
+        .updated["cache"]((sessionId, RequestId(100)), Right("hundred"))
 
       // Range should use numeric ordering, not lexicographic
       // RequestId uses big-endian encoding, so 9 < 42 < 100

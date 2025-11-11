@@ -40,14 +40,14 @@ object CodecsSpec extends ZIOSpecDefault:
             type Response = Unit
           given Codec[DummyCmd.type] = provide(DummyCmd)
           given Codec[Unit] = provide(())
-          val cmd: SessionCommand[DummyCmd.type, Unit] = SessionCommand.ClientRequest[DummyCmd.type, Unit](
+          val cmd: SessionCommand[DummyCmd.type, Unit, Nothing] = SessionCommand.ClientRequest[DummyCmd.type, Unit, Nothing](
             createdAt = Instant.EPOCH,
             sessionId = SessionId.fromString("s-1"),
             requestId = RequestId(1L),
             lowestPendingRequestId = RequestId(0L),
             command = DummyCmd
           )
-          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit]]]
+          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing]]]
           val bits = codec.encode(cmd).require
           val decoded = codec.decode(bits).require.value
           assertTrue(decoded == cmd)
@@ -64,7 +64,7 @@ object CodecsSpec extends ZIOSpecDefault:
             sessionId = SessionId.fromString("s-2"),
             requestId = RequestId(2L)
           )
-          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit]]]
+          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing]]]
           val bits = codec.encode(cmd).require
           val decoded = codec.decode(bits).require.value
           assertTrue(decoded == cmd)
@@ -80,7 +80,7 @@ object CodecsSpec extends ZIOSpecDefault:
             sessionId = SessionId.fromString("s-3"),
             capabilities = Map("k" -> "v")
           )
-          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit]]]
+          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing]]]
           val bits = codec.encode(cmd).require
           val decoded = codec.decode(bits).require.value
           assertTrue(decoded == cmd)
@@ -95,7 +95,7 @@ object CodecsSpec extends ZIOSpecDefault:
             createdAt = Instant.EPOCH,
             sessionId = SessionId.fromString("s-4")
           )
-          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit]]]
+          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing]]]
           val bits = codec.encode(cmd).require
           val decoded = codec.decode(bits).require.value
           assertTrue(decoded == cmd)
@@ -110,7 +110,7 @@ object CodecsSpec extends ZIOSpecDefault:
             createdAt = Instant.EPOCH,
             lastSentBefore = Instant.ofEpochMilli(500L)
           )
-          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit]]]
+          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing]]]
           val bits = codec.encode(cmd).require
           val decoded = codec.decode(bits).require.value
           assertTrue(decoded == cmd)

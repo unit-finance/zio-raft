@@ -193,7 +193,7 @@ object IdempotencySpec extends ZIOSpecDefault:
       (result4.asInstanceOf[Either[RequestError[Nothing], (Int, List[Any])]]: @unchecked) match
         case Left(RequestError.ResponseEvicted) =>
           assertTrue(
-              sm.callCount == 3 // Command was NOT executed again (only 3 commands processed)
+            sm.callCount == 3 // Command was NOT executed again (only 3 commands processed)
           )
         case Right(_) =>
           assertTrue(false) // Should not succeed
@@ -240,6 +240,79 @@ object IdempotencySpec extends ZIOSpecDefault:
       assertTrue(cache5.get["cache"]((sessionId, RequestId(2))).isDefined) &&
       assertTrue(cache5.get["cache"]((sessionId, RequestId(3))).isDefined) &&
       assertTrue(cache5.get["cache"]((sessionId, RequestId(4))).isDefined)
+    },
+    test("PC-1 error: duplicate request returns cached error without re-execution") {
+      // A separate state machine that can fail with String error type
+      sealed trait ErrorCommand extends Command
+      object ErrorCommand:
+        case object Fail extends ErrorCommand:
+          type Response = Int
+
+      type ErrResponse = Int
+      type ErrSchema = EmptyTuple
+
+      import zio.stream.Stream
+      import zio.{UIO, ZIO}
+
+      class ErrorStateMachine extends SessionStateMachine[ErrorCommand, ErrResponse, String, String, ErrSchema]:
+        var callCount = 0
+
+        protected def applyCommand(
+          createdAt: Instant,
+          sessionId: SessionId,
+          cmd: ErrorCommand
+        ): StateWriter[HMap[Schema], ServerRequestForSession[String], String, cmd.Response & ErrResponse] =
+          callCount += 1
+          StateWriter.fail("boom")
+
+        protected def handleSessionCreated(
+          createdAt: Instant,
+          sid: SessionId,
+          caps: Map[String, String]
+        ): StateWriter[HMap[Schema], ServerRequestForSession[String], Nothing, Unit] =
+          StateWriter.succeed(())
+
+        protected def handleSessionExpired(
+          createdAt: Instant,
+          sid: SessionId,
+          capabilities: Map[String, String]
+        ): StateWriter[HMap[Schema], ServerRequestForSession[String], Nothing, Unit] =
+          StateWriter.succeed(())
+
+        def takeSnapshot(state: HMap[Schema]): Stream[Nothing, Byte] = zio.stream.ZStream.empty
+        def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[Schema]] = ZIO.succeed(HMap.empty[Schema])
+        def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean = false
+
+      val sm = new ErrorStateMachine()
+      val state0 = HMap.empty[sm.Schema]
+      val now = Instant.now()
+      val sessionId = SessionId("s-error")
+
+      // Create session
+      val createCmd: SessionCommand[ErrorCommand, String, String] =
+        SessionCommand.CreateSession[String](now, sessionId, Map.empty)
+          .asInstanceOf[SessionCommand[ErrorCommand, String, String]]
+      val (state1, _) = sm.apply(createCmd).run(state0)
+
+      // First request - should execute and cache the error
+      val cmd1: SessionCommand[ErrorCommand, String, String] =
+        SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), ErrorCommand.Fail)
+      val (state2, result1) = sm.apply(cmd1).run(state1)
+      val Left(RequestError.UserError(err1)) =
+        (result1.asInstanceOf[Either[RequestError[String], (Int, List[Any])]]): @unchecked
+
+      // Duplicate request - should NOT execute and should return cached error
+      val cmd2: SessionCommand[ErrorCommand, String, String] =
+        SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), ErrorCommand.Fail)
+      val (_, result2) = sm.apply(cmd2).run(state2)
+      val Left(RequestError.UserError(err2)) =
+        (result2.asInstanceOf[Either[RequestError[String], (Int, List[Any])]]): @unchecked
+
+      assertTrue(
+        sm.callCount == 1, // executed only once
+        err1 == "boom",
+        err2 == "boom" // same cached error returned
+      )
     }
   )
 end IdempotencySpec

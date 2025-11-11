@@ -21,7 +21,7 @@ object Codecs:
 
   given Codec[Either[Nothing, KVResponse]] =
     discriminated[Either[Nothing, KVResponse]].by(uint8)
-      .typecase(0, provide(Left(???)))
+      .typecase(0, provide(Left(().asInstanceOf)))
       .typecase(1, summon[Codec[KVResponse]].xmap(Right(_), _.value))
 
   // Value codec for KV schema values

@@ -185,16 +185,19 @@ final case class Node(
       )
       either <- raft.sendCommand(cmd).either
       result <- either match
-        case Right(Right((resp, envelopes))) =>
+        case Right(envelopes, Right(resp)) =>
           for
             _ <- ZIO.foreachDiscard(envelopes) { env =>
               kvServer.sendServerRequest(now, env.sessionId, env.requestId, env.payload)
             }
           yield Some(resp.asInstanceOf[command.Response])
-        case Right(Left(zio.raft.sessionstatemachine.RequestError.ResponseEvicted)) =>
-          kvServer.requestError(sessionId, requestId, zio.raft.sessionstatemachine.RequestError.ResponseEvicted).as(
-            None
-          )
+        case Right(envelopes, Left(zio.raft.sessionstatemachine.RequestError.ResponseEvicted)) =>
+          for
+            _ <- ZIO.foreachDiscard(envelopes) { env =>
+              kvServer.sendServerRequest(now, env.sessionId, env.requestId, env.payload)
+            }
+            _ <- kvServer.requestError(sessionId, requestId, zio.raft.sessionstatemachine.RequestError.ResponseEvicted)
+          yield None
         case Left(_: zio.raft.NotALeaderError) =>
           // Ignore not leader error, server will handle it eventually
           ZIO.none

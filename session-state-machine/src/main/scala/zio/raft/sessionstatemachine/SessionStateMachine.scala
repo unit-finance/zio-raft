@@ -285,23 +285,25 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
     * highestLowestPendingRequestIdSeen for requests we actually process.
     */
   private def handleClientRequest(cmd: SessionCommand.ClientRequest[UC, SR, E])
-    : State[HMap[Schema], Either[RequestError[E], (cmd.command.Response, List[ServerRequestEnvelope[SR]])]] =
+    : State[HMap[Schema], (List[ServerRequestEnvelope[SR]], Either[RequestError[E], cmd.command.Response])] =
     for
       highestLowestSeen <- getHighestLowestPendingRequestIdSeen(cmd.sessionId)
       cachedOpt <- getCachedResponse((cmd.sessionId, cmd.requestId))
       result <- cachedOpt match
-        case Some(Right(cachedResponse)) =>
+        case Some(cachedResponse) =>
           // Cache hit - return cached response without calling user method
-          State.succeed(Right((cachedResponse.asInstanceOf[cmd.command.Response], Nil)))
-        case Some(Left(error)) =>
-          // Cache hit, but the response is an error
-          State.succeed(Left(RequestError.UserError(error)))
+          val response =
+            cachedResponse match
+              case Left(value)  => Left(RequestError.UserError(value))
+              case Right(value) => Right(value.asInstanceOf[cmd.command.Response])
+
+          State.succeed((Nil, response))
         case None =>
           // Cache miss - check if response was evicted
           // If requestId < highestLowestPendingRequestIdSeen, client has acknowledged receiving this response
           if cmd.requestId.isLowerThan(highestLowestSeen) then
             // Client said "I have responses for all requestIds < highestLowestPending", so this was evicted
-            State.succeed(Left(RequestError.ResponseEvicted))
+            State.succeed((Nil, Left(RequestError.ResponseEvicted)))
           else
             // requestId >= highestLowestPendingRequestIdSeen
             // This is a valid request (not yet acknowledged), execute the command
@@ -311,15 +313,8 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
               _ <- cleanupCache(cmd.sessionId, cmd.lowestPendingRequestId)
               (serverRequestsLog, response) <- applyCommand(cmd.createdAt, cmd.sessionId, cmd.command).either.withLog
               _ <- cacheResponse((cmd.sessionId, cmd.requestId), response)
-
-              result <- response match
-                case Right(a) =>
-                  for
-                    assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
-                  yield Right((a, assignedRequests))
-                case Left(error) =>
-                  State.succeed(Left(RequestError.UserError(error)))
-            yield result
+              assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
+            yield (assignedRequests, response.left.map(RequestError.UserError(_)))
     yield result
 
   /** Get cached response for a composite key.

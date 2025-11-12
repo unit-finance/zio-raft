@@ -55,7 +55,7 @@ object SessionCommand:
     command: UC
   ) extends SessionCommand[UC, SR, E]:
     // Response type can be an error or the user command's response with server request envelopes
-    type Response = Either[RequestError[E], (command.Response, List[ServerRequestEnvelope[SR]])]
+    type Response = (List[ServerRequestEnvelope[SR]], Either[RequestError[E], command.Response])
 
   /** Acknowledgment from a client for a server-initiated request.
     *

@@ -91,7 +91,7 @@ object SchemaSpec extends ZIOSpecDefault:
 
       assertTrue(
         metadata.isDefined &&
-          cached.contains("value1") &&
+          cached.contains(Right("value1")) &&
           counter.contains(42)
       )
     },

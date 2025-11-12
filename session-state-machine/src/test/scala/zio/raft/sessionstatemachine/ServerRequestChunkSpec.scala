@@ -16,17 +16,26 @@ object ServerRequestChunkSpec extends ZIOSpecDefault:
 
   type TestResponse = Int
   type TestSchema = EmptyTuple
-  type CombinedSchema = Tuple.Concat[SessionSchema[TestResponse, String], TestSchema]
+  type CombinedSchema = Tuple.Concat[SessionSchema[TestResponse, String, Nothing], TestSchema]
 
   // Minimal codecs
   import scodec.codecs.*
   given scodec.Codec[Int] = int32
+  // Codec for Either[Nothing, TestResponse] to satisfy cache value type
+  given scodec.Codec[Either[Nothing, TestResponse]] =
+    summon[scodec.Codec[TestResponse]].exmap[Either[Nothing, TestResponse]](
+      r => scodec.Attempt.successful(Right(r)),
+      (e: Either[Nothing, TestResponse]) =>
+        e match
+          case Right(r) => scodec.Attempt.successful(r)
+          case Left(_)  => scodec.Attempt.failure(scodec.Err("Left (Nothing) is not encodable/decodable"))
+    )
   import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
   given scodec.Codec[PendingServerRequest[?]] =
     summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]
 
-  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, TestSchema]
-      with ScodecSerialization[TestResponse, String, TestSchema]:
+  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema]
+      with ScodecSerialization[TestResponse, String, Nothing, TestSchema]:
 
     val codecs = summon[HMap.TypeclassMap[CombinedSchema, scodec.Codec]]
 
@@ -34,7 +43,7 @@ object ServerRequestChunkSpec extends ZIOSpecDefault:
       createdAt: Instant,
       sessionId: SessionId,
       cmd: TestCommand
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], cmd.Response & TestResponse] =
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, cmd.Response & TestResponse] =
       cmd match
         case TestCommand.Emit(count) =>
           // Log a Chunk of server requests in order 1..count to current session
@@ -43,7 +52,7 @@ object ServerRequestChunkSpec extends ZIOSpecDefault:
           if requests.isEmpty then
             StateWriter.succeed(count.asInstanceOf[cmd.Response & TestResponse])
           else
-            val init: StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
+            val init: StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Unit] =
               StateWriter.get[HMap[CombinedSchema]].as(())
             val all = requests.foldLeft(init) { (acc, r) => acc.flatMap(_ => StateWriter.log(r)) }
             all.as(count.asInstanceOf[cmd.Response & TestResponse])
@@ -52,14 +61,14 @@ object ServerRequestChunkSpec extends ZIOSpecDefault:
       createdAt: Instant,
       sid: SessionId,
       caps: Map[String, String]
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Unit] =
       StateWriter.succeed(())
 
     protected def handleSessionExpired(
       createdAt: Instant,
       sid: SessionId,
       capabilities: Map[String, String]
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Unit] =
       StateWriter.succeed(())
 
     override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
@@ -74,14 +83,14 @@ object ServerRequestChunkSpec extends ZIOSpecDefault:
 
       val create =
         SessionCommand.CreateSession[String](now, s1, Map.empty)
-          .asInstanceOf[SessionCommand[TestCommand, String]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(create).run(state0)
 
-      val cmd: SessionCommand[TestCommand, String] =
+      val cmd: SessionCommand[TestCommand, String, Nothing] =
         SessionCommand.ClientRequest(now, s1, RequestId(1), RequestId(0), TestCommand.Emit(5))
       val (state2, result) = sm.apply(cmd).run(state1)
-      val Right((resp, envelopes)) =
-        (result.asInstanceOf[Either[RequestError, (Int, List[ServerRequestEnvelope[String]])]]): @unchecked
+      val (envelopes, Right(resp)) =
+        (result.asInstanceOf[(List[ServerRequestEnvelope[String]], Either[RequestError[Nothing], Int])]): @unchecked
 
       val h = state2.asInstanceOf[HMap[CombinedSchema]]
       val s1Reqs = h.iterator["serverRequests"].toList.collect {

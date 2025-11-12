@@ -1,7 +1,7 @@
 package zio.kvstore
 
 import scodec.Codec
-import scodec.codecs.{ascii, discriminated, fixedSizeBytes, utf8_32}
+import scodec.codecs.{ascii, discriminated, fixedSizeBytes, utf8_32, uint8, provide}
 
 object Codecs:
   // Response codecs
@@ -18,6 +18,11 @@ object Codecs:
       .typecase("S", summon[Codec[KVResponse.SetDone.type]])
       .typecase("W", summon[Codec[KVResponse.WatchDone.type]])
       .typecase("G", summon[Codec[KVResponse.GetResult]])
+
+  given Codec[Either[Nothing, KVResponse]] =
+    discriminated[Either[Nothing, KVResponse]].by(uint8)
+      .typecase(0, scodec.codecs.fail(scodec.Err("Cannot decode Left[Nothing]")))
+      .typecase(1, summon[Codec[KVResponse]].xmap(Right(_), _.value))
 
   // Value codec for KV schema values
   given Codec[String] = utf8_32

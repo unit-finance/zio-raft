@@ -57,9 +57,9 @@ object Codecs {
   /** Codec for SessionId (UUID string).
     */
   implicit val sessionIdCodec: Codec[SessionId] = {
-    variableSizeBytes(uint16, utf8).xmap(
+    variableSizeBytes(uint8, utf8).xmap(
       str => SessionId(str),
-      sessionId => SessionId.unwrap(sessionId)
+      sessionId => sessionId.value
     )
   }
 

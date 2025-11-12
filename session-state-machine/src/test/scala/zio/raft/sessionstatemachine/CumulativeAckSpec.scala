@@ -16,17 +16,26 @@ object CumulativeAckSpec extends ZIOSpecDefault:
   type TestResponse = Unit
 
   type TestSchema = EmptyTuple
-  type CombinedSchema = Tuple.Concat[SessionSchema[TestResponse, String], TestSchema]
+  type CombinedSchema = Tuple.Concat[SessionSchema[TestResponse, String, Nothing], TestSchema]
 
   // Minimal codecs for ScodecSerialization
   import scodec.codecs.*
   given scodec.Codec[Unit] = provide(())
+  // Codec for Either[Nothing, TestResponse] to satisfy cache value type
+  given scodec.Codec[Either[Nothing, TestResponse]] =
+    summon[scodec.Codec[TestResponse]].exmap[Either[Nothing, TestResponse]](
+      r => scodec.Attempt.successful(Right(r)),
+      (e: Either[Nothing, TestResponse]) =>
+        e match
+          case Right(r) => scodec.Attempt.successful(r)
+          case Left(_)  => scodec.Attempt.failure(scodec.Err("Left (Nothing) is not encodable/decodable"))
+    )
   import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
   given scodec.Codec[PendingServerRequest[?]] =
     summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]
 
-  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, TestSchema]
-      with ScodecSerialization[TestResponse, String, TestSchema]:
+  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema]
+      with ScodecSerialization[TestResponse, String, Nothing, TestSchema]:
 
     val codecs = summon[HMap.TypeclassMap[CombinedSchema, scodec.Codec]]
 
@@ -34,21 +43,21 @@ object CumulativeAckSpec extends ZIOSpecDefault:
       createdAt: Instant,
       sessionId: SessionId,
       cmd: TestCommand      
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], cmd.Response & TestResponse] =
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, cmd.Response & TestResponse] =
       StateWriter.succeed(().asInstanceOf[cmd.Response & TestResponse])
 
     protected def handleSessionCreated(
       createdAt: Instant,
       sid: SessionId,
       caps: Map[String, String]      
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Unit] =
       StateWriter.succeed(())
 
     protected def handleSessionExpired(
       createdAt: Instant,
       sid: SessionId,
       capabilities: Map[String, String]      
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Unit] =
       StateWriter.succeed(())
 
     override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
@@ -63,7 +72,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
 
       val createCmd =
         SessionCommand.CreateSession[String](now, sessionId, Map.empty)
-          .asInstanceOf[SessionCommand[TestCommand, String]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 
       // Seed pending server requests manually (IDs 1..5)
@@ -84,9 +93,9 @@ object CumulativeAckSpec extends ZIOSpecDefault:
       val state2 = s2.asInstanceOf[HMap[sm.Schema]]
 
       // Acknowledge up to RequestId(1) should remove first batch
-      val ack1: SessionCommand[TestCommand, String] =
+      val ack1: SessionCommand[TestCommand, String, Nothing] =
         SessionCommand.ServerRequestAck[String](now, sessionId, RequestId(1))
-          .asInstanceOf[SessionCommand[TestCommand, String]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state3, _) = sm.apply(ack1).run(state2)
 
       val pendingAfterAck1 = state3.asInstanceOf[HMap[CombinedSchema]].iterator["serverRequests"].toList

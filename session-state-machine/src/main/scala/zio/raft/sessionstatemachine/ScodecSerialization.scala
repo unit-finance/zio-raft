@@ -32,11 +32,11 @@ import scodec.Codec
   *   // takeSnapshot and restoreFromSnapshot provided!
   *   }}}
   */
-trait ScodecSerialization[R, SR, UserSchema <: Tuple]:
-  this: StateMachine[HMap[Tuple.Concat[SessionSchema[R, SR], UserSchema]], ?] =>
+trait ScodecSerialization[R, SR, E, UserSchema <: Tuple]:
+  this: StateMachine[HMap[Tuple.Concat[SessionSchema[R, SR, E], UserSchema]], ?] =>
 
   // Type alias for convenience
-  type Schema = Tuple.Concat[SessionSchema[R, SR], UserSchema]
+  type Schema = Tuple.Concat[SessionSchema[R, SR, E], UserSchema]
 
   /** TypeclassMap providing codecs for all value types in the schema.
     *

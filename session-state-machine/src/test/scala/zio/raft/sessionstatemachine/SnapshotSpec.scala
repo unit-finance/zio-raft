@@ -11,6 +11,9 @@ object SnapshotSpec extends ZIOSpecDefault:
   case object R0 extends R
   given Codec[R] = provide(R0)
   given Codec[Int] = int32
+  // Codec for Either[Nothing, R] to satisfy cache value type
+  given Codec[Either[Nothing, R]] =
+    summon[Codec[R]].as[Right[Nothing, R]].upcast[Either[Nothing, R]]
 
   import zio.prelude.Newtype
   object UKey extends Newtype[String]
@@ -21,7 +24,7 @@ object SnapshotSpec extends ZIOSpecDefault:
   import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
 
   type UserSchema = ("u", UKey, Int) *: EmptyTuple
-  type CombinedSchema = Tuple.Concat[SessionSchema[R, String], UserSchema]
+  type CombinedSchema = Tuple.Concat[SessionSchema[R, String, Nothing], UserSchema]
 
   // Minimal state machine to exercise ScodecSerialization
   import zio.raft.Command
@@ -33,7 +36,7 @@ object SnapshotSpec extends ZIOSpecDefault:
       type Response = Unit
 
   class TestMachine extends zio.raft.StateMachine[HMap[CombinedSchema], DCmd]
-      with ScodecSerialization[R, String, UserSchema]:
+      with ScodecSerialization[R, String, Nothing, UserSchema]:
     override val codecs: HMap.TypeclassMap[Schema, Codec] = summon
     def emptyState: HMap[CombinedSchema] = HMap.empty
     def apply(command: DCmd): State[HMap[CombinedSchema], command.Response] =

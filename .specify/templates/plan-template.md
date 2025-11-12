@@ -81,6 +81,8 @@ specs/[###-feature]/
 ├── plan.md              # This file (/plan command output)
 ├── research.md          # Phase 0 output (/plan command)
 ├── data-model.md        # Phase 1 output (/plan command)
+├── tests.md             # Phase 1 output (/plan command)
+├── design.md            # Phase 1 output (/plan command)
 ├── quickstart.md        # Phase 1 output (/plan command)
 └── tasks.md             # Phase 2 output (/tasks command - NOT created by /plan)
 ```
@@ -114,11 +116,30 @@ specs/[###-feature]/
    - Validation rules from requirements
    - State transitions if applicable
 
-2. **Extract test scenarios** from user stories:
+2. **Update plan with high-level design and architecture** → `design.md`
+   - Design high-level solution, based on the `research.md`, `data-model.md`, `plan.md`, and `spec.md`. 
+   - Read the relevant chapter from the Raft Paper, you can find it over in memory folder.
+   - What new projects are you going to add?
+   - What are the new dependencies?
+   - What files are going to be changed?
+   - What new entities or classes you need to add?
+   - What areas are affected? Where do we need to add more tests to cover the new functionality?
+   - What procotol changes are required, if any?
+   - Do we need a new version of a codec for the protocol change?
+   - Do we need a new protocol?
+   - In general, give high-level overview of the solution in plain english and drawing as well.
+
+3. **Extract test scenarios from user stories** → `tests.md`:
    - Each story → integration test scenario
+   - For each functional requirement, evaluate if a test case is required → test case
+   - Each new entity that requires codec → codec test case
+   - For each edge case, prompt the user if a test is required → test case
+   - Based on the `design.md`, what additional test cases we need to add?
+   - Collect the different test cases in the `tests.md` in plain english
+   - We are NOT doing Test Driven Development. Only collect the tests to the `tests.md` file.
    - Quickstart test = story validation steps
 
-3. **Update agent file incrementally** (O(1) operation):
+4. **Update agent file incrementally** (O(1) operation):
    - Run `.specify/scripts/bash/update-agent-context.sh cursor`
      **IMPORTANT**: Execute it exactly as specified above. Do not add or remove any arguments.
    - If exists: Add only NEW tech from current plan
@@ -127,20 +148,20 @@ specs/[###-feature]/
    - Keep under 150 lines for token efficiency
    - Output to repository root
 
-**Output**: data-model.md, failing tests, quickstart.md, agent-specific file
+**Output**: data-model.md, tests.md, design.md, quickstart.md, agent-specific file
 
 ## Phase 2: Task Planning Approach
 *This section describes what the /tasks command will do - DO NOT execute during /plan*
 
 **Task Generation Strategy**:
 - Load `.specify/templates/tasks-template.md` as base
-- Generate tasks from Phase 1 design docs (data model, quickstart)
+- Generate tasks from Phase 1 design docs (data model, design, tests, quickstart)
 - Each entity → model creation task [P] 
-- Each user story → integration test task
-- Implementation tasks to make tests pass
+- Each new project → model creation task
+- Implementation tasks to the tests in `tests.md`, no TDD, implement each test to completion.
 
 **Ordering Strategy**:
-- TDD order: Tests before implementation 
+- No TDD order: implementations tasks before tests tasks 
 - Dependency order: Models before services before UI
 - Mark [P] for parallel execution (independent files)
 

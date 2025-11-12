@@ -89,7 +89,7 @@ package object sessionstatemachine:
     *   } yield CommandResponse(...)
     *   }}}
     */
-  type StateWriter[S, W, A] = ZPure[W, S, S, Any, Nothing, A]
+  type StateWriter[S, W, E, A] = ZPure[W, S, S, Any, E, A]
   val StateWriter: zio.prelude.fx.ZPure.type = zio.prelude.fx.ZPure
 
   /** Extension methods for ZPure to simplify working with state + log.
@@ -137,7 +137,7 @@ package object sessionstatemachine:
 
   /** Error type for request handling failures.
     */
-  enum RequestError:
+  enum RequestError[+E]:
     /** Response was cached but has been evicted. Client must create a new session.
       *
       * This error occurs when:
@@ -146,7 +146,18 @@ package object sessionstatemachine:
       *
       * Per Raft dissertation Chapter 6.3, the client should create a new session and retry the operation.
       */
-    case ResponseEvicted
+    case ResponseEvicted extends RequestError[Nothing]
+
+    /** Command execution failed with a user-defined error.
+      *
+      * This error occurs when the state machine's applyCommand method returns a failure. The error is cached to
+      * maintain idempotency - duplicate requests will return the same error. Unlike ResponseEvicted, the client can
+      * retry with the same session or handle the error appropriately.
+      *
+      * @param e
+      *   The user-defined error value
+      */
+    case UserError(e: E) extends RequestError[E]
 
   /** Fixed schema for session management state with typed keys.
     *
@@ -175,9 +186,9 @@ package object sessionstatemachine:
     *   - If yes and response is not in cache, we know it was evicted (client already acknowledged it)
     *   - This correctly handles out-of-order requests while preventing re-execution of acknowledged commands
     */
-  type SessionSchema[R, SR] =
+  type SessionSchema[R, SR, E] =
     ("metadata", SessionId, SessionMetadata) *:
-      ("cache", (SessionId, RequestId), R) *:
+      ("cache", (SessionId, RequestId), Either[E, R]) *:
       ("serverRequests", (SessionId, RequestId), PendingServerRequest[SR]) *:
       ("lastServerRequestId", SessionId, RequestId) *:
       ("highestLowestPendingRequestIdSeen", SessionId, RequestId) *:
@@ -196,7 +207,7 @@ package object sessionstatemachine:
     * @tparam UserSchema
     *   User-defined schema
     */
-  type Schema[R, SR, UserSchema <: Tuple] = Tuple.Concat[SessionSchema[R, SR], UserSchema]
+  type Schema[R, SR, E, UserSchema <: Tuple] = Tuple.Concat[SessionSchema[R, SR, E], UserSchema]
 
   given HMap.KeyLike[(SessionId, RequestId)] = new HMap.KeyLike[(SessionId, RequestId)]:
     import java.nio.charset.StandardCharsets

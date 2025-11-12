@@ -42,6 +42,13 @@ package object protocol {
       require(id.nonEmpty, "Session ID cannot be empty")
       SessionId(id)
     }
+
+    implicit class SessionIdSyntax(private val sessionId: SessionId) extends AnyVal {
+
+      /** Get the value of the session ID.
+        */
+      def value: String = SessionId.unwrap(sessionId)
+    }
   }
 
   type SessionId = SessionId.Type

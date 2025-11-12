@@ -14,7 +14,7 @@ import java.time.Instant
   * @tparam SR
   *   Server-initiated request payload type
   */
-sealed trait SessionCommand[+UC <: Command, SR] extends Command
+sealed trait SessionCommand[+UC <: Command, SR, +E] extends Command
 
 object SessionCommand:
 
@@ -47,15 +47,15 @@ object SessionCommand:
     * @note
     *   Requests can arrive out of order. Eviction detection uses lowestRequestId, not requestId ordering
     */
-  case class ClientRequest[UC <: Command, SR](
+  case class ClientRequest[UC <: Command, SR, E](
     createdAt: Instant,
     sessionId: SessionId,
     requestId: RequestId,
     lowestPendingRequestId: RequestId,
     command: UC
-  ) extends SessionCommand[UC, SR]:
+  ) extends SessionCommand[UC, SR, E]:
     // Response type can be an error or the user command's response with server request envelopes
-    type Response = Either[RequestError, (command.Response, List[ServerRequestEnvelope[SR]])]
+    type Response = (List[ServerRequestEnvelope[SR]], Either[RequestError[E], command.Response])
 
   /** Acknowledgment from a client for a server-initiated request.
     *
@@ -71,7 +71,7 @@ object SessionCommand:
     createdAt: Instant,
     sessionId: SessionId,
     requestId: RequestId
-  ) extends SessionCommand[Nothing, SR]:
+  ) extends SessionCommand[Nothing, SR, Nothing]:
     type Response = Unit
 
   /** Create a new session.
@@ -89,7 +89,7 @@ object SessionCommand:
     createdAt: Instant,
     sessionId: SessionId,
     capabilities: Map[String, String]
-  ) extends SessionCommand[Nothing, SR]:
+  ) extends SessionCommand[Nothing, SR, Nothing]:
     type Response = List[ServerRequestEnvelope[SR]] // server request envelopes
 
   /** Notification that a session has expired.
@@ -104,7 +104,7 @@ object SessionCommand:
   case class SessionExpired[SR](
     createdAt: Instant,
     sessionId: SessionId
-  ) extends SessionCommand[Nothing, SR]:
+  ) extends SessionCommand[Nothing, SR, Nothing]:
     type Response = List[ServerRequestEnvelope[SR]] // server request envelopes
 
   /** Command to atomically retrieve requests needing retry and update lastSentAt.
@@ -122,6 +122,6 @@ object SessionCommand:
   case class GetRequestsForRetry[SR](
     createdAt: Instant,
     lastSentBefore: Instant
-  ) extends SessionCommand[Nothing, SR]:
+  ) extends SessionCommand[Nothing, SR, Nothing]:
     type Response = List[ServerRequestEnvelope[SR]]
 end SessionCommand

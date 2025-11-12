@@ -15,17 +15,26 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
 
   type TestResponse = Unit
   type TestSchema = EmptyTuple
-  type CombinedSchema = Tuple.Concat[SessionSchema[TestResponse, String], TestSchema]
+  type CombinedSchema = Tuple.Concat[SessionSchema[TestResponse, String, Nothing], TestSchema]
 
   // Minimal codecs
   import scodec.codecs.*
   given scodec.Codec[Unit] = provide(())
+  // Codec for Either[Nothing, TestResponse] to satisfy cache value type
+  given scodec.Codec[Either[Nothing, TestResponse]] =
+    summon[scodec.Codec[TestResponse]].exmap[Either[Nothing, TestResponse]](
+      r => scodec.Attempt.successful(Right(r)),
+      (e: Either[Nothing, TestResponse]) =>
+        e match
+          case Right(r) => scodec.Attempt.successful(r)
+          case Left(_)  => scodec.Attempt.failure(scodec.Err("Left (Nothing) is not encodable/decodable"))
+    )
   import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
   given scodec.Codec[PendingServerRequest[?]] =
     summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]
 
-  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, TestSchema]
-      with ScodecSerialization[TestResponse, String, TestSchema]:
+  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema]
+      with ScodecSerialization[TestResponse, String, Nothing, TestSchema]:
 
     val codecs = summon[HMap.TypeclassMap[CombinedSchema, scodec.Codec]]
 
@@ -33,14 +42,14 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
       createdAt: Instant,
       sessionId: SessionId,
       cmd: TestCommand
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], cmd.Response & TestResponse] =
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, cmd.Response & TestResponse] =
       StateWriter.succeed(().asInstanceOf[cmd.Response & TestResponse])
 
     protected def handleSessionCreated(
       createdAt: Instant,
       sid: SessionId,
       caps: Map[String, String]
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Unit] =
       // Emit a server request to another session (admin) upon session creation
       StateWriter.log(ServerRequestForSession[String](SessionId("admin"), s"created:${SessionId.unwrap(sid)}"))
         .as(())
@@ -49,7 +58,7 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
       createdAt: Instant,
       sid: SessionId,
       capabilities: Map[String, String]
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Unit] =
       // Emit a server request to another session (admin) upon session expiration
       StateWriter.log(ServerRequestForSession[String](SessionId("admin"), s"expired:${SessionId.unwrap(sid)}"))
         .as(())
@@ -67,7 +76,7 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
       // Create session
       val create =
         SessionCommand.CreateSession[String](now, sid, Map("k" -> "v"))
-          .asInstanceOf[SessionCommand[TestCommand, String]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(create).run(state0)
 
       // Verify admin request exists
@@ -80,7 +89,7 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
       // Expire session
       val expire =
         SessionCommand.SessionExpired[String](now, sid)
-          .asInstanceOf[SessionCommand[TestCommand, String]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state2, _) = sm.apply(expire).run(state1)
 
       // Verify session data cleaned

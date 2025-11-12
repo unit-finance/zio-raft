@@ -60,14 +60,14 @@ object Codecs:
   /** Codec for SessionCommand, parameterized by UC (user command) and SR (server request payload). Requires codecs for
     * UC and SR in scope.
     */
-  given sessionCommandCodec[UC <: zio.raft.Command, SR](using
+  given sessionCommandCodec[UC <: zio.raft.Command, SR, E](using
     ucCodec: Codec[UC],
     srCodec: Codec[SR]
-  ): Codec[SessionCommand[UC, SR]] =
-    val clientRequestV0: Codec[SessionCommand.ClientRequest[UC, SR]] =
+  ): Codec[SessionCommand[UC, SR, E]] =
+    val clientRequestV0: Codec[SessionCommand.ClientRequest[UC, SR, E]] =
       (instantCodec :: sessionIdCodec :: requestIdCodec :: requestIdCodec :: ucCodec)
-        .as[SessionCommand.ClientRequest[UC, SR]]
-    val clientRequestCodec: Codec[SessionCommand.ClientRequest[UC, SR]] =
+        .as[SessionCommand.ClientRequest[UC, SR, E]]
+    val clientRequestCodec: Codec[SessionCommand.ClientRequest[UC, SR, E]] =
       (uint8 :: clientRequestV0).xmap(
         { case (_, cmd) => cmd },
         cmd => (0, cmd)
@@ -105,7 +105,7 @@ object Codecs:
         cmd => (0, cmd)
       )
 
-    discriminated[SessionCommand[UC, SR]]
+    discriminated[SessionCommand[UC, SR, E]]
       .by(uint8)
       .typecase(0, clientRequestCodec)
       .typecase(1, serverRequestAckCodec)

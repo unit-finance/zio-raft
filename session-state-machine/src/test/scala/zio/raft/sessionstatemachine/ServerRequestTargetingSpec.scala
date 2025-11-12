@@ -15,17 +15,26 @@ object ServerRequestTargetingSpec extends ZIOSpecDefault:
 
   type TestResponse = Unit
   type TestSchema = EmptyTuple
-  type CombinedSchema = Tuple.Concat[SessionSchema[TestResponse, String], TestSchema]
+  type CombinedSchema = Tuple.Concat[SessionSchema[TestResponse, String, Nothing], TestSchema]
 
   // Minimal codecs
   import scodec.codecs.*
   given scodec.Codec[Unit] = provide(())
+  // Codec for Either[Nothing, TestResponse] to satisfy cache value type
+  given scodec.Codec[Either[Nothing, TestResponse]] =
+    summon[scodec.Codec[TestResponse]].exmap[Either[Nothing, TestResponse]](
+      r => scodec.Attempt.successful(Right(r)),
+      (e: Either[Nothing, TestResponse]) =>
+        e match
+          case Right(r) => scodec.Attempt.successful(r)
+          case Left(_)  => scodec.Attempt.failure(scodec.Err("Left (Nothing) is not encodable/decodable"))
+    )
   import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
   given scodec.Codec[PendingServerRequest[?]] =
     summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]
 
-  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, TestSchema]
-      with ScodecSerialization[TestResponse, String, TestSchema]:
+  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema]
+      with ScodecSerialization[TestResponse, String, Nothing, TestSchema]:
 
     val codecs = summon[HMap.TypeclassMap[CombinedSchema, scodec.Codec]]
 
@@ -33,7 +42,7 @@ object ServerRequestTargetingSpec extends ZIOSpecDefault:
       createdAt: Instant,
       sessionId: SessionId,
       cmd: TestCommand
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], cmd.Response & TestResponse] =
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, cmd.Response & TestResponse] =
       // Emit server requests to two different sessions
       for
         _ <- StateWriter.log(ServerRequestForSession[String](SessionId("s1"), "msg-s1"))
@@ -44,14 +53,14 @@ object ServerRequestTargetingSpec extends ZIOSpecDefault:
       createdAt: Instant,
       sid: SessionId,
       caps: Map[String, String]
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Unit] =
       StateWriter.succeed(())
 
     protected def handleSessionExpired(
       createdAt: Instant,
       sid: SessionId,
       capabilities: Map[String, String]
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Unit] =
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Unit] =
       StateWriter.succeed(())
 
     override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
@@ -67,15 +76,15 @@ object ServerRequestTargetingSpec extends ZIOSpecDefault:
 
       val create1 =
         SessionCommand.CreateSession[String](now, s1, Map.empty)
-          .asInstanceOf[SessionCommand[TestCommand, String]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(create1).run(state0)
 
       val create2 =
         SessionCommand.CreateSession[String](now, s2, Map.empty)
-          .asInstanceOf[SessionCommand[TestCommand, String]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state2, _) = sm.apply(create2).run(state1)
 
-      val cmd: SessionCommand[TestCommand, String] =
+      val cmd: SessionCommand[TestCommand, String, Nothing] =
         SessionCommand.ClientRequest(now, s1, RequestId(1), RequestId(0), TestCommand.Noop)
       val (state3, _) = sm.apply(cmd).run(state2)
 

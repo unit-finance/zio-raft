@@ -25,8 +25,11 @@ import zio.raft.zmq.ZmqRpc
 final case class Node(
   kvServer: KVServer,
   raft: zio.raft.Raft[
-    zio.raft.HMap[Tuple.Concat[zio.raft.sessionstatemachine.SessionSchema[KVResponse, KVServerRequest], KVSchema]],
-    SessionCommand[KVCommand, KVServerRequest]
+    zio.raft.HMap[Tuple.Concat[
+      zio.raft.sessionstatemachine.SessionSchema[KVResponse, KVServerRequest, Nothing],
+      KVSchema
+    ]],
+    SessionCommand[KVCommand, KVServerRequest, Nothing]
   ]
 ):
 
@@ -115,7 +118,10 @@ final case class Node(
         for
           state <- raft.readStateDirty
           hasPending =
-            SessionStateMachine.hasPendingRequests[KVResponse, KVServerRequest, KVSchema](state, lastSentBefore)
+            SessionStateMachine.hasPendingRequests[KVResponse, KVServerRequest, Nothing, KVSchema](
+              state,
+              lastSentBefore
+            )
           _ <-
             if hasPending then
               val cmd = SessionCommand.GetRequestsForRetry[KVServerRequest](now, lastSentBefore)
@@ -135,13 +141,14 @@ final case class Node(
             ZIO.logInfo("Node stepped up") *>
               raft.readState.either.flatMap {
                 case Right(state) =>
-                  val sessions = SessionStateMachine.getSessions[KVResponse, KVServerRequest, KVSchema](state).map {
-                    case (sessionId: SessionId, metadata) =>
-                      (
-                        sessionId,
-                        zio.raft.sessionstatemachine.SessionMetadata(metadata.capabilities, metadata.createdAt)
-                      )
-                  }
+                  val sessions =
+                    SessionStateMachine.getSessions[KVResponse, KVServerRequest, Nothing, KVSchema](state).map {
+                      case (sessionId: SessionId, metadata) =>
+                        (
+                          sessionId,
+                          zio.raft.sessionstatemachine.SessionMetadata(metadata.capabilities, metadata.createdAt)
+                        )
+                    }
                   kvServer.stepUp(sessions)
                 case Left(_) => ZIO.unit
               }
@@ -169,7 +176,7 @@ final case class Node(
   ): UIO[Option[command.Response]] =
     for
       now <- Clock.instant
-      cmd = SessionCommand.ClientRequest[KVCommand, KVServerRequest](
+      cmd = SessionCommand.ClientRequest[KVCommand, KVServerRequest, Nothing](
         now,
         sessionId,
         requestId,
@@ -178,16 +185,19 @@ final case class Node(
       )
       either <- raft.sendCommand(cmd).either
       result <- either match
-        case Right(Right((resp, envelopes))) =>
+        case Right(envelopes, Right(resp)) =>
           for
             _ <- ZIO.foreachDiscard(envelopes) { env =>
               kvServer.sendServerRequest(now, env.sessionId, env.requestId, env.payload)
             }
           yield Some(resp.asInstanceOf[command.Response])
-        case Right(Left(zio.raft.sessionstatemachine.RequestError.ResponseEvicted)) =>
-          kvServer.requestError(sessionId, requestId, zio.raft.sessionstatemachine.RequestError.ResponseEvicted).as(
-            None
-          )
+        case Right(envelopes, Left(zio.raft.sessionstatemachine.RequestError.ResponseEvicted)) =>
+          for
+            _ <- ZIO.foreachDiscard(envelopes) { env =>
+              kvServer.sendServerRequest(now, env.sessionId, env.requestId, env.payload)
+            }
+            _ <- kvServer.requestError(sessionId, requestId, zio.raft.sessionstatemachine.RequestError.ResponseEvicted)
+          yield None
         case Left(_: zio.raft.NotALeaderError) =>
           // Ignore not leader error, server will handle it eventually
           ZIO.none
@@ -212,9 +222,10 @@ object Node:
     for
       stable <- LmdbStable.make.debug("LmdbStable.make")
 
-      logStore <- SegmentedLog.make[SessionCommand[KVCommand, KVServerRequest]](logDirectory).debug("SegmentedLog.make")
+      logStore <-
+        SegmentedLog.make[SessionCommand[KVCommand, KVServerRequest, Nothing]](logDirectory).debug("SegmentedLog.make")
       snapshotStore <- FileSnapshotStore.make(zio.nio.file.Path(snapshotDirectory)).debug("FileSnapshotStore.make")
-      rpc <- ZmqRpc.make[SessionCommand[KVCommand, KVServerRequest]](
+      rpc <- ZmqRpc.make[SessionCommand[KVCommand, KVServerRequest, Nothing]](
         nodeAddress,
         peers
       ).debug("ZmqRpc.make")

@@ -41,7 +41,13 @@ object IdempotencySpec extends ZIOSpecDefault:
   given scodec.Codec[Int] = int32
   // Codec for Either[Nothing, TestResponse] to satisfy cache value type
   given scodec.Codec[Either[Nothing, TestResponse]] =
-    summon[scodec.Codec[TestResponse]].as[Right[Nothing, TestResponse]].upcast[Either[Nothing, TestResponse]]
+    summon[scodec.Codec[TestResponse]].exmap[Either[Nothing, TestResponse]](
+      r => scodec.Attempt.successful(Right(r)),
+      (e: Either[Nothing, TestResponse]) =>
+        e match
+          case Right(r) => scodec.Attempt.successful(r)
+          case Left(_)  => scodec.Attempt.failure(scodec.Err("Left (Nothing) is not encodable/decodable"))
+    )
 
   // Use provided codecs from Codecs object
   import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
@@ -109,7 +115,8 @@ object IdempotencySpec extends ZIOSpecDefault:
       val cmd1: SessionCommand[TestCommand, String, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(10))
       val (state2, result1) = sm.apply(cmd1).run(state1)
-      val Right((response1, _)) = (result1.asInstanceOf[Either[RequestError[Nothing], (Int, List[Any])]]): @unchecked
+      val (_, Right(response1)) =
+        (result1.asInstanceOf[(List[Any], Either[RequestError[Nothing], Int])]): @unchecked
 
       assertTrue(sm.callCount == 1) &&
       assertTrue(response1 == 10)
@@ -118,7 +125,8 @@ object IdempotencySpec extends ZIOSpecDefault:
       val cmd2: SessionCommand[TestCommand, String, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(999))
       val (state3, result2) = sm.apply(cmd2).run(state2)
-      val Right((response2, _)) = (result2.asInstanceOf[Either[RequestError[Nothing], (Int, List[Any])]]): @unchecked
+      val (_, Right(response2)) =
+        (result2.asInstanceOf[(List[Any], Either[RequestError[Nothing], Int])]): @unchecked
 
       assertTrue(
         sm.callCount == 1 && // Still 1, not called again!
@@ -140,13 +148,15 @@ object IdempotencySpec extends ZIOSpecDefault:
       val cmd1: SessionCommand[TestCommand, String, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(5))
       val (state2, result1) = sm.apply(cmd1).run(state1)
-      val Right((response1, _)) = (result1.asInstanceOf[Either[RequestError[Nothing], (Int, List[Any])]]): @unchecked
+      val (_, Right(response1)) =
+        (result1.asInstanceOf[(List[Any], Either[RequestError[Nothing], Int])]): @unchecked
 
       // Second request with DIFFERENT ID
       val cmd2: SessionCommand[TestCommand, String, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(2), RequestId(1), TestCommand.Increment(3))
       val (state3, result2) = sm.apply(cmd2).run(state2)
-      val Right((response2, _)) = (result2.asInstanceOf[Either[RequestError[Nothing], (Int, List[Any])]]): @unchecked
+      val (_, Right(response2)) =
+        (result2.asInstanceOf[(List[Any], Either[RequestError[Nothing], Int])]): @unchecked
 
       assertTrue(
         sm.callCount == 2 && // Both requests processed
@@ -170,13 +180,15 @@ object IdempotencySpec extends ZIOSpecDefault:
       val cmd1: SessionCommand[TestCommand, String, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(10))
       val (state2, result1) = sm.apply(cmd1).run(state1)
-      val Right((response1, _)) = (result1.asInstanceOf[Either[RequestError[Nothing], (Int, List[Any])]]): @unchecked
+      val (_, Right(response1)) =
+        (result1.asInstanceOf[(List[Any], Either[RequestError[Nothing], Int])]): @unchecked
 
       // Second request (requestId=2, lowestPendingRequestId=1)
       val cmd2: SessionCommand[TestCommand, String, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(2), RequestId(1), TestCommand.Increment(5))
       val (state3, result2) = sm.apply(cmd2).run(state2)
-      val Right((response2, _)) = (result2.asInstanceOf[Either[RequestError[Nothing], (Int, List[Any])]]): @unchecked
+      val (_, Right(response2)) =
+        (result2.asInstanceOf[(List[Any], Either[RequestError[Nothing], Int])]): @unchecked
 
       // Third request (requestId=3, lowestPendingRequestId=2)
       // Client says "lowestPendingRequestId=2", so responses with requestId < 2 can be evicted (only 1)
@@ -190,12 +202,12 @@ object IdempotencySpec extends ZIOSpecDefault:
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(2), TestCommand.Increment(999))
       val (state5, result4) = sm.apply(cmd4).run(state4)
 
-      (result4.asInstanceOf[Either[RequestError[Nothing], (Int, List[Any])]]: @unchecked) match
-        case Left(RequestError.ResponseEvicted) =>
+      (result4.asInstanceOf[(List[Any], Either[RequestError[Nothing], Int])]: @unchecked) match
+        case (_, Left(RequestError.ResponseEvicted)) =>
           assertTrue(
             sm.callCount == 3 // Command was NOT executed again (only 3 commands processed)
           )
-        case Right(_) =>
+        case (_, Right(_)) =>
           assertTrue(false) // Should not succeed
     },
     test("PC-3: Cache cleanup removes responses based on lowestPendingRequestId (exclusive)") {
@@ -298,15 +310,15 @@ object IdempotencySpec extends ZIOSpecDefault:
       val cmd1: SessionCommand[ErrorCommand, String, String] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), ErrorCommand.Fail)
       val (state2, result1) = sm.apply(cmd1).run(state1)
-      val Left(RequestError.UserError(err1)) =
-        (result1.asInstanceOf[Either[RequestError[String], (Int, List[Any])]]): @unchecked
+      val (_, Left(RequestError.UserError(err1))) =
+        (result1.asInstanceOf[(List[Any], Either[RequestError[String], Int])]): @unchecked
 
       // Duplicate request - should NOT execute and should return cached error
       val cmd2: SessionCommand[ErrorCommand, String, String] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), ErrorCommand.Fail)
       val (_, result2) = sm.apply(cmd2).run(state2)
-      val Left(RequestError.UserError(err2)) =
-        (result2.asInstanceOf[Either[RequestError[String], (Int, List[Any])]]): @unchecked
+      val (_, Left(RequestError.UserError(err2))) =
+        (result2.asInstanceOf[(List[Any], Either[RequestError[String], Int])]): @unchecked
 
       assertTrue(
         sm.callCount == 1, // executed only once

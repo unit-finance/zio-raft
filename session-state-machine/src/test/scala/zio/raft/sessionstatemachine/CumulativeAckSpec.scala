@@ -23,7 +23,13 @@ object CumulativeAckSpec extends ZIOSpecDefault:
   given scodec.Codec[Unit] = provide(())
   // Codec for Either[Nothing, TestResponse] to satisfy cache value type
   given scodec.Codec[Either[Nothing, TestResponse]] =
-    summon[scodec.Codec[TestResponse]].as[Right[Nothing, TestResponse]].upcast[Either[Nothing, TestResponse]]
+    summon[scodec.Codec[TestResponse]].exmap[Either[Nothing, TestResponse]](
+      r => scodec.Attempt.successful(Right(r)),
+      (e: Either[Nothing, TestResponse]) =>
+        e match
+          case Right(r) => scodec.Attempt.successful(r)
+          case Left(_)  => scodec.Attempt.failure(scodec.Err("Left (Nothing) is not encodable/decodable"))
+    )
   import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
   given scodec.Codec[PendingServerRequest[?]] =
     summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]

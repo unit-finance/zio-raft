@@ -31,7 +31,13 @@ object ResponseCachingSpec extends ZIOSpecDefault:
   given scodec.Codec[Int] = int32
   // Codec for Either[Nothing, TestResponse] to satisfy cache value type
   given scodec.Codec[Either[Nothing, TestResponse]] =
-    summon[scodec.Codec[TestResponse]].as[Right[Nothing, TestResponse]].upcast[Either[Nothing, TestResponse]]
+    summon[scodec.Codec[TestResponse]].exmap[Either[Nothing, TestResponse]](
+      r => scodec.Attempt.successful(Right(r)),
+      (e: Either[Nothing, TestResponse]) =>
+        e match
+          case Right(r) => scodec.Attempt.successful(r)
+          case Left(_)  => scodec.Attempt.failure(scodec.Err("Left (Nothing) is not encodable/decodable"))
+    )
   import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
   given scodec.Codec[PendingServerRequest[?]] =
     summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]
@@ -89,14 +95,16 @@ object ResponseCachingSpec extends ZIOSpecDefault:
       val cmd1: SessionCommand[TestCommand, String, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(10))
       val (state2, result1) = sm.apply(cmd1).run(state1)
-      val Right((response1, _)) = (result1.asInstanceOf[Either[RequestError[Nothing], (Int, List[Any])]]): @unchecked
+      val (_, Right(response1)) =
+        (result1.asInstanceOf[(List[Any], Either[RequestError[Nothing], Int])]): @unchecked
 
       assertTrue(sm.callCount == 1) && assertTrue(response1 == 10)
 
       val cmd2: SessionCommand[TestCommand, String, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(999))
       val (_, result2) = sm.apply(cmd2).run(state2)
-      val Right((response2, _)) = (result2.asInstanceOf[Either[RequestError[Nothing], (Int, List[Any])]]): @unchecked
+      val (_, Right(response2)) =
+        (result2.asInstanceOf[(List[Any], Either[RequestError[Nothing], Int])]): @unchecked
 
       assertTrue(
         sm.callCount == 1 &&

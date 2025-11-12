@@ -23,7 +23,13 @@ object ServerRequestChunkSpec extends ZIOSpecDefault:
   given scodec.Codec[Int] = int32
   // Codec for Either[Nothing, TestResponse] to satisfy cache value type
   given scodec.Codec[Either[Nothing, TestResponse]] =
-    summon[scodec.Codec[TestResponse]].as[Right[Nothing, TestResponse]].upcast[Either[Nothing, TestResponse]]
+    summon[scodec.Codec[TestResponse]].exmap[Either[Nothing, TestResponse]](
+      r => scodec.Attempt.successful(Right(r)),
+      (e: Either[Nothing, TestResponse]) =>
+        e match
+          case Right(r) => scodec.Attempt.successful(r)
+          case Left(_)  => scodec.Attempt.failure(scodec.Err("Left (Nothing) is not encodable/decodable"))
+    )
   import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
   given scodec.Codec[PendingServerRequest[?]] =
     summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]
@@ -83,8 +89,8 @@ object ServerRequestChunkSpec extends ZIOSpecDefault:
       val cmd: SessionCommand[TestCommand, String, Nothing] =
         SessionCommand.ClientRequest(now, s1, RequestId(1), RequestId(0), TestCommand.Emit(5))
       val (state2, result) = sm.apply(cmd).run(state1)
-      val Right((resp, envelopes)) =
-        (result.asInstanceOf[Either[RequestError[Nothing], (Int, List[ServerRequestEnvelope[String]])]]): @unchecked
+      val (envelopes, Right(resp)) =
+        (result.asInstanceOf[(List[ServerRequestEnvelope[String]], Either[RequestError[Nothing], Int])]): @unchecked
 
       val h = state2.asInstanceOf[HMap[CombinedSchema]]
       val s1Reqs = h.iterator["serverRequests"].toList.collect {

@@ -207,7 +207,7 @@ package object sessionstatemachine:
     * @tparam UserSchema
     *   User-defined schema
     */
-  type Schema[R, SR, E, UserSchema <: Tuple] = Tuple.Concat[SessionSchema[E, R, SR], UserSchema]
+  type Schema[R, SR, E, UserSchema <: Tuple] = Tuple.Concat[SessionSchema[R, SR, E], UserSchema]
 
   given HMap.KeyLike[(SessionId, RequestId)] = new HMap.KeyLike[(SessionId, RequestId)]:
     import java.nio.charset.StandardCharsets

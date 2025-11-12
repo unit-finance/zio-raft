@@ -147,13 +147,15 @@ package object sessionstatemachine:
       * Per Raft dissertation Chapter 6.3, the client should create a new session and retry the operation.
       */
     case ResponseEvicted extends RequestError[Nothing]
+
     /** Command execution failed with a user-defined error.
       *
-      * This error occurs when the state machine's applyCommand method returns a failure.
-      * The error is cached to maintain idempotency - duplicate requests will return the same error.
-      * Unlike ResponseEvicted, the client can retry with the same session or handle the error appropriately.
+      * This error occurs when the state machine's applyCommand method returns a failure. The error is cached to
+      * maintain idempotency - duplicate requests will return the same error. Unlike ResponseEvicted, the client can
+      * retry with the same session or handle the error appropriately.
       *
-      * @param e The user-defined error value
+      * @param e
+      *   The user-defined error value
       */
     case UserError(e: E) extends RequestError[E]
 

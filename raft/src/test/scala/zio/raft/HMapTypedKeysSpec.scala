@@ -143,6 +143,100 @@ object HMapTypedKeysSpec extends ZIOSpecDefault:
       }
 
       assertTrue(hasBob && !hasZoe)
+    },
+    test("filter keeps only entries matching predicate") {
+      val hmap = HMap.empty[TestSchema]
+        .updated["users"](UserId("u1"), UserData("Alice", "alice@example.com"))
+        .updated["users"](UserId("u2"), UserData("Bob", "bob@example.com"))
+        .updated["users"](UserId("u3"), UserData("Charlie", "charlie@example.com"))
+
+      // Filter to keep only users with names starting with 'A' or 'B'
+      val filtered = hmap.filter["users"] { (_, userData) =>
+        userData.name.startsWith("A") || userData.name.startsWith("B")
+      }
+
+      val alice = filtered.get["users"](UserId("u1"))
+      val bob = filtered.get["users"](UserId("u2"))
+      val charlie = filtered.get["users"](UserId("u3"))
+
+      assertTrue(
+        alice.isDefined && alice.get.name == "Alice",
+        bob.isDefined && bob.get.name == "Bob",
+        charlie.isEmpty
+      )
+    },
+    test("filter returns empty HMap when no entries match") {
+      val hmap = HMap.empty[TestSchema]
+        .updated["users"](UserId("u1"), UserData("Alice", "alice@example.com"))
+        .updated["users"](UserId("u2"), UserData("Bob", "bob@example.com"))
+
+      // Filter with predicate that matches nothing
+      val filtered = hmap.filter["users"] { (_, userData) =>
+        userData.name == "Zoe"
+      }
+
+      val users = filtered.iterator["users"].toList
+
+      assertTrue(users.isEmpty)
+    },
+    test("filter returns all entries when all match") {
+      val hmap = HMap.empty[TestSchema]
+        .updated["users"](UserId("u1"), UserData("Alice", "alice@example.com"))
+        .updated["users"](UserId("u2"), UserData("Bob", "bob@example.com"))
+        .updated["users"](UserId("u3"), UserData("Charlie", "charlie@example.com"))
+
+      // Filter with predicate that matches everything
+      val filtered = hmap.filter["users"] { (_, _) => true }
+
+      val users = filtered.iterator["users"].toList
+
+      assertTrue(users.size == 3)
+    },
+    test("filter preserves entries in other prefixes") {
+      val hmap = HMap.empty[TestSchema]
+        .updated["users"](UserId("u1"), UserData("Alice", "alice@example.com"))
+        .updated["users"](UserId("u2"), UserData("Bob", "bob@example.com"))
+        .updated["orders"](OrderId("o1"), OrderData(5, 50.0))
+        .updated["orders"](OrderId("o2"), OrderData(10, 100.0))
+
+      // Filter users but keep only Alice
+      val filtered = hmap.filter["users"] { (_, userData) =>
+        userData.name == "Alice"
+      }
+
+      val alice = filtered.get["users"](UserId("u1"))
+      val bob = filtered.get["users"](UserId("u2"))
+      val order1 = filtered.get["orders"](OrderId("o1"))
+      val order2 = filtered.get["orders"](OrderId("o2"))
+
+      assertTrue(
+        alice.isDefined && alice.get.name == "Alice",
+        bob.isEmpty,
+        order1.isDefined && order1.get.itemCount == 5,
+        order2.isDefined && order2.get.itemCount == 10
+      )
+    },
+    test("filter can use key in predicate") {
+      val hmap = HMap.empty[TestSchema]
+        .updated["users"](UserId("alice"), UserData("Alice Smith", "alice@example.com"))
+        .updated["users"](UserId("bob"), UserData("Bob Jones", "bob@example.com"))
+        .updated["users"](UserId("charlie"), UserData("Charlie Brown", "charlie@example.com"))
+
+      // Filter based on key starting with 'a' or 'b'
+      val filtered = hmap.filter["users"] { (key, _) =>
+        val id = UserId.unwrap(key)
+        id.startsWith("a") || id.startsWith("b")
+      }
+
+      val alice = filtered.get["users"](UserId("alice"))
+      val bob = filtered.get["users"](UserId("bob"))
+      val charlie = filtered.get["users"](UserId("charlie"))
+
+      assertTrue(
+        alice.isDefined,
+        bob.isDefined,
+        charlie.isEmpty
+      )
     }
   )
 end HMapTypedKeysSpec

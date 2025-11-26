@@ -480,6 +480,48 @@ final case class HMap[M <: Tuple](private val m: TreeMap[Array[Byte], Any] =
       predicate(logicalKey, v.asInstanceOf[ValueAt[M, P]])
     }
 
+  /** Filter entries within a specific prefix based on a predicate function.
+    *
+    * Uses the underlying TreeMap's range for efficient iteration - only visits entries with the specified prefix. For
+    * each entry, the predicate is applied to the (key, value) pair, and only matching entries are included in the
+    * result.
+    *
+    * @tparam P
+    *   The prefix (must be present in the schema)
+    * @param predicate
+    *   Function to test each (key, value) pair. Returns true to keep the entry, false to exclude it.
+    * @return
+    *   A new HMap containing only entries that satisfy the predicate
+    *
+    * @example
+    *   {{{
+    * type Schema = ("users", UserId, UserData) *: EmptyTuple
+    * val hmap = HMap.empty[Schema]
+    *   .updated["users"](UserId("alice"), UserData(age = 25))
+    *   .updated["users"](UserId("bob"), UserData(age = 30))
+    *   .updated["users"](UserId("charlie"), UserData(age = 17))
+    *
+    * // Keep only users over 18
+    * val adults = hmap.filter["users"] { (_, user) => user.age >= 18 }
+    * // Result contains alice and bob, but not charlie
+    *   }}}
+    */
+  def filter[P <: String & Singleton: ValueOf](predicate: (KeyAt[M, P], ValueAt[M, P]) => Boolean)(using
+    c: Contains[M, P],
+    kl: KeyLike[KeyAt[M, P]]
+  ): HMap[M] =
+    val (lowerBound, upperBound) = prefixRange[P]()
+
+    // Filter entries in the prefix range and build a new TreeMap
+    val filtered = m.range(lowerBound, upperBound).filter { case (k, v) =>
+      val logicalKey = extractKey(k)
+      predicate(logicalKey, v.asInstanceOf[ValueAt[M, P]])
+    }
+
+    // Combine filtered entries with entries outside the prefix range
+    val outside = m.rangeFrom(upperBound) ++ m.rangeUntil(lowerBound)
+    copy(m = TreeMap.from(outside ++ filtered)(using HMap.byteArrayOrdering))
+
   /** Export the internal TreeMap for serialization.
     *
     * This exposes the raw byte array keys and Any values for serialization purposes. Use with extractPrefix and

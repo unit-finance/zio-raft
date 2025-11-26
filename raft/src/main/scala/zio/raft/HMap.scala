@@ -519,8 +519,9 @@ final case class HMap[M <: Tuple](private val m: TreeMap[Array[Byte], Any] =
     }
 
     // Combine filtered entries with entries outside the prefix range
-    val outside = m.rangeFrom(upperBound) ++ m.rangeUntil(lowerBound)
-    copy(m = TreeMap.from(outside ++ filtered)(using HMap.byteArrayOrdering))
+    // Use iterators directly to avoid materializing intermediate collections
+    val newMap = TreeMap.from(m.rangeUntil(lowerBound).iterator ++ filtered.iterator ++ m.rangeFrom(upperBound).iterator)(using HMap.byteArrayOrdering)
+    copy(m = newMap)
 
   /** Export the internal TreeMap for serialization.
     *

@@ -1,9 +1,8 @@
 package zio.raft.sessionstatemachine
 
 import zio.test.*
-import zio.test.Assertion.*
 import zio.raft.{Command, HMap, Index}
-import zio.raft.protocol.{SessionId, RequestId}
+import zio.raft.protocol.SessionId
 import java.time.Instant
 
 object SessionLifecycleSpec extends ZIOSpecDefault:

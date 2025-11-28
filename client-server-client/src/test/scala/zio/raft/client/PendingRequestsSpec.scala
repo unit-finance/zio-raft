@@ -2,7 +2,6 @@ package zio.raft.client
 
 import _root_.zio.*
 import _root_.zio.test.*
-import _root_.zio.test.Assertion.*
 import _root_.zio.raft.protocol.*
 import scodec.bits.ByteVector
 import java.time.Instant

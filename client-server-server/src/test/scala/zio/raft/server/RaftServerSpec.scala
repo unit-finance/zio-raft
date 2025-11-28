@@ -2,7 +2,6 @@ package zio.raft.server
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import zio.raft.protocol.*
 import zio.raft.protocol.Codecs.*
 import zio.raft.server.RaftServer.*

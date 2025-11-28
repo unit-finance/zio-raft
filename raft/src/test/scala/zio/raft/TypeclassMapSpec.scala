@@ -1,7 +1,6 @@
 package zio.raft
 
 import zio.test.*
-import zio.test.Assertion.*
 import zio.prelude.Newtype
 
 /** Test for TypeclassMap - demonstrates deriving typeclass instances for HMap schemas.

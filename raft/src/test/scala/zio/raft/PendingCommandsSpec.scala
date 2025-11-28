@@ -1,6 +1,6 @@
 package zio.raft
 
-import zio.{Promise, ZIO}
+import zio.{Queue, Ref, ZIO}
 import zio.test.ZIOSpecDefault
 import zio.test.Spec
 import zio.test.TestEnvironment
@@ -8,71 +8,93 @@ import zio.test.assertTrue
 
 object PendingCommandsSpec extends ZIOSpecDefault:
 
-  private def makeTestPromise[A](): ZIO[Any, Nothing, CommandPromise[A]] =
-    Promise.make[NotALeaderError, A]
+  private def makeRef[A](): ZIO[Any, Nothing, Ref[Option[Either[NotALeaderError, A]]]] =
+    Ref.make[Option[Either[NotALeaderError, A]]](None)
 
   override def spec: Spec[TestEnvironment, Any] = suite("PendingCommands Spec")(
     test("withAdded - multiple command promises") {
-      for
-        promise1 <- makeTestPromise[String]()
-        promise2 <- makeTestPromise[Int]()
-        promise3 <- makeTestPromise[Boolean]()
-        updated = PendingCommands.empty
-          .withAdded(Index(1), promise1)
-          .withAdded(Index(3), promise2)
-          .withAdded(Index(2), promise3)
-      yield assertTrue(
-        updated.map.size == 3,
-        updated.map.contains(Index(1)),
-        updated.map.contains(Index(2)),
-        updated.map.contains(Index(3)),
-        updated.lastIndex.contains(Index(3))
+      val updated = PendingCommands.empty
+        .withAdded(Index(1), (_: Either[NotALeaderError, String]) => ZIO.unit)
+        .withAdded(Index(3), (_: Either[NotALeaderError, Int]) => ZIO.unit)
+        .withAdded(Index(2), (_: Either[NotALeaderError, Boolean]) => ZIO.unit)
+      ZIO.succeed(
+        assertTrue(
+          updated.map.size == 3,
+          updated.map.contains(Index(1)),
+          updated.map.contains(Index(2)),
+          updated.map.contains(Index(3)),
+          updated.lastIndex.contains(Index(3))
+        )
       )
     },
     test("withCompleted - existing command succeeds and is removed") {
       for
-        promise <- makeTestPromise[String]()
-        initial = PendingCommands.empty.withAdded(Index(1), promise)
-        completed <- initial.withCompleted(Index(1), "test-response")
-        promiseResult <- promise.await
+        ref <- makeRef[String]()
+        queue <- Queue.unbounded[RaftAction]
+        continuation: CommandContinuation[String] = (r: Either[NotALeaderError, String]) => ref.set(Some(r))
+        initial = PendingCommands.empty.withAdded(Index(1), continuation)
+        completed <- initial.withCompleted(Index(1), "test-response", queue)
+        // run the produced continuation effect
+        action <- queue.take
+        _ <- action match
+          case RaftAction.CommandContinuation(eff) => eff
+          case _                                   => ZIO.unit
+        promiseResult <- ref.get
       yield assertTrue(
         completed.map.isEmpty,
         completed.lastIndex.isEmpty,
-        promiseResult == "test-response"
+        promiseResult.contains(Right("test-response"))
       )
     },
     test("withCompleted - non-existent command returns unchanged") {
       for
-        promise <- makeTestPromise[String]()
-        initial = PendingCommands.empty.withAdded(Index(1), promise)
-        completed <- initial.withCompleted(Index(2), "test-response")
+        queue <- Queue.unbounded[RaftAction]
+        continuation: CommandContinuation[String] = (_: Either[NotALeaderError, String]) => ZIO.unit
+        initial = PendingCommands.empty.withAdded(Index(1), continuation)
+        completed <- initial.withCompleted(Index(2), "test-response", queue)
+        maybeAction <- queue.poll
       yield assertTrue(
         completed.map.size == 1,
         completed.map.contains(Index(1)),
-        completed.lastIndex.contains(Index(1))
+        completed.lastIndex.contains(Index(1)),
+        maybeAction.isEmpty
       )
     },
     test("stepDown - empty commands has no effect") {
       for
-        _ <- PendingCommands.empty.stepDown(Some(MemberId("leader1")))
-      yield assertTrue(true) // No exceptions thrown
+        queue <- Queue.unbounded[RaftAction]
+        _ <- PendingCommands.empty.stepDown(Some(MemberId("leader1")), queue)
+        isEmpty <- queue.isEmpty
+      yield assertTrue(isEmpty) // No actions enqueued
     },
     test("stepDown - pending commands fail with NotALeaderError") {
       for
-        promise1 <- makeTestPromise[String]()
-        promise2 <- makeTestPromise[Int]()
+        ref1 <- makeRef[String]()
+        ref2 <- makeRef[Int]()
+        c1: CommandContinuation[String] = (r: Either[NotALeaderError, String]) => ref1.set(Some(r))
+        c2: CommandContinuation[Int] = (r: Either[NotALeaderError, Int]) => ref2.set(Some(r))
+        queue <- Queue.unbounded[RaftAction]
         leaderId = Some(MemberId("leader1"))
         pendingCommands = PendingCommands.empty
-          .withAdded(Index(1), promise1)
-          .withAdded(Index(2), promise2)
-        _ <- pendingCommands.stepDown(leaderId)
-        result1 <- promise1.await.either
-        result2 <- promise2.await.either
+          .withAdded(Index(1), c1)
+          .withAdded(Index(2), c2)
+        _ <- pendingCommands.stepDown(leaderId, queue)
+        // two actions expected, run both
+        a1 <- queue.take
+        _ <- a1 match
+          case RaftAction.CommandContinuation(eff) => eff
+          case _                                   => ZIO.unit
+        a2 <- queue.take
+        _ <- a2 match
+          case RaftAction.CommandContinuation(eff) => eff
+          case _                                   => ZIO.unit
+        result1 <- ref1.get
+        result2 <- ref2.get
       yield assertTrue(
-        result1.isLeft,
-        result2.isLeft,
-        result1.left.getOrElse(NotALeaderError(None)) == NotALeaderError(leaderId),
-        result2.left.getOrElse(NotALeaderError(None)) == NotALeaderError(leaderId)
+        result1.exists(_.isLeft),
+        result2.exists(_.isLeft),
+        result1.contains(Left(NotALeaderError(leaderId))),
+        result2.contains(Left(NotALeaderError(leaderId)))
       )
     },
     test("lastIndex - empty commands returns None") {
@@ -80,19 +102,16 @@ object PendingCommandsSpec extends ZIOSpecDefault:
       assertTrue(empty.lastIndex.isEmpty)
     },
     test("lastIndex - multiple commands returns highest index") {
-      for
-        promise1 <- makeTestPromise[String]()
-        promise2 <- makeTestPromise[Int]()
-        promise3 <- makeTestPromise[Boolean]()
-        promise4 <- makeTestPromise[Boolean]()
-        pendingCommands = PendingCommands.empty
-          .withAdded(Index(10), promise1)
-          .withAdded(Index(5), promise2)
-          .withAdded(Index(15), promise3)
-          .withAdded(Index(1), promise4)
-      yield assertTrue(
-        pendingCommands.lastIndex.contains(Index(15)),
-        pendingCommands.map.size == 4
+      val pendingCommands = PendingCommands.empty
+        .withAdded(Index(10), (_: Either[NotALeaderError, String]) => ZIO.unit)
+        .withAdded(Index(5), (_: Either[NotALeaderError, Int]) => ZIO.unit)
+        .withAdded(Index(15), (_: Either[NotALeaderError, Boolean]) => ZIO.unit)
+        .withAdded(Index(1), (_: Either[NotALeaderError, Boolean]) => ZIO.unit)
+      ZIO.succeed(
+        assertTrue(
+          pendingCommands.lastIndex.contains(Index(15)),
+          pendingCommands.map.size == 4
+        )
       )
     }
   )

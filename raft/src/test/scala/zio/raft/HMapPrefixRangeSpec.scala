@@ -1,7 +1,6 @@
 package zio.raft
 
 import zio.test.*
-import zio.test.Assertion.*
 import zio.prelude.Newtype
 import java.nio.charset.StandardCharsets
 

@@ -20,6 +20,8 @@ import zio.raft.stores.LmdbStable
 import zio.raft.stores.segmentedlog.SegmentedLog
 import zio.raft.stores.FileSnapshotStore
 import zio.raft.zmq.ZmqRpc
+import zio.raft.NotALeaderError
+import zio.raft.sessionstatemachine.ServerRequestEnvelope
 
 /** Node wiring KVServer, Raft core, and KV state machine. */
 final case class Node(
@@ -48,16 +50,19 @@ final case class Node(
         for
           now <- Clock.instant
           cmd = SessionCommand.CreateSession[KVServerRequest](now, sessionId, capabilities)
-          res <- raft.sendCommand(cmd).either
-          _ <- res match
-            case Right(envelopes) =>
-              for
-                // It's important to confirm session creation before sending server requests
-                // As the session might be one of the recipients of the server requests
-                _ <- kvServer.confirmSessionCreation(sessionId)
-                _ <- dispatchServerRequests(now, envelopes)
-              yield ()
-            case Left(_) => ZIO.unit
+
+          cont = (r: Either[NotALeaderError, List[ServerRequestEnvelope[KVServerRequest]]]) =>
+            r match
+              case Right(envelopes) =>
+                for
+                  // It's important to confirm session creation before sending server requests
+                  // As the session might be one of the recipients of the server requests
+                  _ <- kvServer.confirmSessionCreation(sessionId)
+                  _ <- dispatchServerRequests(now, envelopes)
+                yield ()
+              case Left(_) => ZIO.unit
+
+          _ <- raft.sendCommand(cmd, cont)
         yield ()
 
       case NodeAction.FromServer(KVServerAction.ClientRequest(
@@ -69,20 +74,18 @@ final case class Node(
         clientReq match
           case KVClientRequest.Set(k, v) =>
             val cmd = KVCommand.Set(k, v)
-            for
-              maybe <- applyCommand(sessionId, requestId, lowestPendingRequestId, cmd)
-              _ <- maybe match
+            val cont = (maybe: Option[cmd.Response]) =>
+              maybe match
                 case Some(_) => kvServer.reply(sessionId, requestId, ())
                 case _       => ZIO.unit
-            yield ()
+            applyCommand(sessionId, requestId, lowestPendingRequestId, cmd, cont)
           case KVClientRequest.Watch(k) =>
             val cmd = KVCommand.Watch(k)
-            for
-              maybe <- applyCommand(sessionId, requestId, lowestPendingRequestId, cmd)
-              _ <- maybe match
+            val cont = (maybe: Option[cmd.Response]) =>
+              maybe match
                 case Some(_) => kvServer.reply(sessionId, requestId, ())
                 case _       => ZIO.unit
-            yield ()
+            applyCommand(sessionId, requestId, lowestPendingRequestId, cmd, cont)
 
       case NodeAction.FromServer(KVServerAction.Query(sessionId, correlationId, query)) =>
         query match
@@ -99,17 +102,18 @@ final case class Node(
         for
           now <- Clock.instant
           cmd = SessionCommand.ServerRequestAck[KVServerRequest](now, sessionId, requestId)
-          _ <- raft.sendCommand(cmd).ignore
+          _ <- raft.sendCommand(cmd, _ => ZIO.unit).ignore
         yield ()
 
       case NodeAction.FromServer(KVServerAction.ExpireSession(sessionId)) =>
         for
           now <- Clock.instant
           cmd = SessionCommand.SessionExpired[KVServerRequest](now, sessionId)
-          res <- raft.sendCommand(cmd).either
-          _ <- res match
-            case Right(envelopes) => dispatchServerRequests(now, envelopes)
-            case Left(_)          => ZIO.unit
+          cont = (r: Either[NotALeaderError, List[ServerRequestEnvelope[KVServerRequest]]]) =>
+            r match
+              case Right(envelopes) => dispatchServerRequests(now, envelopes)
+              case Left(_)          => ZIO.unit
+          _ <- raft.sendCommand(cmd, cont)
         yield ()
 
       // Retry stream every 10s - dirty read + command to bump lastSentAt
@@ -125,19 +129,18 @@ final case class Node(
           _ <-
             if hasPending then
               val cmd = SessionCommand.GetRequestsForRetry[KVServerRequest](now, lastSentBefore)
-              raft.sendCommand(cmd).either.flatMap {
-                case Right(envelopes) => dispatchServerRequests(now, envelopes)
-                case Left(_)          =>
-                  // node is always running the job, regardless if leader or not
-                  ZIO.unit
-              }
+              val cont = (r: Either[NotALeaderError, List[ServerRequestEnvelope[KVServerRequest]]]) =>
+                r match
+                  case Right(envelopes) => dispatchServerRequests(now, envelopes)
+                  case Left(_)          => ZIO.unit
+              raft.sendCommand(cmd, cont)
             else ZIO.unit
         yield ()
 
       // State notifications mapping to server leadership signals
-      case NodeAction.StateNotificationReceived(notification) =>
-        notification match
-          case zio.raft.StateNotification.SteppedUp =>
+      case NodeAction.FromRaft(action) =>
+        action match
+          case zio.raft.RaftAction.SteppedUp =>
             ZIO.logInfo("Node stepped up") *>
               raft.readState.either.flatMap {
                 case Right(state) =>
@@ -152,10 +155,12 @@ final case class Node(
                   kvServer.stepUp(sessions)
                 case Left(_) => ZIO.unit
               }
-          case zio.raft.StateNotification.SteppedDown(leaderId) =>
+          case zio.raft.RaftAction.SteppedDown(leaderId) =>
             kvServer.stepDown(leaderId)
-          case zio.raft.StateNotification.LeaderChanged(leaderId) =>
+          case zio.raft.RaftAction.LeaderChanged(leaderId) =>
             kvServer.leaderChanged(leaderId)
+          case zio.raft.RaftAction.CommandContinuation(continuation) =>
+            continuation
 
       case NodeAction.FromServer(_) => ZIO.unit
 
@@ -165,15 +170,40 @@ final case class Node(
       kvServer.stream.map(NodeAction.FromServer.apply),
       // TODO: filter this if we are not the leader
       ZStream.tick(10.seconds).mapZIO(_ => Clock.instant.map(NodeAction.RetryTick.apply)),
-      raft.stateNotifications.map(NodeAction.StateNotificationReceived.apply)
+      raft.raftActions.map(NodeAction.FromRaft.apply)
     )
 
   def applyCommand(
     sessionId: SessionId,
     requestId: RequestId,
     lowestPendingRequestId: RequestId,
-    command: KVCommand
-  ): UIO[Option[command.Response]] =
+    command: KVCommand,
+    cont: Option[command.Response] => ZIO[Any, Nothing, Unit]
+  ): UIO[Unit] =
+    def applyCommandCont(
+      now: Instant,
+      cmd: SessionCommand.ClientRequest[KVCommand, KVServerRequest, Nothing]
+    )(r: Either[NotALeaderError, cmd.Response]): ZIO[Any, Nothing, Unit] =
+      r match
+        case Right(envelopes, Right(resp)) =>
+          for
+            _ <- cont(Some(resp.asInstanceOf[command.Response]))
+            _ <- ZIO.foreachDiscard(envelopes) { env =>
+              kvServer.sendServerRequest(now, env.sessionId, env.requestId, env.payload)
+            }
+          yield ()
+        case Right(envelopes, Left(zio.raft.sessionstatemachine.RequestError.ResponseEvicted)) =>
+          for
+            _ <- cont(None)
+            _ <- ZIO.foreachDiscard(envelopes) { env =>
+              kvServer.sendServerRequest(now, env.sessionId, env.requestId, env.payload)
+            }
+            _ <- kvServer.requestError(sessionId, requestId, zio.raft.sessionstatemachine.RequestError.ResponseEvicted)
+          yield ()
+        case Left(_: zio.raft.NotALeaderError) =>
+          // Ignore not leader error, server will handle it eventually
+          cont(None)
+
     for
       now <- Clock.instant
       cmd = SessionCommand.ClientRequest[KVCommand, KVServerRequest, Nothing](
@@ -183,25 +213,8 @@ final case class Node(
         lowestPendingRequestId,
         command
       )
-      either <- raft.sendCommand(cmd).either
-      result <- either match
-        case Right(envelopes, Right(resp)) =>
-          for
-            _ <- ZIO.foreachDiscard(envelopes) { env =>
-              kvServer.sendServerRequest(now, env.sessionId, env.requestId, env.payload)
-            }
-          yield Some(resp.asInstanceOf[command.Response])
-        case Right(envelopes, Left(zio.raft.sessionstatemachine.RequestError.ResponseEvicted)) =>
-          for
-            _ <- ZIO.foreachDiscard(envelopes) { env =>
-              kvServer.sendServerRequest(now, env.sessionId, env.requestId, env.payload)
-            }
-            _ <- kvServer.requestError(sessionId, requestId, zio.raft.sessionstatemachine.RequestError.ResponseEvicted)
-          yield None
-        case Left(_: zio.raft.NotALeaderError) =>
-          // Ignore not leader error, server will handle it eventually
-          ZIO.none
-    yield result
+      _ <- raft.sendCommand(cmd, applyCommandCont(now, cmd))
+    yield ()
 
   // Run unified loop
   def run: UIO[Unit] =
@@ -249,4 +262,4 @@ object Node:
   object NodeAction:
     case class FromServer(action: KVServerAction) extends NodeAction
     case class RetryTick(now: Instant) extends NodeAction
-    case class StateNotificationReceived(notification: zio.raft.StateNotification) extends NodeAction
+    case class FromRaft(action: zio.raft.RaftAction) extends NodeAction

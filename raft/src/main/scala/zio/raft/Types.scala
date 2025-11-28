@@ -1,6 +1,7 @@
 package zio.raft
 
-import zio.{Chunk, Promise}
+import zio.Chunk
+import zio.ZIO
 
 case class Term(value: Long):
   def <(other: Term) = value < other.value
@@ -53,9 +54,26 @@ case class ClusterConfiguration(
 trait Command:
   type Response
 
+object Command:
+  type Aux[C <: Command, R] = C { type Response = R }
+
 case class NotALeaderError(leaderId: Option[MemberId])
 
-type CommandPromise[A] = Promise[NotALeaderError, A]
+/** A user-supplied callback that will be invoked when a command completes.
+  *
+  * Rationale:
+  *   - Using `Promise` would force callers to block (or manually fork) on `sendCommand`, which is problematic when the
+  *     caller drives Raft from a single stream/fiber.
+  *   - Raft is stream-based and batches commands. With continuations, callers can enqueue many commands without
+  *     awaiting each one. Raft will batch, replicate, and when a result is available it will enqueue a
+  *     `RaftAction.CommandContinuation` containing the effect to run the continuation on the caller's stream.
+  *
+  * Contract:
+  *   - The continuation must be total and non-blocking; it will be scheduled back to the user via the `raftActions`
+  *     stream as an effect to run.
+  *   - On success: receives `Right(response)`. On leadership loss: receives `Left(NotALeaderError)`.
+  */
+type CommandContinuation[A] = Either[NotALeaderError, A] => ZIO[Any, Nothing, Unit]
 
 sealed trait LogEntry[+A <: Command]:
   val term: Term
@@ -127,8 +145,24 @@ object InstallSnapshotResult:
   ) extends InstallSnapshotResult[A]
   case class Failure[A <: Command](from: MemberId, term: Term, index: Index) extends InstallSnapshotResult[A]
 
-sealed trait StateNotification
-object StateNotification:
-  case object SteppedUp extends StateNotification
-  case class SteppedDown(leaderId: Option[MemberId]) extends StateNotification
-  case class LeaderChanged(leaderId: MemberId) extends StateNotification
+/** Outbound actions emitted by the Raft runtime to be handled by the embedding application.
+  *
+  * Stream:
+  *   - Use `Raft#raftActions` to subscribe. Actions include leadership changes and continuations to resume user flows
+  *     when commands complete.
+  */
+sealed trait RaftAction
+object RaftAction:
+  case object SteppedUp extends RaftAction
+  case class SteppedDown(leaderId: Option[MemberId]) extends RaftAction
+  case class LeaderChanged(leaderId: MemberId) extends RaftAction
+
+  /** An effect that, when run by the embedding application, will invoke the user's command continuation with either a
+    * response or `NotALeaderError`.
+    *
+    * Delivery model:
+    *   - Raft enqueues this when a command completes (success or leadership loss).
+    *   - Your integration should drain `raftActions` and execute these effects on your desired execution
+    *     context/stream.
+    */
+  case class CommandContinuation(continuation: ZIO[Any, Nothing, Unit]) extends RaftAction

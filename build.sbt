@@ -6,7 +6,7 @@ lazy val zio1Version = "1.0.18"
 
 lazy val jeromqVersion = "0.5.3"
 
-lazy val scala3Version = "3.3.6"
+lazy val scala3Version = "3.3.7"
 lazy val scala213Version = "2.13.14"
 lazy val mainScalaVersion = scala3Version
 

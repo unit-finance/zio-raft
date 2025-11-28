@@ -89,18 +89,23 @@ object State:
     def withReadPendingHeartbeat(promise: Promise[NotALeaderError, S], timestamp: Instant): Leader[S] =
       this.copy(pendingReads = pendingReads.withPendingHeartbeat(promise, timestamp))
 
-    def withPendingCommand[R](index: Index, promise: CommandPromise[R]): Leader[S] =
-      this.copy(pendingCommands = pendingCommands.withAdded(index, promise))
+    def withPendingCommand[R](index: Index, continuation: CommandContinuation[R]): Leader[S] =
+      this.copy(pendingCommands = pendingCommands.withAdded(index, continuation))
 
-    def stepDown(leaderId: Option[MemberId]): UIO[Unit] =
+    def stepDown(leaderId: Option[MemberId], queue: zio.Queue[RaftAction]): UIO[Unit] =
       for
         _ <- pendingReads.stepDown(leaderId)
-        _ <- pendingCommands.stepDown(leaderId)
+        _ <- pendingCommands.stepDown(leaderId, queue)
       yield ()
 
-    def completeCommands[R](index: Index, commandResponse: R, readState: S): UIO[Leader[S]] =
+    def completeCommands[R](
+      index: Index,
+      commandResponse: R,
+      readState: S,
+      queue: zio.Queue[RaftAction]
+    ): UIO[Leader[S]] =
       for
-        pendingCommands <- pendingCommands.withCompleted(index, commandResponse)
+        pendingCommands <- pendingCommands.withCompleted(index, commandResponse, queue)
         pendingReads <- pendingReads.resolveReadsForCommand(index, readState)
       yield this.copy(pendingCommands = pendingCommands, pendingReads = pendingReads)
 

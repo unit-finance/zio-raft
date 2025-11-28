@@ -5,7 +5,7 @@ import scodec.codecs.{ascii, discriminated, fixedSizeBytes, utf8_32, uint8, prov
 
 object Codecs:
   // Response codecs
-  given Codec[KVResponse.SetDone.type] = scodec.codecs.provide(KVResponse.SetDone)
+  given Codec[KVResponse.SetDone.type] = provide(KVResponse.SetDone)
   given Codec[KVResponse.WatchDone.type] = scodec.codecs.provide(KVResponse.WatchDone)
   given Codec[KVResponse.GetResult] = scodec.codecs.optional(scodec.codecs.bool, utf8_32).xmap(
     opt => KVResponse.GetResult(opt),

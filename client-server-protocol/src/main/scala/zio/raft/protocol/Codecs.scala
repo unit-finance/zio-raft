@@ -128,6 +128,7 @@ object Codecs {
         RejectionReason.SessionExpired
       ))
       .subcaseP(3) { case InvalidCapabilities => InvalidCapabilities }(provide(InvalidCapabilities))
+      .subcaseP(4) { case RejectionReason.Other => RejectionReason.Other }(provide(RejectionReason.Other))
   }
 
   /** Codec for SessionCloseReason.

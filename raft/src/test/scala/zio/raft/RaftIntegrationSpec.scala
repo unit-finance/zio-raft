@@ -218,14 +218,20 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch3
         ) <- makeRaft()
 
-        _ <- r1.sendCommand(Increase, _ => ZIO.unit)
+        // Ensure the first Increase is fully applied before killing the leader
+        inc1Done <- Promise.make[Nothing, Unit]
+        _ <- r1.sendCommand(Increase, _ => inc1Done.succeed(()).unit)
+        _ <- inc1Done.await
 
         // stop the leader
         _ <- killSwitch1.set(false)
 
         // find the new leader
         leader <- waitForNewLeader(r1, r1, r2, r3)
-        _ <- leader.sendCommand(Increase, _ => ZIO.unit)
+        // Ensure the second Increase is fully applied before reading logs/state
+        inc2Done <- Promise.make[Nothing, Unit]
+        _ <- leader.sendCommand(Increase, _ => inc2Done.succeed(()).unit)
+        _ <- inc2Done.await
         pp <- Promise.make[Nothing, Int]
         _ <- leader.sendCommand(Get, {
           case Right(v: Int) => pp.succeed(v).unit
@@ -278,7 +284,10 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch3
         ) <- makeRaft().provideSomeLayer(zio.Runtime.removeDefaultLoggers >>> zio.Runtime.addLogger(testLogger))
 
-        _ <- r1.sendCommand(Increase, _ => ZIO.unit)
+        // Ensure write is fully applied so no pending writes remain
+        applied <- Promise.make[Nothing, Unit]
+        _ <- r1.sendCommand(Increase, _ => applied.succeed(()).unit)
+        _ <- applied.await
 
         // When this runs we should have no writes in the queue since the sendCommand call is blocking
         readResult <- r1.readState

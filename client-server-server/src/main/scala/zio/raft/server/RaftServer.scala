@@ -30,6 +30,11 @@ final class RaftServer(
   def sendQueryResponse(sessionId: SessionId, response: QueryResponse): UIO[Unit] =
     actionQueue.offer(RaftServer.ServerAction.SendQueryResponse(sessionId, response)).unit
 
+  /** Reject a pending session creation with a reason (sends SessionRejected and disconnects).
+    */
+  def rejectSession(sessionId: SessionId, reason: RejectionReason): UIO[Unit] =
+    actionQueue.offer(RaftServer.ServerAction.RejectSession(sessionId, reason)).unit
+
   /** Send server-initiated request to a client.
     */
   def sendServerRequest(sessionId: SessionId, request: ServerRequest): UIO[Unit] =
@@ -77,6 +82,7 @@ object RaftServer:
     case class StepUp(sessions: Map[SessionId, SessionMetadata]) extends ServerAction
     case class StepDown(leaderId: Option[MemberId]) extends ServerAction
     case class LeaderChanged(leaderId: MemberId) extends ServerAction
+    case class RejectSession(sessionId: SessionId, reason: RejectionReason) extends ServerAction
 
   /** Actions to forward to Raft state machine.
     */
@@ -189,6 +195,10 @@ object RaftServer:
           case StreamEvent.IncomingClientMessage(routingId, message) =>
             handleClientMessage(routingId, message, transport)
 
+          case StreamEvent.Action(ServerAction.RejectSession(_, _)) =>
+            // Not leader: ignore
+            ZIO.succeed(this)
+
           case StreamEvent.Action(ServerAction.StepUp(sessions)) =>
             for
               _ <- ZIO.logInfo(s"Became leader with ${sessions.size} existing sessions")
@@ -282,6 +292,16 @@ object RaftServer:
         event match
           case StreamEvent.IncomingClientMessage(routingId, message) =>
             handleClientMessage(routingId, message, transport, raftActionsOut, config)
+
+          case StreamEvent.Action(ServerAction.RejectSession(sessionId, reason)) =>
+            sessions.rejectPending(sessionId) match
+              case Some((routingId, nonce, newSessions)) =>
+                for
+                  _ <- transport.sendMessage(routingId, SessionRejected(reason, nonce, None)).orDie
+                  _ <- transport.disconnect(routingId).orDie
+                yield copy(sessions = newSessions)
+              case None =>
+                ZIO.logWarning(s"RejectSession: session $sessionId not found in pending").as(this)
 
           case StreamEvent.Action(ServerAction.StepUp(_)) =>
             ZIO.succeed(this)

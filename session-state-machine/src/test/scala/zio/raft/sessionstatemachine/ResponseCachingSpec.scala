@@ -62,7 +62,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
             _ <- StateWriter.set(state.updated["counter"](counterKey, newValue))
           yield newValue.asInstanceOf[cmd.Response & TestResponse]
 
-    protected def handleSessionCreated(
+    protected def createSession(
       createdAt: Instant,
       sid: SessionId,
       caps: Map[String, String]
@@ -87,7 +87,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
       val sessionId = SessionId("s1")
 
       val createCmd =
-        SessionCommand.CreateSession[String](now, sessionId, Map.empty)
+        SessionCommand.CreateSession[String, Nothing](now, sessionId, Map.empty)
           .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 

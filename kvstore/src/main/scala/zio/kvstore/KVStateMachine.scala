@@ -96,7 +96,7 @@ class KVStateMachine
             case None => StateWriter.unit
         yield KVResponse.WatchDone.asResponseType(command, watch)
 
-  protected def handleSessionCreated(
+  protected def createSession(
     createdAt: Instant,
     sessionId: SessionId,
     capabilities: Map[String, String]

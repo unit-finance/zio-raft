@@ -63,6 +63,17 @@ case class Sessions(
       (pending.routingId, pending.nonce, newSessions)
     }
 
+  /** Reject a pending session and remove it from pending set.
+    *
+    * @return
+    *   routingId and nonce if the session was pending, along with updated Sessions
+    */
+  def rejectPending(sessionId: SessionId): Option[(RoutingId, Nonce, Sessions)] =
+    pendingSessions.get(sessionId).map { pending =>
+      val newSessions = copy(pendingSessions = pendingSessions.removed(sessionId))
+      (pending.routingId, pending.nonce, newSessions)
+    }
+
   def reconnect(sessionId: SessionId, routingId: RoutingId, now: Instant, config: ServerConfig): Sessions =
     connections.get(sessionId) match
       case Some(conn) =>

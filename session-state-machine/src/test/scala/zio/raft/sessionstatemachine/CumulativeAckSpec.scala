@@ -45,7 +45,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
     ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, cmd.Response & TestResponse] =
       StateWriter.succeed(().asInstanceOf[cmd.Response & TestResponse])
 
-    protected def handleSessionCreated(
+    protected def createSession(
       createdAt: Instant,
       sid: SessionId,
       caps: Map[String, String]      
@@ -70,7 +70,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
       val sessionId = SessionId("s1")
 
       val createCmd =
-        SessionCommand.CreateSession[String](now, sessionId, Map.empty)
+        SessionCommand.CreateSession[String, Nothing](now, sessionId, Map.empty)
           .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 

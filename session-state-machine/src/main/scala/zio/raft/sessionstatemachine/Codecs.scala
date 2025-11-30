@@ -81,9 +81,9 @@ object Codecs:
         cmd => (0, cmd)
       )
 
-    val createSessionV0: Codec[SessionCommand.CreateSession[SR]] =
-      (instantCodec :: sessionIdCodec :: capabilitiesCodec).as[SessionCommand.CreateSession[SR]]
-    val createSessionCodec: Codec[SessionCommand.CreateSession[SR]] =
+    val createSessionV0: Codec[SessionCommand.CreateSession[SR, E]] =
+      (instantCodec :: sessionIdCodec :: capabilitiesCodec).as[SessionCommand.CreateSession[SR, E]]
+    val createSessionCodec: Codec[SessionCommand.CreateSession[SR, E]] =
       (uint8 :: createSessionV0).xmap(
         { case (_, cmd) => cmd },
         cmd => (0, cmd)

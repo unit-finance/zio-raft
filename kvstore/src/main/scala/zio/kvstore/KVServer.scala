@@ -14,6 +14,7 @@ import zio.raft.MemberId
 import zio.raft.sessionstatemachine.SessionMetadata
 import zio.raft.protocol.ServerRequest
 import java.time.Instant
+import zio.raft.protocol.RejectionReason
 
 class KVServer(server: RaftServer):
   private def decodeClientRequest(bytes: ByteVector): KVClientRequest =
@@ -48,6 +49,8 @@ class KVServer(server: RaftServer):
     server.sendRequestError(sessionId, zio.raft.protocol.RequestError(requestId, serverReason))
 
   def confirmSessionCreation(sessionId: SessionId) = server.confirmSessionCreation(sessionId)
+
+  def rejectSession(sessionId: SessionId, reason: RejectionReason) = server.rejectSession(sessionId, reason)
 
   def stepUp(sessions: Map[SessionId, SessionMetadata]) =
     server.stepUp(sessions.map((k, v) => (k, zio.raft.server.SessionMetadata(v.capabilities, v.createdAt))))

@@ -8,7 +8,7 @@ import zio.kvstore.protocol.{KVClientRequest, KVQuery}
 import zio.kvstore.protocol.KVClientResponse.given
 import zio.raft.Raft
 import zio.raft.protocol.*
-import zio.raft.sessionstatemachine.{SessionCommand, SessionStateMachine}
+import zio.raft.sessionstatemachine.{SessionCommand, SessionStateMachine, RequestError}
 import zio.raft.sessionstatemachine.Codecs.given
 import zio.kvstore.KVServer.KVServerAction
 import java.time.Instant
@@ -49,15 +49,23 @@ final case class Node(
       case NodeAction.FromServer(KVServerAction.CreateSession(sessionId, capabilities)) =>
         for
           now <- Clock.instant
-          cmd = SessionCommand.CreateSession[KVServerRequest](now, sessionId, capabilities)
+          cmd = SessionCommand.CreateSession[KVServerRequest, Nothing](now, sessionId, capabilities)
 
-          cont = (r: Either[NotALeaderError, List[ServerRequestEnvelope[KVServerRequest]]]) =>
+          cont = (r: Either[
+            NotALeaderError,
+            (List[ServerRequestEnvelope[KVServerRequest]], Either[RequestError[Nothing], Unit])
+          ]) =>
             r match
-              case Right(envelopes) =>
+              case Right((envelopes, Right(_))) =>
                 for
                   // It's important to confirm session creation before sending server requests
                   // As the session might be one of the recipients of the server requests
                   _ <- kvServer.confirmSessionCreation(sessionId)
+                  _ <- dispatchServerRequests(now, envelopes)
+                yield ()
+              case Right((envelopes, Left(error))) =>
+                for
+                  _ <- kvServer.rejectSession(sessionId, RejectionReason.InvalidCapabilities)
                   _ <- dispatchServerRequests(now, envelopes)
                 yield ()
               case Left(_) => ZIO.unit

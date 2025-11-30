@@ -75,7 +75,7 @@ object CodecsSpec extends ZIOSpecDefault:
             type Response = Unit
           given Codec[DummyCmd.type] = provide(DummyCmd)
           given Codec[Unit] = provide(())
-          val cmd = SessionCommand.CreateSession[Unit](
+          val cmd = SessionCommand.CreateSession[Unit, Nothing](
             createdAt = Instant.EPOCH,
             sessionId = SessionId.fromString("s-3"),
             capabilities = Map("k" -> "v")

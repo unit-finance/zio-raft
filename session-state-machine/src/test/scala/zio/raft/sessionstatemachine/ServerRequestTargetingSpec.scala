@@ -48,7 +48,7 @@ object ServerRequestTargetingSpec extends ZIOSpecDefault:
         _ <- StateWriter.log(ServerRequestForSession[String](SessionId("s2"), "msg-s2"))
       yield ().asInstanceOf[cmd.Response & TestResponse]
 
-    protected def handleSessionCreated(
+    protected def createSession(
       createdAt: Instant,
       sid: SessionId,
       caps: Map[String, String]
@@ -74,12 +74,12 @@ object ServerRequestTargetingSpec extends ZIOSpecDefault:
       val s2 = SessionId("s2")
 
       val create1 =
-        SessionCommand.CreateSession[String](now, s1, Map.empty)
+        SessionCommand.CreateSession[String, Nothing](now, s1, Map.empty)
           .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(create1).run(state0)
 
       val create2 =
-        SessionCommand.CreateSession[String](now, s2, Map.empty)
+        SessionCommand.CreateSession[String, Nothing](now, s2, Map.empty)
           .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state2, _) = sm.apply(create2).run(state1)
 

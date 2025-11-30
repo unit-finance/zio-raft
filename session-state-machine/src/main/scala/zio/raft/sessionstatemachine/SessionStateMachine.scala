@@ -405,7 +405,7 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
     : State[HMap[Schema], List[ServerRequestEnvelope[SR]]] =
     for
       capabilities <- getSessionCapabilities(cmd.sessionId)
-      (serverRequestsLog, response) <- handleSessionExpired(cmd.createdAt, cmd.sessionId, capabilities).withLog
+      (serverRequestsLog, _) <- handleSessionExpired(cmd.createdAt, cmd.sessionId, capabilities).withLog
       assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
       _ <- expireSession(cmd.sessionId)
     yield assignedRequests

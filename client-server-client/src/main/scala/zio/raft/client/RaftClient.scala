@@ -258,6 +258,11 @@ object RaftClient {
                   pendingRequests.dieAll(new RuntimeException("Invalid capabilities")) *>
                     pendingQueries.dieAll(new RuntimeException("Invalid capabilities")) *>
                     ZIO.dieMessage(s"Invalid capabilities - cannot connect: ${capabilities}")
+
+                case RejectionReason.Other =>
+                  pendingRequests.dieAll(new RuntimeException("Other reason")) *>
+                    pendingQueries.dieAll(new RuntimeException("Other reason")) *>
+                    ZIO.dieMessage(s"Other reason - cannot connect: ${reason}")
               }
             } else {
               ZIO.logWarning("Nonce mismatch, ignoring SessionRejected").as(this)
@@ -412,6 +417,11 @@ object RaftClient {
                   pendingRequests.dieAll(new RuntimeException("Invalid capabilities")) *>
                     pendingQueries.dieAll(new RuntimeException("Invalid capabilities")) *>
                     ZIO.dieMessage(s"Invalid capabilities - cannot connect: ${capabilities}")
+
+                case RejectionReason.Other =>
+                  pendingRequests.dieAll(new RuntimeException("Other reason")) *>
+                    pendingQueries.dieAll(new RuntimeException("Other reason")) *>
+                    ZIO.dieMessage(s"Other reason - cannot connect: ${reason}")
               }
             } else {
               ZIO.logWarning("Nonce mismatch, ignoring SessionRejected").as(this)

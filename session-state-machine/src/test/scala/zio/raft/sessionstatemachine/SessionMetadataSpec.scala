@@ -1,7 +1,6 @@
 package zio.raft.sessionstatemachine
 
 import zio.test.*
-import zio.test.Assertion.*
 import java.time.Instant
 
 /** Contract test for SessionMetadata.

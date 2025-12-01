@@ -3,17 +3,21 @@ package zio.raft
 import zio.{UIO, ZIO}
 
 case class PendingCommands(map: Map[Index, Any]):
-  def withCompleted[R](index: Index, response: R): UIO[PendingCommands] =
+  def withCompleted[R](index: Index, response: R, queue: zio.Queue[RaftAction]): UIO[PendingCommands] =
     ZIO
-      .foreach(map.get(index).asInstanceOf[Option[CommandPromise[R]]])(_.succeed(response))
+      .foreach(map.get(index).asInstanceOf[Option[CommandContinuation[R]]]) { continuation =>
+        queue.offer(RaftAction.CommandContinuation(continuation(Right(response))))
+      }
       .as(PendingCommands(map.removed(index)))
 
-  def withAdded[R](index: Index, promise: CommandPromise[R]): PendingCommands =
-    PendingCommands(map + (index -> promise))
+  def withAdded[R](index: Index, continuation: CommandContinuation[R]): PendingCommands =
+    PendingCommands(map + (index -> continuation))
 
-  def stepDown(leaderId: Option[MemberId]): UIO[Unit] =
+  def stepDown(leaderId: Option[MemberId], queue: zio.Queue[RaftAction]): UIO[Unit] =
     ZIO
-      .foreach(map.values.map(_.asInstanceOf[CommandPromise[Any]]))(_.fail(NotALeaderError(leaderId)))
+      .foreach(map.values.map(_.asInstanceOf[CommandContinuation[Any]])) { continuation =>
+        queue.offer(RaftAction.CommandContinuation(continuation(Left(NotALeaderError(leaderId)))))
+      }
       .unit
 
   def lastIndex: Option[Index] = Option.when(map.keys.nonEmpty)(map.keys.max(using Ordering.by(_.value)))

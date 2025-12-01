@@ -1,7 +1,6 @@
 package zio.raft.sessionstatemachine
 
 import zio.test.*
-import zio.test.Assertion.*
 import zio.stream.ZStream
 import zio.{Chunk, ZIO}
 import scodec.Codec

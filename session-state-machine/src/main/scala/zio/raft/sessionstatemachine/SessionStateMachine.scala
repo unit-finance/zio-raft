@@ -17,7 +17,7 @@ import java.time.Instant
   *
   * Users extend this trait and implement 3 protected abstract methods:
   *   - `applyCommand`: Business logic for processing user commands (returns StateWriter)
-  *   - `handleSessionCreated`: Session initialization logic (returns StateWriter)
+  *   - `createSession`: Session initialization logic; may reject session (returns StateWriter)
   *   - `handleSessionExpired`: Session cleanup logic (returns StateWriter)
   *
   * The StateWriter monad combines State for state transitions with Writer for accumulating server-initiated requests.
@@ -135,12 +135,15 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
     command: UC
   ): StateWriter[HMap[Schema], ServerRequestForSession[SR], E, command.Response & R]
 
-  /** Handle session creation event.
+  /** Create a session (may reject).
     *
     * Called when a CreateSession command is processed. Use this to initialize any per-session state in your
     * user-defined prefixes.
     *
     * Use `.log(ServerRequestForSession(targetSessionId, payload))` to emit server requests.
+    *
+    * To reject a session, return a Left(error). On rejection, session metadata will not be created. To accept a
+    * session, return Right(()).
     *
     * @param createdAt
     *   The time the session was created
@@ -149,7 +152,7 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
     * @param capabilities
     *   Client capabilities as key-value pairs
     * @return
-    *   StateWriter monad accumulating server requests via log
+    *   StateWriter monad accumulating server requests via log; Left(error) rejects the session
     *
     * @note
     *   Receives complete schema state
@@ -158,11 +161,11 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
     * @note
     *   Server requests must specify target sessionId (can be different from current session)
     */
-  protected def handleSessionCreated(
+  protected def createSession(
     createdAt: Instant,
     sessionId: SessionId,
     capabilities: Map[String, String]
-  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Nothing, Unit]
+  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], E, Unit]
 
   /** Handle session expiration event.
     *
@@ -233,7 +236,7 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
       case cmd: SessionCommand.ServerRequestAck[SR] @unchecked =>
         handleServerRequestAck(cmd).map(_.asResponseType(command, cmd))
 
-      case cmd: SessionCommand.CreateSession[SR] @unchecked =>
+      case cmd: SessionCommand.CreateSession[SR, E] @unchecked =>
         handleCreateSession(cmd).map(_.asResponseType(command, cmd))
 
       case cmd: SessionCommand.SessionExpired[SR] @unchecked =>
@@ -377,13 +380,15 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
 
   /** Handle CreateSession command.
     */
-  private def handleCreateSession(cmd: SessionCommand.CreateSession[SR])
-    : State[HMap[Schema], List[ServerRequestEnvelope[SR]]] =
+  private def handleCreateSession(cmd: SessionCommand.CreateSession[SR, E])
+    : State[HMap[Schema], (List[ServerRequestEnvelope[SR]], Either[RequestError[E], Unit])] =
     for
-      _ <- createSessionMetadata(cmd.sessionId, cmd.capabilities, cmd.createdAt)
-      (serverRequestsLog, _) <- handleSessionCreated(cmd.createdAt, cmd.sessionId, cmd.capabilities).withLog
+      (serverRequestsLog, response) <- createSession(cmd.createdAt, cmd.sessionId, cmd.capabilities).either.withLog
+      _ <- response match
+        case Right(_) => createSessionMetadata(cmd.sessionId, cmd.capabilities, cmd.createdAt)
+        case Left(_)  => State.unit
       assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
-    yield assignedRequests
+    yield (assignedRequests, response.left.map(RequestError.UserError(_)))
 
   /** Create session metadata entry.
     */

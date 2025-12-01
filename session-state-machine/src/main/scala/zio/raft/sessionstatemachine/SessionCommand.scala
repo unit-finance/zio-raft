@@ -77,20 +77,20 @@ object SessionCommand:
   /** Create a new session.
     *
     * The SessionStateMachine base class:
-    *   1. Creates SessionMetadata and stores it 2. Calls user's handleSessionCreated method 3. Returns any server
-    *      requests
+    *   1. Calls user's createSession method (may reject by returning Left(error)) 2. If accepted (Right(())), creates
+    *      SessionMetadata and stores it 3. Returns any server requests
     *
     * @param sessionId
     *   The newly created session ID
     * @param capabilities
     *   Client capabilities as key-value pairs
     */
-  case class CreateSession[SR](
+  case class CreateSession[SR, E](
     createdAt: Instant,
     sessionId: SessionId,
     capabilities: Map[String, String]
-  ) extends SessionCommand[Nothing, SR, Nothing]:
-    type Response = List[ServerRequestEnvelope[SR]] // server request envelopes
+  ) extends SessionCommand[Nothing, SR, E]:
+    type Response = (List[ServerRequestEnvelope[SR]], Either[RequestError[E], Unit])
 
   /** Notification that a session has expired.
     *

@@ -148,6 +148,10 @@ object RejectionReason {
   /** Client capabilities are invalid or unsupported.
     */
   case object InvalidCapabilities extends RejectionReason
+
+  /** Generic rejection reason for cases not covered above.
+    */
+  case object Other extends RejectionReason
 }
 
 /** Reasons for server-initiated session closure.

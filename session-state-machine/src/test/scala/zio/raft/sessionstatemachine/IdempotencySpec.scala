@@ -1,7 +1,6 @@
 package zio.raft.sessionstatemachine
 
 import zio.test.*
-import zio.test.Assertion.*
 import zio.raft.{Command, HMap, Index}
 import zio.raft.protocol.{SessionId, RequestId}
 import java.time.Instant
@@ -79,7 +78,7 @@ object IdempotencySpec extends ZIOSpecDefault:
             _ <- StateWriter.set(newState)
           yield newValue.asInstanceOf[cmd.Response & TestResponse]
 
-    protected def handleSessionCreated(
+    protected def createSession(
       createdAt: Instant,
       sid: SessionId,
       caps: Map[String, String]
@@ -107,7 +106,7 @@ object IdempotencySpec extends ZIOSpecDefault:
 
       // Create session first (cast to match state machine type)
       val createCmd: SessionCommand[TestCommand, String, Nothing] =
-        SessionCommand.CreateSession[String](now, sessionId, Map.empty)
+        SessionCommand.CreateSession[String, Nothing](now, sessionId, Map.empty)
           .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 
@@ -140,7 +139,7 @@ object IdempotencySpec extends ZIOSpecDefault:
       val sessionId = SessionId("s1")
 
       val createCmd: SessionCommand[TestCommand, String, Nothing] =
-        SessionCommand.CreateSession[String](now, sessionId, Map.empty)
+        SessionCommand.CreateSession[String, Nothing](now, sessionId, Map.empty)
           .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 
@@ -172,7 +171,7 @@ object IdempotencySpec extends ZIOSpecDefault:
 
       // Create session
       val createCmd: SessionCommand[TestCommand, String, Nothing] =
-        SessionCommand.CreateSession[String](now, sessionId, Map.empty)
+        SessionCommand.CreateSession[String, Nothing](now, sessionId, Map.empty)
           .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 
@@ -218,7 +217,7 @@ object IdempotencySpec extends ZIOSpecDefault:
 
       // Create session
       val createCmd: SessionCommand[TestCommand, String, Nothing] =
-        SessionCommand.CreateSession[String](now, sessionId, Map.empty)
+        SessionCommand.CreateSession[String, Nothing](now, sessionId, Map.empty)
           .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 
@@ -277,7 +276,7 @@ object IdempotencySpec extends ZIOSpecDefault:
           callCount += 1
           StateWriter.fail("boom")
 
-        protected def handleSessionCreated(
+        protected def createSession(
           createdAt: Instant,
           sid: SessionId,
           caps: Map[String, String]
@@ -302,7 +301,7 @@ object IdempotencySpec extends ZIOSpecDefault:
 
       // Create session
       val createCmd: SessionCommand[ErrorCommand, String, String] =
-        SessionCommand.CreateSession[String](now, sessionId, Map.empty)
+        SessionCommand.CreateSession[String, String](now, sessionId, Map.empty)
           .asInstanceOf[SessionCommand[ErrorCommand, String, String]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 

@@ -1,7 +1,6 @@
 package zio.raft.sessionstatemachine
 
 import zio.test.*
-import zio.test.Assertion.*
 import zio.raft.protocol.SessionId
 
 /** Contract test for ServerRequestForSession wrapper.

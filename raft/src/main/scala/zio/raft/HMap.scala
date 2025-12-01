@@ -2,7 +2,6 @@ package zio.raft
 
 import scala.util.NotGiven
 import scala.collection.immutable.TreeMap
-import scala.compiletime.constValue
 import zio.prelude.Newtype
 import zio.raft.HMap.{KeyAt, ValueAt, Contains, KeyLike}
 import java.nio.charset.StandardCharsets

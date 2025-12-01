@@ -2,7 +2,7 @@ package zio.raft
 
 import zio.test.*
 import zio.test.TestAspect.withLiveClock
-import zio.{ZIO, durationInt}
+import zio.{Promise, ZIO, durationInt}
 import zio.raft.LogEntry.NoopLogEntry
 import zio.raft.LogEntry.CommandLogEntry
 import zio.LogLevel
@@ -41,9 +41,9 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
     raft3: Raft[Int, TestCommands]
   ) =
     for
-      r1IsLeader <- raft1.isTheLeader
-      r2IsLeader <- raft2.isTheLeader
-      r3IsLeader <- raft3.isTheLeader
+      r1IsLeader <- raft1.isLeader
+      r2IsLeader <- raft2.isLeader
+      r3IsLeader <- raft3.isLeader
     yield
       if r3IsLeader && raft3 != currentLeader then Some(raft3)
       else if r2IsLeader && raft2 != currentLeader then Some(raft2)
@@ -110,7 +110,21 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         rpc(2)._1,
         stateMachine3
       )
+      // Drain raft actions to execute continuations during tests
+      _ <- raft1.raftActions.foreach {
+        case zio.raft.RaftAction.CommandContinuation(effect) => effect
+        case _                                               => ZIO.unit
+      }.forkScoped
+      _ <- raft2.raftActions.foreach {
+        case zio.raft.RaftAction.CommandContinuation(effect) => effect
+        case _                                               => ZIO.unit
+      }.forkScoped
+      _ <- raft3.raftActions.foreach {
+        case zio.raft.RaftAction.CommandContinuation(effect) => effect
+        case _                                               => ZIO.unit
+      }.forkScoped
       _ <- raft1.bootstrap
+      _ <- (zio.Clock.sleep(Raft.electionTimeout.millis) *> raft1.isLeader).repeatUntil(identity)
     yield (
       raft1,
       rpc(0)._2,
@@ -132,10 +146,15 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch3
         ) <- makeRaft()
 
-        _ <- r1.sendCommand(Increase)
-        _ <- r1.sendCommand(Increase)
-        _ <- r1.sendCommand(Increase)
-        x <- r1.sendCommand(Get)
+        _ <- r1.sendCommand(Increase, _ => ZIO.unit)
+        _ <- r1.sendCommand(Increase, _ => ZIO.unit)
+        _ <- r1.sendCommand(Increase, _ => ZIO.unit)
+        p <- Promise.make[Nothing, Int]
+        _ <- r1.sendCommand(Get, {
+          case Right(v: Int) => p.succeed(v).unit
+          case Left(_)  => ZIO.unit
+        })
+        x <- p.await
       yield assertTrue(x == 3)
     },
     test(
@@ -151,10 +170,15 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch3
         ) <- makeRaft()
         _ <- killSwitch2.set(false)
-        _ <- r1.sendCommand(Increase)
-        _ <- r1.sendCommand(Increase)
-        _ <- r1.sendCommand(Increase)
-        x <- r1.sendCommand(Get)
+        _ <- r1.sendCommand(Increase, _ => ZIO.unit)
+        _ <- r1.sendCommand(Increase, _ => ZIO.unit)
+        _ <- r1.sendCommand(Increase, _ => ZIO.unit)
+        p <- Promise.make[Nothing, Int]
+        _ <- r1.sendCommand(Get, {
+          case Right(v: Int) => p.succeed(v).unit
+          case Left(_)  => ZIO.unit
+        })
+        x <- p.await
       yield assertTrue(x == 3)
     },
     test("raft, make sure leader is replaced") {
@@ -172,10 +196,15 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
 
         // find the new leader
         leader <- waitForNewLeader(r1, r1, r2, r3)
-        _ <- leader.sendCommand(Increase)
-        _ <- leader.sendCommand(Increase)
-        _ <- leader.sendCommand(Increase)
-        x <- leader.sendCommand(Get)
+        _ <- leader.sendCommand(Increase, _ => ZIO.unit)
+        _ <- leader.sendCommand(Increase, _ => ZIO.unit)
+        _ <- leader.sendCommand(Increase, _ => ZIO.unit)
+        p <- Promise.make[Nothing, Int]
+        _ <- leader.sendCommand(Get, {
+          case Right(v: Int) => p.succeed(v).unit
+          case Left(_)  => ZIO.unit
+        })
+        x <- p.await
       yield assertTrue(x == 3)
     },
     test("raft, noop command sent after leader elected") {
@@ -189,15 +218,26 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch3
         ) <- makeRaft()
 
-        _ <- r1.sendCommand(Increase)
+        // Ensure the first Increase is fully applied before killing the leader
+        inc1Done <- Promise.make[Nothing, Unit]
+        _ <- r1.sendCommand(Increase, _ => inc1Done.succeed(()).unit)
+        _ <- inc1Done.await
 
         // stop the leader
         _ <- killSwitch1.set(false)
 
         // find the new leader
         leader <- waitForNewLeader(r1, r1, r2, r3)
-        _ <- leader.sendCommand(Increase)
-        actualState <- leader.sendCommand(Get)
+        // Ensure the second Increase is fully applied before reading logs/state
+        inc2Done <- Promise.make[Nothing, Unit]
+        _ <- leader.sendCommand(Increase, _ => inc2Done.succeed(()).unit)
+        _ <- inc2Done.await
+        pp <- Promise.make[Nothing, Int]
+        _ <- leader.sendCommand(Get, {
+          case Right(v: Int) => pp.succeed(v).unit
+          case Left(_)  => ZIO.unit
+        })
+        actualState <- pp.await
         logs = leader.logStore.stream(Index.one, Index(10))
         actualLogs <- logs.runCollect.map(_.map {
           case a: NoopLogEntry       => None
@@ -220,7 +260,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
 
         // Making sure we call readState while there are queued write commands is difficult,
         // we use this approach to make sure there are some unhandled commands before we call readState, hopefully it won't be too flaky
-        _ <- r1.sendCommand(Increase).fork.repeatN(99)
+        _ <- r1.sendCommand(Increase, _ => ZIO.unit).fork.repeatN(99)
 
         readResult1 <- r1.readState
 
@@ -244,7 +284,10 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch3
         ) <- makeRaft().provideSomeLayer(zio.Runtime.removeDefaultLoggers >>> zio.Runtime.addLogger(testLogger))
 
-        _ <- r1.sendCommand(Increase)
+        // Ensure write is fully applied so no pending writes remain
+        applied <- Promise.make[Nothing, Unit]
+        _ <- r1.sendCommand(Increase, _ => applied.succeed(()).unit)
+        _ <- applied.await
 
         // When this runs we should have no writes in the queue since the sendCommand call is blocking
         readResult <- r1.readState
@@ -268,7 +311,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
           killSwitch3
         ) <- makeRaft()
 
-        _ <- r1.sendCommand(Increase)
+        _ <- r1.sendCommand(Increase, _ => ZIO.unit)
         _ <- killSwitch2.set(false)
         readResult <- r1.readState
       yield assertTrue(readResult == 1)
@@ -302,7 +345,7 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         ) <- makeRaft()
 
         // Verify r1 is the leader initially
-        _ <- r1.sendCommand(Increase)
+        _ <- r1.sendCommand(Increase, _ => ZIO.unit)
         initialState <- r1.readState
 
         // Isolate the leader (r1) from the rest of the cluster
@@ -311,14 +354,15 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         // Try to send a command to the isolated leader
         // This can either timeout (if leader hasn't detected isolation yet)
         // or fail with NotALeaderError (if leader has stepped down)
-        commandResult <- r1.sendCommand(Increase).timeout(2.seconds).either
+        p <- Promise.make[Nothing, Either[NotALeaderError, Int]]
+        _ <- r1.sendCommand(Increase, r => p.succeed(r.asInstanceOf[Either[NotALeaderError, Int]]).unit)
+        commandResult <- p.await.timeout(2.seconds)
       yield assertTrue(
         initialState == 1 && // Verify initial command worked
           (commandResult match
-              case Right(None)              => true // Command timed out - leader couldn't commit
-              case Left(_: NotALeaderError) => true // Leader stepped down due to isolation
-              case _                        => false
-            // Any other result is unexpected
+              case None               => true // Command timed out - leader couldn't commit
+              case Some(Left(_))      => true // Leader stepped down due to isolation
+              case Some(Right(_))     => false
           )
       )
     } @@ TestAspect.timeout(5.seconds)

@@ -3,7 +3,6 @@ package zio.raft
 import java.time.Instant
 
 import zio.raft.AppendEntriesResult.{Failure, Success}
-import zio.raft.Raft.electionTimeout
 import zio.raft.RequestVoteResult.Rejected
 import zio.raft.State.{Candidate, Follower, Leader}
 import zio.raft.StreamItem.{Bootstrap, CommandMessage, Message, Tick, Read}
@@ -16,19 +15,19 @@ sealed trait StreamItem[A <: Command, S]
 object StreamItem:
   case class Tick[A <: Command, S]() extends StreamItem[A, S]
   case class Message[A <: Command, S](message: RPCMessage[A]) extends StreamItem[A, S]
-  case class Bootstrap[A <: Command, S]() extends StreamItem[A, S]
+  case class Bootstrap[A <: Command, S](promise: Promise[Nothing, Unit]) extends StreamItem[A, S]
   case class Read[A <: Command, S](promise: Promise[NotALeaderError, S]) extends StreamItem[A, S]
 
   trait CommandMessage[A <: Command, S] extends StreamItem[A, S]:
     val command: A
-    val promise: CommandPromise[command.Response]
+    val continuation: CommandContinuation[command.Response]
 
 class Raft[S, A <: Command](
   val memberId: MemberId,
   peers: Peers,
   private[raft] val raftState: Ref[State[S]],
   commandsQueue: Queue[StreamItem[A, S]],
-  stateNotificationsQueue: Queue[StateNotification],
+  raftActionsQueue: Queue[RaftAction],
   stable: Stable,
   private[raft] val logStore: LogStore[A],
   snapshotStore: SnapshotStore,
@@ -40,8 +39,17 @@ class Raft[S, A <: Command](
   val batchSize = 100
   val numberOfServers = peers.size + 1
 
-  def stateNotifications: ZStream[Any, Nothing, StateNotification] =
-    ZStream.fromQueue(stateNotificationsQueue)
+  /** Stream of actions emitted by the Raft runtime.
+    *
+    *   - Leadership signals: `SteppedUp`, `SteppedDown`, `LeaderChanged`.
+    *   - Command completions: `CommandContinuation` wrapping an effect that will invoke the user-supplied continuation
+    *     corresponding to a previously sent command.
+    *
+    * Embedding applications should drain this stream and execute the effects to resume their own workflows. This
+    * decouples command submission from completion handling and allows high-throughput, batched command processing.
+    */
+  def raftActions: ZStream[Any, Nothing, RaftAction] =
+    ZStream.fromQueue(raftActionsQueue)
 
   private def stepDown(newTerm: Term, leaderId: Option[MemberId]) =
     for
@@ -50,8 +58,9 @@ class Raft[S, A <: Command](
       // Reset commands and reads if we are a leader before we transition to Follower
       currentState <- raftState.get
       _ <- currentState match
-        case l: Leader[S] => l.stepDown(leaderId) // Called for side effects, so we ignore the new state
-        case _            => ZIO.unit
+        case l: Leader[S] =>
+          l.stepDown(leaderId, raftActionsQueue) // Called for side effects, so we ignore the new state
+        case _ => ZIO.unit
       electionTimeout <- makeElectionTimeout
 
       _ <- raftState.update(s => State.Follower[S](s.commitIndex, s.lastApplied, electionTimeout, leaderId))
@@ -62,11 +71,11 @@ class Raft[S, A <: Command](
 
       _ <- (currentState, leaderId) match
         case (_: Leader[S], _) =>
-          stateNotificationsQueue.offer(StateNotification.SteppedDown(leaderId))
+          raftActionsQueue.offer(RaftAction.SteppedDown(leaderId))
         case (f: State.Follower[S], Some(leaderId)) if f.leaderId != Some(leaderId) =>
-          stateNotificationsQueue.offer(StateNotification.LeaderChanged(leaderId))
+          raftActionsQueue.offer(RaftAction.LeaderChanged(leaderId))
         case (_: State.Candidate[S], Some(leaderId)) =>
-          stateNotificationsQueue.offer(StateNotification.LeaderChanged(leaderId))
+          raftActionsQueue.offer(RaftAction.LeaderChanged(leaderId))
         case _ => ZIO.unit
     yield newTerm
 
@@ -85,7 +94,7 @@ class Raft[S, A <: Command](
             )
 
             // Leader changed, so let's notify
-            _ <- stateNotificationsQueue.offer(StateNotification.LeaderChanged(leaderId))
+            _ <- raftActionsQueue.offer(RaftAction.LeaderChanged(leaderId))
           yield ()
         case s: State.Follower[S] => ZIO.unit
         case s =>
@@ -497,13 +506,15 @@ class Raft[S, A <: Command](
         case _ => ZIO.unit
     yield ()
 
-  private def handleBootstrap =
+  private def handleBootstrap(promise: Promise[Nothing, Unit]) =
     for
       s <- raftState.get
       currentTerm <- stable.currentTerm
       _ <- s match
-        case f: State.Follower[S] if currentTerm.isZero => startElection
-        case _                                          => ZIO.unit
+        case f: State.Follower[S] if currentTerm.isZero =>
+          startElection *> promise.succeed(())
+        case _ =>
+          promise.succeed(())
     yield ()
 
   private def becomeLeaderRule =
@@ -533,7 +544,7 @@ class Raft[S, A <: Command](
           )
         )
 
-        _ <- stateNotificationsQueue.offer(StateNotification.SteppedUp)
+        _ <- raftActionsQueue.offer(RaftAction.SteppedUp)
       yield ()
 
     for
@@ -627,7 +638,7 @@ class Raft[S, A <: Command](
                     _ <- appStateRef.set(newState)
 
                     newRaftState <- state match
-                      case l: Leader[S] => l.completeCommands(logEntry.index, response, newState)
+                      case l: Leader[S] => l.completeCommands(logEntry.index, response, newState, raftActionsQueue)
                       case _            => ZIO.succeed(state)
                   yield newRaftState
             yield newRaftState.increaseLastApplied
@@ -883,7 +894,7 @@ class Raft[S, A <: Command](
 
   private def handleRequestFromClient(
     command: A,
-    promise: CommandPromise[command.Response]
+    continuation: CommandContinuation[command.Response]
   ): ZIO[Any, Nothing, Unit] =
     raftState.get.flatMap:
       case l: Leader[S] =>
@@ -898,12 +909,20 @@ class Raft[S, A <: Command](
           _ <- ZIO.logDebug(s"memberId=${this.memberId} handleCommand $entry")
           _ <- logStore.storeLog(entry)
 
-          _ <- raftState.set(l.withPendingCommand(entry.index, promise))
+          _ <- raftState.set(l.withPendingCommand(entry.index, continuation))
         yield ()
       case f: Follower[S] =>
-        promise.fail(NotALeaderError(f.leaderId)).unit
+        raftActionsQueue.offer(
+          RaftAction.CommandContinuation(
+            continuation(Left(NotALeaderError(f.leaderId)))
+          )
+        ).unit
       case c: Candidate[S] =>
-        promise.fail(NotALeaderError(None)).unit
+        raftActionsQueue.offer(
+          RaftAction.CommandContinuation(
+            continuation(Left(NotALeaderError(None)))
+          )
+        ).unit
 
   private[raft] def handleStreamItem(item: StreamItem[A, S]): ZIO[Any, Nothing, Unit] =
     item match
@@ -922,7 +941,7 @@ class Raft[S, A <: Command](
           _ <- preRules
           _ <- handleRequestFromClient(
             commandMessage.command,
-            commandMessage.promise
+            commandMessage.continuation
           )
           _ <- postRules
         yield ()
@@ -931,31 +950,44 @@ class Raft[S, A <: Command](
           _ <- ZIO.logDebug(s"[Read] memberId=${this.memberId} $r")
           _ <- handleRead(r)
         yield ()
-      case Bootstrap() =>
+      case Bootstrap(promise) =>
         for
           _ <- ZIO.logDebug(s"[Bootstrap] memberId=${this.memberId}")
           _ <- preRules
-          _ <- handleBootstrap
+          _ <- handleBootstrap(promise)
           _ <- postRules
         yield ()
 
-  // TODO: the correct implementation should enqueue this into the stream queue?
-  def isTheLeader =
+  def isLeader =
     for s <- raftState.get
     yield if s.isInstanceOf[Leader[S]] then true else false
 
-  def sendCommand(
-    commandArg: A
-  ): ZIO[Any, NotALeaderError, commandArg.Response] =
-    // todo: leader only
+  /** Enqueue a command and its continuation without blocking for the result.
+    *
+    * Why continuation instead of promise:
+    *   - If this were `Promise`-based, callers would need to await (or fork) every call to `sendCommand`. For
+    *     single-fiber/stream integrations, that would serialize submission, limiting throughput to one in-flight
+    *     command.
+    *   - With a continuation, callers can submit many commands quickly. Raft batches and replicates them, then enqueues
+    *     a `RaftAction.CommandContinuation` which, when run, executes the provided continuation with either
+    *     `Right(response)` or `Left(NotALeaderError)`.
+    *   - The embedding application drains `raftActions` and runs the continuation effects on its own stream, preserving
+    *     the stream-based architecture and maximizing batching.
+    *
+    * Semantics:
+    *   - Non-blocking: returns immediately after enqueue.
+    *   - Leader-only effect: if not leader, Raft immediately schedules the continuation with `NotALeaderError`.
+    */
+  def sendCommand[B <: Command.Aux[A, R], R](
+    commandArg: B,
+    continuationArg: Either[NotALeaderError, R] => ZIO[Any, Nothing, Unit]
+  ): ZIO[Any, Nothing, Unit] =
     for
-      promiseArg <- Promise.make[NotALeaderError, commandArg.Response]
       _ <- commandsQueue.offer(new CommandMessage:
         val command = commandArg
-        val promise = promiseArg.asInstanceOf
+        val continuation = continuationArg.asInstanceOf
       )
-      res <- promiseArg.await
-    yield (res)
+    yield ()
 
   def handleRead(r: Read[A, S]): ZIO[Any, Nothing, Unit] =
     (for
@@ -995,15 +1027,15 @@ class Raft[S, A <: Command](
 
   def readStateDirty: ZIO[Any, Nothing, S] = appStateRef.get
 
-  // bootstrap the node and wait until the node would become the leader, only works when the current term is zero
+  // bootstrap the node, only call on one node in the cluster. It is safe to call this even if the cluster is already formed.
   def bootstrap =
     for
+      promise <- Promise.make[Nothing, Unit]
       _ <- commandsQueue.offer(
-        StreamItem.Bootstrap()
-      ) // TODO: use promise here and fail if the term is not zero
-      _ <- (zio.Clock.sleep(electionTimeout.millis) *> isTheLeader)
-        .repeatUntil(identity)
-    yield ()
+        StreamItem.Bootstrap(promise)
+      )
+      result <- promise.await
+    yield result
 
   // User of the library would decide on what index to use for the compaction
   def compact(index: Index) =
@@ -1074,14 +1106,14 @@ object Raft:
         State.Follower[S](previousIndex, previousIndex, electionTimeout, None)
       )
       commandsQueue <- Queue.unbounded[StreamItem[A, S]] // TODO: should this be bounded for back-pressure?
-      stateNotificationsQueue <- Queue.unbounded[StateNotification]
+      raftActionsQueue <- Queue.unbounded[RaftAction]
 
       raft = new Raft[S, A](
         memberId,
         peers,
         state,
         commandsQueue,
-        stateNotificationsQueue,
+        raftActionsQueue,
         stable,
         logStore,
         snapshotStore,

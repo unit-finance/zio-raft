@@ -1,9 +1,8 @@
 package zio.raft.sessionstatemachine
 
 import zio.test.*
-import zio.test.Assertion.*
 import zio.raft.{Command, HMap, Index}
-import zio.raft.protocol.{SessionId, RequestId}
+import zio.raft.protocol.SessionId
 import java.time.Instant
 
 object SessionLifecycleSpec extends ZIOSpecDefault:
@@ -45,7 +44,7 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
     ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, cmd.Response & TestResponse] =
       StateWriter.succeed(().asInstanceOf[cmd.Response & TestResponse])
 
-    protected def handleSessionCreated(
+    protected def createSession(
       createdAt: Instant,
       sid: SessionId,
       caps: Map[String, String]
@@ -75,7 +74,7 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
 
       // Create session
       val create =
-        SessionCommand.CreateSession[String](now, sid, Map("k" -> "v"))
+        SessionCommand.CreateSession[String, Nothing](now, sid, Map("k" -> "v"))
           .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(create).run(state0)
 

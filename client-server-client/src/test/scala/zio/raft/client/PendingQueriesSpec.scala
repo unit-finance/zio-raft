@@ -2,7 +2,6 @@ package zio.raft.client
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import scodec.bits.ByteVector
 import zio.raft.protocol.*
 import zio.stream.ZStream

@@ -1,7 +1,6 @@
 package zio.raft.sessionstatemachine
 
 import zio.test.*
-import zio.test.Assertion.*
 import zio.raft.{Command, HMap, Index}
 import zio.raft.protocol.{SessionId, RequestId}
 import zio.Chunk
@@ -57,7 +56,7 @@ object ServerRequestChunkSpec extends ZIOSpecDefault:
             val all = requests.foldLeft(init) { (acc, r) => acc.flatMap(_ => StateWriter.log(r)) }
             all.as(count.asInstanceOf[cmd.Response & TestResponse])
 
-    protected def handleSessionCreated(
+    protected def createSession(
       createdAt: Instant,
       sid: SessionId,
       caps: Map[String, String]
@@ -82,7 +81,7 @@ object ServerRequestChunkSpec extends ZIOSpecDefault:
       val s1 = SessionId("s1")
 
       val create =
-        SessionCommand.CreateSession[String](now, s1, Map.empty)
+        SessionCommand.CreateSession[String, Nothing](now, s1, Map.empty)
           .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
       val (state1, _) = sm.apply(create).run(state0)
 

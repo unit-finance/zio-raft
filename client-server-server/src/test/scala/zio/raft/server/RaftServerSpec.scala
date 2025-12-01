@@ -2,7 +2,6 @@ package zio.raft.server
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import zio.raft.protocol.*
 import zio.raft.protocol.Codecs.*
 import zio.raft.server.RaftServer.*
@@ -154,6 +153,67 @@ object RaftServerSpec extends ZIOSpec[TestEnvironment & ZContext]:
           created <- waitForMessage[SessionCreated](client)
         yield assertTrue(created.sessionId == sessionId) &&
           assertTrue(created.nonce == nonce)
+      }
+    }
+
+    // ==========================================================================
+    // Leader Session Rejection Tests
+    // ==========================================================================
+    suiteAll("Leader - Session Rejection") {
+      test("should reject pending session with provided reason and clear pending") {
+        for
+          server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
+          _ <- ZIO.sleep(300.millis)
+
+          // Become leader
+          _ <- server.stepUp(Map.empty)
+          _ <- ZIO.sleep(100.millis)
+
+          // Connect client and request session creation
+          client <- ZSocket.client
+          _ <- client.connect(serverAddress)
+          nonce <- Nonce.generate()
+          _ <- sendClientMessage(client, CreateSession(Map("role" -> "guest"), nonce))
+
+          // Get RaftAction.CreateSession to retrieve sessionId
+          _ <- ZIO.sleep(100.millis)
+          action <- server.raftActions.take(1).runCollect.map(_.head)
+          sessionId = action.asInstanceOf[RaftAction.CreateSession].sessionId
+
+          // Reject the pending session
+          _ <- server.rejectSession(sessionId, RejectionReason.InvalidCapabilities)
+
+          // Expect SessionRejected with same nonce and specified reason
+          rejection <- waitForMessage[SessionRejected](client)
+
+          // Ensure that confirming afterwards does nothing (pending cleared)
+          _ <- server.confirmSessionCreation(sessionId)
+          maybeMore <- waitForMessage[SessionCreated](client, 300.millis).either
+        yield assertTrue(rejection.reason == RejectionReason.InvalidCapabilities) &&
+          assertTrue(rejection.nonce == nonce) &&
+          assertTrue(maybeMore.isLeft) // No SessionCreated after rejection
+      }
+
+      test("should support rejecting with RejectionReason.Other") {
+        for
+          server <- RaftServer.make(s"tcp://0.0.0.0:$testPort")
+          _ <- ZIO.sleep(300.millis)
+          _ <- server.stepUp(Map.empty)
+          _ <- ZIO.sleep(100.millis)
+
+          client <- ZSocket.client
+          _ <- client.connect(serverAddress)
+          nonce <- Nonce.generate()
+          _ <- sendClientMessage(client, CreateSession(Map("x" -> "y"), nonce))
+
+          _ <- ZIO.sleep(100.millis)
+          action <- server.raftActions.take(1).runCollect.map(_.head)
+          sessionId = action.asInstanceOf[RaftAction.CreateSession].sessionId
+
+          _ <- server.rejectSession(sessionId, RejectionReason.Other)
+          rejection <- waitForMessage[SessionRejected](client)
+        yield assertTrue(rejection.reason == RejectionReason.Other) &&
+          assertTrue(rejection.nonce == nonce)
       }
     }
 

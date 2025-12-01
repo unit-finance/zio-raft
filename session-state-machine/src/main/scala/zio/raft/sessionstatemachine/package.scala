@@ -124,7 +124,7 @@ package object sessionstatemachine:
       * @example
       *   {{{
       * for {
-      *   (serverRequests, _) <- handleSessionCreated(...).withLog
+      *   (serverRequests, _) <- createSession(...).withLog
       *   assignedRequests <- addServerRequests(createdAt, serverRequests)
       * } yield assignedRequests
       *   }}}

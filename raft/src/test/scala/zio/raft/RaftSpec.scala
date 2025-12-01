@@ -6,6 +6,7 @@ import zio.test.*
 import zio.{Scope, ZIO}
 import zio.durationInt
 import zio.raft.LogEntry.{CommandLogEntry, NoopLogEntry}
+import zio.Promise
 
 object RaftSpec extends ZIOSpecDefault:
 
@@ -117,17 +118,20 @@ object RaftSpec extends ZIOSpecDefault:
     )
 
   def handleBootstrap(raft: Raft[Int, TestCommands]) =
-    raft.handleStreamItem(StreamItem.Bootstrap[TestCommands, Int]())
+    for 
+      promise <- Promise.make[Nothing, Unit]
+      _ <- raft.handleStreamItem(StreamItem.Bootstrap[TestCommands, Int](promise))
+      _ <- promise.await
+    yield ()
 
   def handleTick(raft: Raft[Int, TestCommands]) =
     raft.handleStreamItem(StreamItem.Tick[TestCommands, Int]())
 
   def sendCommand(raft: Raft[Int, TestCommands], commandArg: TestCommands) =
     for
-      promiseArg <- zio.Promise.make[NotALeaderError, Int]
       _ <- raft.handleStreamItem(new CommandMessage[TestCommands, Int]:
         val command: TestCommands = commandArg
-        val promise: CommandPromise[Int] = promiseArg
+        val continuation: CommandContinuation[Int] = (_: Either[NotALeaderError, Int]) => ZIO.unit
       )
     yield ()
 
@@ -154,7 +158,7 @@ object RaftSpec extends ZIOSpecDefault:
         messages <- rpc.queue.takeAll
 
         _ <- handleVoteGranted(raft, Term(1), MemberId("peer2"))
-        isLeaderAfterGranted <- raft.isTheLeader
+        isLeaderAfterGranted <- raft.isLeader
 
         expectedMessages: List[(MemberId, RPCMessage[TestCommands])] = List(
           MemberId("peer2") -> RequestVoteRequest(

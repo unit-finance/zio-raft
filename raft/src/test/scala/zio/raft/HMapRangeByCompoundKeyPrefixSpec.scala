@@ -1,7 +1,6 @@
 package zio.raft
 
 import zio.test.*
-import zio.test.Assertion.*
 import java.nio.charset.StandardCharsets
 
 object HMapRangeByCompoundKeyPrefixSpec extends ZIOSpecDefault:

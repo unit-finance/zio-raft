@@ -92,6 +92,12 @@ object IdempotencySpec extends ZIOSpecDefault:
     ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Unit] =
       StateWriter.succeed(())
 
+    protected def applyInternalCommand(
+      createdAt: Instant,
+      command: TestCommand
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, command.Response & TestResponse] =
+      StateWriter.succeed(0.asInstanceOf[command.Response & TestResponse])
+
     // takeSnapshot and restoreFromSnapshot are now provided by SessionStateMachine base class!
 
     override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
@@ -289,6 +295,12 @@ object IdempotencySpec extends ZIOSpecDefault:
           capabilities: Map[String, String]
         ): StateWriter[HMap[Schema], ServerRequestForSession[String], Nothing, Unit] =
           StateWriter.succeed(())
+
+        protected def applyInternalCommand(
+          createdAt: Instant,
+          command: ErrorCommand
+        ): StateWriter[HMap[Schema], ServerRequestForSession[String], Nothing, command.Response & ErrResponse] =
+          StateWriter.succeed(0.asInstanceOf[command.Response & ErrResponse])
 
         def takeSnapshot(state: HMap[Schema]): Stream[Nothing, Byte] = zio.stream.ZStream.empty
         def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[Schema]] = ZIO.succeed(HMap.empty[Schema])

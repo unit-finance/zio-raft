@@ -70,6 +70,12 @@ object ServerRequestChunkSpec extends ZIOSpecDefault:
     ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Unit] =
       StateWriter.succeed(())
 
+    protected def applyInternalCommand(
+      createdAt: Instant,
+      command: TestCommand
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, command.Response & TestResponse] =
+      StateWriter.succeed(0.asInstanceOf[command.Response & TestResponse])
+
     override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
       false
 

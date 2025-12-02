@@ -15,10 +15,11 @@ import java.time.Instant
   *
   * ## Template Pattern
   *
-  * Users extend this trait and implement 3 protected abstract methods:
+  * Users extend this trait and implement 4 protected abstract methods:
   *   - `applyCommand`: Business logic for processing user commands (returns StateWriter)
   *   - `createSession`: Session initialization logic; may reject session (returns StateWriter)
   *   - `handleSessionExpired`: Session cleanup logic (returns StateWriter)
+  *   - `applyInternalCommand`: Business logic for internal/background commands (returns StateWriter)
   *
   * The StateWriter monad combines State for state transitions with Writer for accumulating server-initiated requests.
   * Users call `.log(serverRequest)` to emit server requests instead of manually collecting them in tuples.
@@ -199,6 +200,61 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
     capabilities: Map[String, String]
   ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Nothing, Unit]
 
+  /** Apply an internal command (from background/system processes).
+    *
+    * Called when an InternalCommand is processed. Unlike applyCommand, this does NOT receive a sessionId because
+    * internal commands operate at the system level (e.g., scanning all sessions, cleanup tasks).
+    *
+    * Use `.log(ServerRequestForSession(targetSessionId, payload))` to emit server requests to specific sessions.
+    *
+    * IMPORTANT: Internal commands are NOT cached and do NOT have idempotency protection. If the leader fails
+    * mid-execution and the command is replayed, it will execute again. Design commands to be safe under re-execution:
+    *   - Use timestamps from createdAt (deterministic) rather than Clock (non-deterministic)
+    *   - Filter operations based on state conditions that change after first execution
+    *   - Make operations naturally idempotent (e.g., "remove items where timestamp < X")
+    *
+    * @param createdAt
+    *   The timestamp when the command was created (use this for time-based logic)
+    * @param command
+    *   The internal command to process
+    * @return
+    *   StateWriter monad yielding the response (must be subtype of R) and accumulating server requests via log
+    *
+    * @note
+    *   Must be pure and deterministic
+    * @note
+    *   Must NOT throw exceptions - return errors in response payload
+    * @note
+    *   Return type is intersection: command.Response & R
+    * @note
+    *   Receives complete HMap[Schema] (both session state and user state)
+    *
+    * @example
+    *   {{{
+    * protected def applyInternalCommand(createdAt: Instant, cmd: UC): StateWriter[HMap[Schema], ServerRequestForSession[SR], Nothing, cmd.Response & R] =
+    *   cmd match
+    *     case TaskCommand.ExpireTimedOutTasks(cutoff) =>
+    *       for {
+    *         state <- StateWriter.get[HMap[Schema]]
+    *         tasks = state.get["asyncTasks"](AllTasksKey).getOrElse(Map.empty)
+    *         expired = tasks.filter((_, t) => t.expiresAt.isBefore(cutoff))
+    *         _ <- StateWriter.update[HMap[Schema], HMap[Schema]](s =>
+    *           s.updated["asyncTasks"](AllTasksKey, tasks -- expired.keys)
+    *         )
+    *         _ <- StateWriter.foreach(expired.values) { task =>
+    *           StateWriter.log(ServerRequestForSession(
+    *             task.ownerSessionId,
+    *             TaskServerRequest.TaskExpired(task.id)
+    *           ))
+    *         }
+    *       } yield TaskResponse.ExpiredCount(expired.size)
+    *   }}}
+    */
+  protected def applyInternalCommand(
+    createdAt: Instant,
+    command: UC
+  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Nothing, command.Response & R]
+
   // ====================================================================================
   // StateMachine INTERFACE - Implemented by this trait
   // ====================================================================================
@@ -244,6 +300,9 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
 
       case cmd: SessionCommand.GetRequestsForRetry[SR] @unchecked =>
         handleGetRequestsForRetry(cmd).map(_.asResponseType(command, cmd))
+
+      case cmd: SessionCommand.InternalCommand[UC, SR] @unchecked =>
+        handleInternalCommand(cmd).map(_.asResponseType(command, cmd))
 
   /** Snapshot behavior - users must implement.
     *
@@ -439,6 +498,18 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
             (accumulated, currentState)
       }
     }
+
+  /** Handle InternalCommand - execute user's internal command and collect server requests.
+    *
+    * No session management overhead (no cache lookup, no idempotency checking). Directly executes the user's
+    * applyInternalCommand method and returns the response with any emitted server requests.
+    */
+  private def handleInternalCommand(cmd: SessionCommand.InternalCommand[UC, SR])
+    : State[HMap[Schema], (List[ServerRequestEnvelope[SR]], cmd.command.Response)] =
+    for
+      (serverRequestsLog, response) <- applyInternalCommand(cmd.createdAt, cmd.command).withLog
+      assignedRequests <- addServerRequests(cmd.createdAt, serverRequestsLog)
+    yield (assignedRequests, response)
 
   // ====================================================================================
   // SERVER REQUEST MANAGEMENT

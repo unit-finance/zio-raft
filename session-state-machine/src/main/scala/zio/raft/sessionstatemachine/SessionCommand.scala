@@ -124,4 +124,40 @@ object SessionCommand:
     lastSentBefore: Instant
   ) extends SessionCommand[Nothing, SR, Nothing]:
     type Response = List[ServerRequestEnvelope[SR]]
+
+  /** Command for internal/background processes that modify state.
+    *
+    * Used by system processes (timeouts, cleanup, retries) that need to modify state outside of client session context.
+    * Unlike ClientRequest, these commands:
+    *   - Do NOT go through session management (no cache, no idempotency checking)
+    *   - Do NOT require sessionId/requestId parameters
+    *   - Are executed directly by calling applyInternalCommand on the state machine
+    *   - Can emit server requests to notify affected sessions
+    *   - Are deterministic but not idempotent (re-execution may have different effects)
+    *
+    * Example: A background process that scans all async tasks, expires timed-out ones, and notifies owning sessions.
+    *
+    * WARNING: Unlike ClientRequest, internal commands do NOT have idempotency protection. If the leader fails
+    * mid-execution and the command is replayed after leadership change, it will execute again. Design internal commands
+    * to be safe under re-execution (e.g., use timestamps to determine eligibility).
+    *
+    * @param createdAt
+    *   Timestamp when the command was created (use for time-based logic)
+    * @param command
+    *   The user command to execute
+    * @tparam UC
+    *   User command type
+    * @tparam SR
+    *   Server request type
+    *
+    * @note
+    *   Response type is (List[ServerRequestEnvelope[SR]], command.Response)
+    * @note
+    *   Similar to GetRequestsForRetry - operates at system level, not session level
+    */
+  case class InternalCommand[UC <: Command, SR](
+    createdAt: Instant,
+    command: UC
+  ) extends SessionCommand[UC, SR, Nothing]:
+    type Response = (List[ServerRequestEnvelope[SR]], command.Response)
 end SessionCommand

@@ -62,6 +62,14 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
       StateWriter.log(ServerRequestForSession[String](SessionId("admin"), s"expired:${SessionId.unwrap(sid)}"))
         .as(())
 
+    protected def applyInternalCommand(
+      createdAt: Instant,
+      command: TestCommand
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, command.Response & TestResponse] =
+      // For test purposes, emit a notification to admin session
+      StateWriter.log(ServerRequestForSession[String](SessionId("admin"), "internal-command-executed"))
+        .as(().asInstanceOf[command.Response & TestResponse])
+
     override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
       false
 
@@ -99,6 +107,56 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
       val noLastId = h2.get["lastServerRequestId"](sid).isEmpty
 
       assertTrue(noMetadata && noCache && noServerRequests && noLastId)
+    },
+    test("InternalCommand executes without session context") {
+      val sm = new TestStateMachine()
+      val state0 = HMap.empty[sm.Schema]
+      val now = Instant.now()
+
+      // Execute internal command - no session required
+      val cmd = SessionCommand.InternalCommand[TestCommand, String](
+        now,
+        TestCommand.Noop
+      ).asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+      
+      val result = sm.apply(cmd).run(state0)
+      val state1 = result._1
+      val response = result._2.asInstanceOf[(List[ServerRequestEnvelope[String]], Unit)]
+
+      // Verify command executed and returned result
+      assertTrue(response._2 == ())
+    },
+    test("InternalCommand can emit server requests to multiple sessions") {
+      val sm = new TestStateMachine()
+      val state0 = HMap.empty[sm.Schema]
+      val now = Instant.now()
+
+      // Create two sessions to receive notifications
+      val create1 = SessionCommand.CreateSession[String, Nothing](now, SessionId("s1"), Map.empty)
+        .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+      val (state1, _) = sm.apply(create1).run(state0)
+      
+      val create2 = SessionCommand.CreateSession[String, Nothing](now, SessionId("admin"), Map.empty)
+        .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+      val (state2, _) = sm.apply(create2).run(state1)
+
+      // Execute internal command
+      val cmd = SessionCommand.InternalCommand[TestCommand, String](
+        now,
+        TestCommand.Noop
+      ).asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+      
+      val result = sm.apply(cmd).run(state2)
+      val state3 = result._1
+
+      // Verify server request was emitted to admin session
+      val h = state3.asInstanceOf[HMap[CombinedSchema]]
+      val hasAdminRequest = h.iterator["serverRequests"].exists { 
+        case ((sess, _), pending) =>
+          sess == SessionId("admin") && pending.payload == "internal-command-executed"
+      }
+      
+      assertTrue(hasAdminRequest)
     }
   )
 end SessionLifecycleSpec

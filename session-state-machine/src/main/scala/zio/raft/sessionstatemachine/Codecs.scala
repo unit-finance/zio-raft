@@ -105,6 +105,14 @@ object Codecs:
         cmd => (0, cmd)
       )
 
+    val internalCommandV0: Codec[SessionCommand.InternalCommand[UC, SR]] =
+      (instantCodec :: ucCodec).as[SessionCommand.InternalCommand[UC, SR]]
+    val internalCommandCodec: Codec[SessionCommand.InternalCommand[UC, SR]] =
+      (uint8 :: internalCommandV0).xmap(
+        { case (_, cmd) => cmd },
+        cmd => (0, cmd)
+      )
+
     discriminated[SessionCommand[UC, SR, E]]
       .by(uint8)
       .typecase(0, clientRequestCodec)
@@ -112,5 +120,6 @@ object Codecs:
       .typecase(2, createSessionCodec)
       .typecase(3, sessionExpiredCodec)
       .typecase(4, getRequestsForRetryCodec)
+      .typecase(5, internalCommandCodec)
   end sessionCommandCodec
 end Codecs

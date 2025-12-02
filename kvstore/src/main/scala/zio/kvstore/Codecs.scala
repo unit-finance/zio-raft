@@ -11,6 +11,10 @@ object Codecs:
     opt => KVResponse.GetResult(opt),
     gr => gr.value
   )
+  given Codec[KVResponse.PurgeResult] = scodec.codecs.int32.xmap(
+    keysRemoved => KVResponse.PurgeResult(keysRemoved),
+    pr => pr.keysRemoved
+  )
 
   given Codec[KVResponse] =
     discriminated[KVResponse]
@@ -18,6 +22,7 @@ object Codecs:
       .typecase("S", summon[Codec[KVResponse.SetDone.type]])
       .typecase("W", summon[Codec[KVResponse.WatchDone.type]])
       .typecase("G", summon[Codec[KVResponse.GetResult]])
+      .typecase("P", summon[Codec[KVResponse.PurgeResult]])
 
   given Codec[Either[Nothing, KVResponse]] =
     discriminated[Either[Nothing, KVResponse]].by(uint8)
@@ -40,3 +45,4 @@ object Codecs:
       .by(fixedSizeBytes(1, ascii))
       .typecase("S", setCodec)
       .typecase("W", watchCodec)
+      .typecase("P", provide(KVCommand.PurgeUnwatchedKeys))

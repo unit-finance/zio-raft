@@ -110,6 +110,34 @@ class KVStateMachine
   ): SW[Unit] =
     removeAllSubscriptions(sessionId)
 
+  protected def applyInternalCommand(
+    createdAt: Instant,
+    command: KVCommand
+  ): SW[command.Response & KVResponse] =
+    command match
+      case purge @ KVCommand.PurgeUnwatchedKeys =>
+        for
+          state <- StateWriter.get[HMap[Schema]]
+
+          // Find all keys in the KV store
+          allKeys = state.iterator["kv"].map { case (key, _) => key }.toSet
+
+          // Find keys that have active watchers
+          watchedKeys = state.iterator["subsByKey"].collect {
+            case (key, subs) if subs.nonEmpty => key
+          }.toSet
+
+          // Keys to purge: in KV store but not watched
+          keysToPurge = allKeys -- watchedKeys
+
+          // Remove unwatched keys from KV store
+          _ <- StateWriter.update[HMap[Schema], HMap[Schema]](s =>
+            keysToPurge.foldLeft(s) { (acc, key) =>
+              acc.removed["kv"](key).removed["subsByKey"](key)
+            }
+          )
+        yield KVResponse.PurgeResult(keysToPurge.size).asInstanceOf[command.Response & KVResponse]
+
   override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
     (commitIndex.value - lastSnapshotIndex.value) >= 100
 

@@ -644,6 +644,62 @@ object HMap:
       def fromBytes(bytes: Array[Byte]): A =
         nt.wrap(new String(bytes, StandardCharsets.UTF_8))
 
+    /** KeyLike instance for compound keys (A, B) where both use String-like newtypes.
+      *
+      * The encoded format is:
+      *   - 4 bytes (big-endian, int) length of A
+      *   - bytes of A (UTF-8)
+      *   - if B is the "empty" value (empty string), OMIT the length and bytes of B entirely (see
+      *     rangeByCompoundKeyPrefix - important for prefix scans)
+      *   - else, 4 bytes (big-endian, int) length of B + bytes of B (UTF-8)
+      *
+      * This format supports lexicographical ordering so rangeByCompoundKeyPrefix can work on the prefix A.
+      */
+    def forNewTypeTuple[A, B](
+      ntA: Newtype[String] { type Type = A },
+      ntB: Newtype[String] { type Type = B }
+    ): KeyLike[(A, B)] = new KeyLike[(A, B)]:
+      import java.nio.ByteBuffer
+      import java.nio.ByteOrder
+      import java.nio.charset.StandardCharsets
+
+      def asBytes(key: (A, B)): Array[Byte] =
+        val aStr = ntA.unwrap(key._1)
+        val bStr = ntB.unwrap(key._2)
+        val aBytes = aStr.getBytes(StandardCharsets.UTF_8)
+        // If B is empty string, omit it entirely
+        if bStr.isEmpty then
+          val buf = ByteBuffer.allocate(4 + aBytes.length).order(ByteOrder.BIG_ENDIAN)
+          buf.putInt(aBytes.length)
+          buf.put(aBytes)
+          buf.array()
+        else
+          val bBytes = bStr.getBytes(StandardCharsets.UTF_8)
+          val buf = ByteBuffer.allocate(4 + aBytes.length + 4 + bBytes.length).order(ByteOrder.BIG_ENDIAN)
+          buf.putInt(aBytes.length)
+          buf.put(aBytes)
+          buf.putInt(bBytes.length)
+          buf.put(bBytes)
+          buf.array()
+
+      def fromBytes(bytes: Array[Byte]): (A, B) =
+        val buf = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN)
+        val aLen = buf.getInt()
+        val aBytes = new Array[Byte](aLen)
+        buf.get(aBytes)
+        if !buf.hasRemaining then
+          // No B part: B is empty string
+          (ntA.wrap(new String(aBytes, StandardCharsets.UTF_8)), ntB.wrap(""))
+        else
+          val bLen = buf.getInt()
+          val bBytes = new Array[Byte](bLen)
+          buf.get(bBytes)
+          (
+            ntA.wrap(new String(aBytes, StandardCharsets.UTF_8)),
+            ntB.wrap(new String(bBytes, StandardCharsets.UTF_8))
+          )
+  end KeyLike
+
   /** Type-level function that extracts the key type for a given prefix P in schema M.
     *
     * This is a match type that recursively searches through the schema tuple:

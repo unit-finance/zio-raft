@@ -47,7 +47,7 @@ object ContinuationBuilderSpec extends ZIOSpecDefault:
           r <- ref.get
         yield assertTrue(r == 3)
       },
-      test("ignoreError makes domain error a no-op") {
+      test("ignoreFailure makes domain error a no-op") {
         for
           ref <- Ref.make(0)
           handler =

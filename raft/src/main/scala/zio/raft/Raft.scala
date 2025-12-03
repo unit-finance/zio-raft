@@ -16,7 +16,7 @@ object StreamItem:
   case class Tick[A <: Command, S]() extends StreamItem[A, S]
   case class Message[A <: Command, S](message: RPCMessage[A]) extends StreamItem[A, S]
   case class Bootstrap[A <: Command, S](promise: Promise[Nothing, Unit]) extends StreamItem[A, S]
-  case class Read[A <: Command, S](promise: Promise[NotALeaderError, S]) extends StreamItem[A, S]
+  case class Read[A <: Command, S](continuation: ReadContinuation[S]) extends StreamItem[A, S]
 
   trait CommandMessage[A <: Command, S] extends StreamItem[A, S]:
     val command: A
@@ -59,7 +59,7 @@ class Raft[S, A <: Command](
       currentState <- raftState.get
       _ <- currentState match
         case l: Leader[S] =>
-          l.stepDown(leaderId, raftActionsQueue) // Called for side effects, so we ignore the new state
+          l.stepDown(raftActionsQueue, leaderId) // Called for side effects, so we ignore the new state
         case _ => ZIO.unit
       electionTimeout <- makeElectionTimeout
 
@@ -205,7 +205,7 @@ class Raft[S, A <: Command](
           for
             appState <- appStateRef.get
             now <- zio.Clock.instant
-            l <- l.withHeartbeatResponse(m.from, now, appState, numberOfServers)
+            l <- l.withHeartbeatResponse(raftActionsQueue, m.from, now, appState, numberOfServers)
             _ <- raftState.set(l)
 
             wasPaused = l.replicationStatus.isPaused(m.from)
@@ -628,7 +628,7 @@ class Raft[S, A <: Command](
                   for
                     appState <- appStateRef.get
                     newRaftState <- state match
-                      case l: Leader[S] => l.completeReads(logEntry.index, appState)
+                      case l: Leader[S] => l.completeReads(raftActionsQueue, logEntry.index, appState)
                       case _            => ZIO.succeed(state)
                   yield newRaftState
                 case logEntry: CommandLogEntry[?] =>
@@ -990,7 +990,7 @@ class Raft[S, A <: Command](
     yield ()
 
   def handleRead(r: Read[A, S]): ZIO[Any, Nothing, Unit] =
-    (for
+    for
       s <- raftState.get
       // If we have pending commands we piggyback on the next command to handle the read,
       // otherwise we need to verify leadership by waiting with the read until we get heartbeats from all peers
@@ -1000,30 +1000,32 @@ class Raft[S, A <: Command](
             case Some(index) =>
               ZIO
                 .logDebug(s"memberId=${this.memberId} read pending command index=$index")
-                .as(l.withReadPendingCommand(r.promise, index))
+                .as(l.withReadPendingCommand(r.continuation, index))
             case None if peers.size == 0 =>
               for
                 _ <- ZIO.logDebug("No peers, returning state")
                 appState <- appStateRef.get
-                _ <- r.promise.succeed(appState)
+                _ <- raftActionsQueue.offer(
+                  RaftAction.ReadContinuation(
+                    r.continuation(Right(appState))
+                  )
+                )
               yield l
             case None =>
               for
                 now <- zio.Clock.instant
                 _ <- ZIO.logDebug(s"memberId=${this.memberId} read pending heartbeat timestamp=$now")
-              yield l.withHeartbeatDueFromAll.withReadPendingHeartbeat(r.promise, now)
-        case f: Follower[S]  => ZIO.fail(NotALeaderError(f.leaderId))
-        case c: Candidate[S] => ZIO.fail(NotALeaderError(None))
+              yield l.withHeartbeatDueFromAll.withReadPendingHeartbeat(r.continuation, now)
+        case f: Follower[S] =>
+          raftActionsQueue.offer(RaftAction.ReadContinuation(r.continuation(Left(NotALeaderError(f.leaderId))))).as(f)
+        case c: Candidate[S] =>
+          raftActionsQueue.offer(RaftAction.ReadContinuation(r.continuation(Left(NotALeaderError(None))))).as(c)
 
       _ <- raftState.set(newRaftState)
-    yield ()).catchAll(e => r.promise.fail(e).unit)
+    yield ()
 
-  def readState: ZIO[Any, NotALeaderError, S] =
-    for
-      promise <- Promise.make[NotALeaderError, S]
-      _ <- commandsQueue.offer(Read[A, S](promise))
-      result <- promise.await
-    yield result
+  def readState(continuation: Either[NotALeaderError, S] => ZIO[Any, Nothing, Unit]): ZIO[Any, Nothing, Unit] =
+    commandsQueue.offer(Read[A, S](continuation)).unit
 
   def readStateDirty: ZIO[Any, Nothing, S] = appStateRef.get
 

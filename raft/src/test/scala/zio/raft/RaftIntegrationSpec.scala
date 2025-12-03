@@ -113,14 +113,17 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
       // Drain raft actions to execute continuations during tests
       _ <- raft1.raftActions.foreach {
         case zio.raft.RaftAction.CommandContinuation(effect) => effect
+        case zio.raft.RaftAction.ReadContinuation(effect)    => effect
         case _                                               => ZIO.unit
       }.forkScoped
       _ <- raft2.raftActions.foreach {
         case zio.raft.RaftAction.CommandContinuation(effect) => effect
+        case zio.raft.RaftAction.ReadContinuation(effect)    => effect
         case _                                               => ZIO.unit
       }.forkScoped
       _ <- raft3.raftActions.foreach {
         case zio.raft.RaftAction.CommandContinuation(effect) => effect
+        case zio.raft.RaftAction.ReadContinuation(effect)    => effect
         case _                                               => ZIO.unit
       }.forkScoped
       _ <- raft1.bootstrap
@@ -262,7 +265,12 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         // we use this approach to make sure there are some unhandled commands before we call readState, hopefully it won't be too flaky
         _ <- r1.sendCommand(Increase, _ => ZIO.unit).fork.repeatN(99)
 
-        readResult1 <- r1.readState
+        pRead1 <- Promise.make[Nothing, Int]
+        _ <- r1.readState {
+          case Right(v: Int) => pRead1.succeed(v).unit
+          case Left(_)       => ZIO.unit
+        }
+        readResult1 <- pRead1.await
 
         messages = testLogger.getMessages
         pendingHeartbeatLogCount = messages.count(_.contains("memberId=MemberId(peer1) read pending heartbeat"))
@@ -290,7 +298,12 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         _ <- applied.await
 
         // When this runs we should have no writes in the queue since the sendCommand call is blocking
-        readResult <- r1.readState
+        pRead <- Promise.make[Nothing, Int]
+        _ <- r1.readState {
+          case Right(v: Int) => pRead.succeed(v).unit
+          case Left(_)       => ZIO.unit
+        }
+        readResult <- pRead.await
 
         // verify read waits for heartbeat and not a write/noop command
         messages = testLogger.getMessages
@@ -313,7 +326,12 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
 
         _ <- r1.sendCommand(Increase, _ => ZIO.unit)
         _ <- killSwitch2.set(false)
-        readResult <- r1.readState
+        pRead2 <- Promise.make[Nothing, Int]
+        _ <- r1.readState {
+          case Right(v: Int) => pRead2.succeed(v).unit
+          case Left(_)       => ZIO.unit
+        }
+        readResult <- pRead2.await
       yield assertTrue(readResult == 1)
     },
     test("read fails when not leader") {
@@ -328,7 +346,9 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
         ) <- makeRaft()
 
         // Try to read from a non-leader node (should fail with NotALeaderError)
-        readResult <- r2.readState.either
+        pRead3 <- Promise.make[Nothing, Either[NotALeaderError, Int]]
+        _ <- r2.readState(r => pRead3.succeed(r).unit)
+        readResult <- pRead3.await
       yield assertTrue(
         readResult.isLeft && readResult.left.exists(_.isInstanceOf[NotALeaderError])
       )
@@ -346,7 +366,12 @@ object RaftIntegrationSpec extends ZIOSpecDefault:
 
         // Verify r1 is the leader initially
         _ <- r1.sendCommand(Increase, _ => ZIO.unit)
-        initialState <- r1.readState
+        pInitial <- Promise.make[Nothing, Int]
+        _ <- r1.readState {
+          case Right(v: Int) => pInitial.succeed(v).unit
+          case Left(_)       => ZIO.unit
+        }
+        initialState <- pInitial.await
 
         // Isolate the leader (r1) from the rest of the cluster
         _ <- killSwitch1.set(false)

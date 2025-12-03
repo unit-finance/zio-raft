@@ -2,7 +2,6 @@ package zio.raft
 
 import java.time.Instant
 import zio.UIO
-import zio.Promise
 
 sealed trait State[S]:
   val commitIndex: Index
@@ -83,19 +82,19 @@ object State:
     def withHeartbeatDueFromAll: Leader[S] =
       this.copy(heartbeatDue = HeartbeatDue.empty)
 
-    def withReadPendingCommand(promise: Promise[NotALeaderError, S], commandIndex: Index): Leader[S] =
-      this.copy(pendingReads = pendingReads.withPendingCommand(promise, commandIndex))
+    def withReadPendingCommand(continuation: ReadContinuation[S], commandIndex: Index): Leader[S] =
+      this.copy(pendingReads = pendingReads.withPendingCommand(continuation, commandIndex))
 
-    def withReadPendingHeartbeat(promise: Promise[NotALeaderError, S], timestamp: Instant): Leader[S] =
-      this.copy(pendingReads = pendingReads.withPendingHeartbeat(promise, timestamp))
+    def withReadPendingHeartbeat(continuation: ReadContinuation[S], timestamp: Instant): Leader[S] =
+      this.copy(pendingReads = pendingReads.withPendingHeartbeat(continuation, timestamp))
 
     def withPendingCommand[R](index: Index, continuation: CommandContinuation[R]): Leader[S] =
       this.copy(pendingCommands = pendingCommands.withAdded(index, continuation))
 
-    def stepDown(leaderId: Option[MemberId], queue: zio.Queue[RaftAction]): UIO[Unit] =
+    def stepDown(queue: zio.Queue[RaftAction], leaderId: Option[MemberId]): UIO[Unit] =
       for
-        _ <- pendingReads.stepDown(leaderId)
-        _ <- pendingCommands.stepDown(leaderId, queue)
+        _ <- pendingReads.stepDown(queue, leaderId)
+        _ <- pendingCommands.stepDown(queue, leaderId)
       yield ()
 
     def completeCommands[R](
@@ -105,16 +104,22 @@ object State:
       queue: zio.Queue[RaftAction]
     ): UIO[Leader[S]] =
       for
-        pendingCommands <- pendingCommands.withCompleted(index, commandResponse, queue)
-        pendingReads <- pendingReads.resolveReadsForCommand(index, readState)
+        pendingCommands <- pendingCommands.withCompleted(queue, index, commandResponse)
+        pendingReads <- pendingReads.resolveReadsForCommand(queue, index, readState)
       yield this.copy(pendingCommands = pendingCommands, pendingReads = pendingReads)
 
-    def withHeartbeatResponse(memberId: MemberId, timestamp: Instant, state: S, numberOfServers: Int): UIO[Leader[S]] =
-      for pendingReads <- pendingReads.resolveReadsForHeartbeat(memberId, timestamp, state, numberOfServers)
+    def withHeartbeatResponse(
+      queue: zio.Queue[RaftAction],
+      memberId: MemberId,
+      timestamp: Instant,
+      state: S,
+      numberOfServers: Int
+    ): UIO[Leader[S]] =
+      for pendingReads <- pendingReads.resolveReadsForHeartbeat(queue, memberId, timestamp, state, numberOfServers)
       yield this.copy(pendingReads = pendingReads)
 
-    def completeReads(index: Index, readState: S): UIO[Leader[S]] =
-      for pendingReads <- pendingReads.resolveReadsForCommand(index, readState)
+    def completeReads(queue: zio.Queue[RaftAction], index: Index, readState: S): UIO[Leader[S]] =
+      for pendingReads <- pendingReads.resolveReadsForCommand(queue, index, readState)
       yield this.copy(pendingReads = pendingReads)
   end Leader
 end State

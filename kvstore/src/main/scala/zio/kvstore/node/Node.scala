@@ -13,7 +13,7 @@ import zio.raft.sessionstatemachine.Codecs.given
 import zio.kvstore.KVServer.KVServerAction
 import java.time.Instant
 import zio.kvstore.given
-import zio.kvstore.Codecs.given scodec.Codec[zio.kvstore.KVCommand]
+import zio.kvstore.Codecs.given
 import zio.kvstore.node.Node.NodeAction
 import zio.kvstore.node.Node.NodeAction.*
 import zio.raft.stores.LmdbStable
@@ -22,15 +22,13 @@ import zio.raft.stores.FileSnapshotStore
 import zio.raft.zmq.ZmqRpc
 import zio.raft.NotALeaderError
 import zio.raft.sessionstatemachine.ServerRequestEnvelope
+import zio.raft.HMap
 
 /** Node wiring KVServer, Raft core, and KV state machine. */
 final case class Node(
   kvServer: KVServer,
   raft: zio.raft.Raft[
-    zio.raft.HMap[Tuple.Concat[
-      zio.raft.sessionstatemachine.SessionSchema[KVResponse, KVServerRequest, Nothing],
-      KVSchema
-    ]],
+    zio.raft.HMap[CombinedSchema],
     SessionCommand[KVCommand, KVServerRequest, Nothing]
   ]
 ):
@@ -98,12 +96,13 @@ final case class Node(
       case NodeAction.FromServer(KVServerAction.Query(sessionId, correlationId, query)) =>
         query match
           case KVQuery.Get(k) =>
-            raft.readState.either.flatMap {
-              case Right(state) =>
-                val value = state.get["kv"](KVKey(k))
-                kvServer.replyQuery(sessionId, correlationId, value)
-              case Left(_) => ZIO.unit
-            }
+            val cont = (r: Either[NotALeaderError, HMap[CombinedSchema]]) =>
+              r match
+                case Right(state) =>
+                  val value = state.get["kv"](KVKey(k))
+                  kvServer.replyQuery(sessionId, correlationId, value)
+                case Left(_) => ZIO.unit
+            raft.readState(cont)
           case _ => ZIO.unit
 
       case NodeAction.FromServer(KVServerAction.ServerRequestAck(sessionId, requestId)) =>
@@ -149,8 +148,8 @@ final case class Node(
       case NodeAction.FromRaft(action) =>
         action match
           case zio.raft.RaftAction.SteppedUp =>
-            ZIO.logInfo("Node stepped up") *>
-              raft.readState.either.flatMap {
+            val cont = (r: Either[NotALeaderError, HMap[CombinedSchema]]) =>
+              r match
                 case Right(state) =>
                   val sessions =
                     SessionStateMachine.getSessions[KVResponse, KVServerRequest, Nothing, KVSchema](state).map {
@@ -162,12 +161,15 @@ final case class Node(
                     }
                   kvServer.stepUp(sessions)
                 case Left(_) => ZIO.unit
-              }
+            ZIO.logInfo("Node stepped up") *>
+              raft.readState(cont)
           case zio.raft.RaftAction.SteppedDown(leaderId) =>
             kvServer.stepDown(leaderId)
           case zio.raft.RaftAction.LeaderChanged(leaderId) =>
             kvServer.leaderChanged(leaderId)
           case zio.raft.RaftAction.CommandContinuation(continuation) =>
+            continuation
+          case zio.raft.RaftAction.ReadContinuation(continuation) =>
             continuation
 
       case NodeAction.FromServer(_) => ZIO.unit

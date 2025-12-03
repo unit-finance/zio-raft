@@ -53,12 +53,28 @@ object ContinuationBuilderSpec extends ZIOSpecDefault:
           handler =
             ContinuationBuilder
               .onSuccess[Any, Int] { (_, _) => ref.set(1) }
-              .ignoreError[Nothing]()
+              .ignoreFailure[Nothing]
               .onNotALeader(_ => ref.set(3))
               .make
           _ <- handler(Right((Nil, Left(RequestError.ResponseEvicted))))
           r <- ref.get
         yield assertTrue(r == 0)
+      },
+      test("ignoreAllErrors makes both non-success branches no-ops") {
+        for
+          ref <- Ref.make(0)
+          handler =
+            ContinuationBuilder
+              .onSuccess[Any, String] { (_, _) => ref.set(1) }
+              .ignoreAllErrors
+              .make
+          _ <- handler(Left(NotALeaderError(None)))
+          r1 <- ref.get
+          _ <- handler(Right((Nil, Left(RequestError.ResponseEvicted))))
+          r2 <- ref.get
+          _ <- handler(Right((Nil, Right("ok"))))
+          r3 <- ref.get
+        yield assertTrue(r1 == 0 && r2 == 0 && r3 == 1)
       }
     ),
     suite("ResultOnlyContinuationBuilder - success/failure semantics")(

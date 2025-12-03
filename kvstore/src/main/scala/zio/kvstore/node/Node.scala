@@ -60,7 +60,7 @@ final case class Node(
               _ <- kvServer.rejectSession(sessionId, RejectionReason.InvalidCapabilities)
               _ <- dispatchServerRequests(now, envelopes)
             yield ()
-          ).make
+          ).ignoreNotALeader.make
 
           _ <- raft.sendCommand(cmd, cont)
         yield ()
@@ -93,7 +93,7 @@ final case class Node(
             val cont = ContinuationBuilder.query[CombinedSchema](state =>
               val value = state.get["kv"](KVKey(k))
               kvServer.replyQuery(sessionId, correlationId, value)
-            ).make
+            ).ignoreNotALeader.make
             raft.readState(cont)
           case _ => ZIO.unit
 
@@ -110,7 +110,7 @@ final case class Node(
           cmd = SessionCommand.SessionExpired[KVServerRequest](now, sessionId)
           cont = ContinuationBuilder.withoutResult[KVServerRequest](envelopes =>
             dispatchServerRequests(now, envelopes)
-          ).onNotALeader(_ => ZIO.unit).make
+          ).ignoreNotALeader.make
 
           _ <- raft.sendCommand(cmd, cont)
         yield ()
@@ -149,7 +149,7 @@ final case class Node(
                     )
                 }
               kvServer.stepUp(sessions)
-            ).make
+            ).ignoreNotALeader.make
             ZIO.logInfo("Node stepped up") *>
               raft.readState(cont)
           case zio.raft.RaftAction.SteppedDown(leaderId) =>

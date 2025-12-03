@@ -135,6 +135,10 @@ object ContinuationBuilder:
     def onNotALeader(onNotALeader: NotALeaderError => ZIO[Any, Nothing, Unit]): ResultOnlyContinuationBuilder[SR, A] =
       ResultOnlyContinuationBuilder(onResult, onNotALeader)
 
+    /** Ignore [[NotALeaderError]] by replacing the handler with a no-op. */
+    def ignoreNotALeader: ResultOnlyContinuationBuilder[SR, A] =
+      ResultOnlyContinuationBuilder(onResult, _ => ZIO.unit)
+
     /** Create the total continuation function.
       *
       *   - `Left(NotALeaderError)` → calls the configured `onNotALeader`
@@ -152,6 +156,10 @@ object ContinuationBuilder:
     /** Set the handler for [[NotALeaderError]]. */
     def onNotALeader(onNotALeader: NotALeaderError => ZIO[Any, Nothing, Unit]): WithoutResultContinuationBuilder[SR] =
       WithoutResultContinuationBuilder(onSuccess, onNotALeader)
+
+    /** Ignore [[NotALeaderError]] by replacing the handler with a no-op. */
+    def ignoreNotALeader: WithoutResultContinuationBuilder[SR] =
+      WithoutResultContinuationBuilder(onSuccess, _ => ZIO.unit)
 
     /** Create the total continuation function.
       *
@@ -180,13 +188,21 @@ object ContinuationBuilder:
     def onNotALeader(onNotALeader: NotALeaderError => ZIO[Any, Nothing, Unit]): EitherContinuationBuilder[SR, E, A] =
       EitherContinuationBuilder(onSuccess, onFailure, onNotALeader)
 
+    /** Ignore [[NotALeaderError]] by replacing the handler with a no-op. */
+    def ignoreNotALeader: EitherContinuationBuilder[SR, E, A] =
+      EitherContinuationBuilder(onSuccess, onFailure, _ => ZIO.unit)
+
+    /** Ignore both domain [[RequestError]] and [[NotALeaderError]]; only run onSuccess. */
+    def ignoreAllErrors: EitherContinuationBuilder[SR, E, A] =
+      EitherContinuationBuilder(onSuccess, (_, _) => ZIO.unit, _ => ZIO.unit)
+
     /** Replace the domain error handler and optionally change its error type `E2`. */
     def onFailure[E2](onFailure: (List[ServerRequestEnvelope[SR]], RequestError[E2]) => ZIO[Any, Nothing, Unit])
       : EitherContinuationBuilder[SR, E2, A] =
       EitherContinuationBuilder(onSuccess, onFailure, onNotALeader)
 
     /** Ignore any domain error ([[RequestError]]) and keep only the success branch. */
-    def ignoreError[E2](): EitherContinuationBuilder[SR, E2, A] =
+    def ignoreFailure[E2]: EitherContinuationBuilder[SR, E2, A] =
       EitherContinuationBuilder(onSuccess, (_, _) => ZIO.unit, onNotALeader)
 
     /** Create the total continuation function.
@@ -221,6 +237,10 @@ object ContinuationBuilder:
     /** Replace the handler for [[NotALeaderError]]. */
     def onNotALeader(onNotALeader: NotALeaderError => ZIO[Any, Nothing, Unit]): QueryContinuationBuilder[M] =
       QueryContinuationBuilder(onSuccess, onNotALeader)
+
+    /** Ignore [[NotALeaderError]] by replacing the handler with a no-op. */
+    def ignoreNotALeader: QueryContinuationBuilder[M] =
+      QueryContinuationBuilder(onSuccess, _ => ZIO.unit)
 
     /** Create the total continuation function.
       *

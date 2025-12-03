@@ -197,7 +197,7 @@ object ContinuationBuilder:
 
     /** Create the total continuation function.
       *
-      *   - `Left(NotALeaderError)` → returns `ZIO.unit` (note: `onNotALeader` is not called)
+      *   - `Left(NotALeaderError)` → calls the configured `onNotALeader`
       *   - `Right((envelopes, Left(requestError)))` → calls `onFailure`
       *   - `Right((envelopes, Right(a)))` → calls `onSuccess`
       *

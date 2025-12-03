@@ -62,6 +62,12 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
       StateWriter.log(ServerRequestForSession[String](SessionId("admin"), s"expired:${SessionId.unwrap(sid)}"))
         .as(())
 
+    protected def applyInternalCommand(
+      createdAt: Instant,
+      command: Nothing
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Nothing] =
+      throw new UnsupportedOperationException("IC = Nothing, internal commands disabled")
+
     override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
       false
 

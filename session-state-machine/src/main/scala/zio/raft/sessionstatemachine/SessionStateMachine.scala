@@ -258,12 +258,7 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple, IC <: Co
   protected def applyInternalCommand(
     createdAt: Instant,
     command: IC
-  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Nothing, command.Response & R] =
-    // Default stub implementation for IC = Nothing
-    // This should never be called when IC = Nothing because InternalCommand[Nothing, SR] cannot be constructed
-    throw new UnsupportedOperationException(
-      "applyInternalCommand called but IC = Nothing. This should be unreachable - internal commands are disabled."
-    )
+  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Nothing, command.Response & R]
 
   // ====================================================================================
   // StateMachine INTERFACE - Implemented by this trait

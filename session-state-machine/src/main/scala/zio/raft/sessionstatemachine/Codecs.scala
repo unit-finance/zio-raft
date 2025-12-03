@@ -57,16 +57,64 @@ object Codecs:
       p => (p.payload, p.lastSentAt.toEpochMilli)
     )
 
-  /** Codec for Nothing type - used when IC = Nothing (internal commands disabled).
-    *
-    * This codec should never actually be used at runtime since Nothing has no inhabitants.
-    */
-  given nothingCodec: Codec[Nothing] = scodec.codecs.fail(scodec.Err("Cannot encode/decode Nothing type"))
-
   /** Codec for SessionCommand, parameterized by UC (user command), SR (server request payload), and IC (internal
-    * command). Requires codecs for UC, SR, and IC in scope.
+    * command). Requires codecs for UC and SR in scope. IC codec is required only when IC != Nothing.
     */
-  given sessionCommandCodec[UC <: zio.raft.Command, SR, E, IC <: zio.raft.Command](using
+  given sessionCommandCodecWithoutIC[UC <: zio.raft.Command, SR, E](using
+    ucCodec: Codec[UC],
+    srCodec: Codec[SR]
+  ): Codec[SessionCommand[UC, SR, E, Nothing]] =
+    val clientRequestV0: Codec[SessionCommand.ClientRequest[UC, SR, E]] =
+      (instantCodec :: sessionIdCodec :: requestIdCodec :: requestIdCodec :: ucCodec)
+        .as[SessionCommand.ClientRequest[UC, SR, E]]
+    val clientRequestCodec: Codec[SessionCommand.ClientRequest[UC, SR, E]] =
+      (uint8 :: clientRequestV0).xmap(
+        { case (_, cmd) => cmd },
+        cmd => (0, cmd)
+      )
+
+    val serverRequestAckV0: Codec[SessionCommand.ServerRequestAck[SR]] =
+      (instantCodec :: sessionIdCodec :: requestIdCodec).as[SessionCommand.ServerRequestAck[SR]]
+    val serverRequestAckCodec: Codec[SessionCommand.ServerRequestAck[SR]] =
+      (uint8 :: serverRequestAckV0).xmap(
+        { case (_, cmd) => cmd },
+        cmd => (0, cmd)
+      )
+
+    val createSessionV0: Codec[SessionCommand.CreateSession[SR, E]] =
+      (instantCodec :: sessionIdCodec :: capabilitiesCodec).as[SessionCommand.CreateSession[SR, E]]
+    val createSessionCodec: Codec[SessionCommand.CreateSession[SR, E]] =
+      (uint8 :: createSessionV0).xmap(
+        { case (_, cmd) => cmd },
+        cmd => (0, cmd)
+      )
+
+    val sessionExpiredV0: Codec[SessionCommand.SessionExpired[SR]] =
+      (instantCodec :: sessionIdCodec).as[SessionCommand.SessionExpired[SR]]
+    val sessionExpiredCodec: Codec[SessionCommand.SessionExpired[SR]] =
+      (uint8 :: sessionExpiredV0).xmap(
+        { case (_, cmd) => cmd },
+        cmd => (0, cmd)
+      )
+
+    val getRequestsForRetryV0: Codec[SessionCommand.GetRequestsForRetry[SR]] =
+      (instantCodec :: instantCodec).as[SessionCommand.GetRequestsForRetry[SR]]
+    val getRequestsForRetryCodec: Codec[SessionCommand.GetRequestsForRetry[SR]] =
+      (uint8 :: getRequestsForRetryV0).xmap(
+        { case (_, cmd) => cmd },
+        cmd => (0, cmd)
+      )
+
+    discriminated[SessionCommand[UC, SR, E, Nothing]]
+      .by(uint8)
+      .typecase(0, clientRequestCodec)
+      .typecase(1, serverRequestAckCodec)
+      .typecase(2, createSessionCodec)
+      .typecase(3, sessionExpiredCodec)
+      .typecase(4, getRequestsForRetryCodec)
+  end sessionCommandCodecWithoutIC
+
+  given sessionCommandCodecWithIC[UC <: zio.raft.Command, SR, E, IC <: zio.raft.Command](using
     ucCodec: Codec[UC],
     srCodec: Codec[SR],
     icCodec: Codec[IC]
@@ -128,5 +176,5 @@ object Codecs:
       .typecase(3, sessionExpiredCodec)
       .typecase(4, getRequestsForRetryCodec)
       .typecase(5, internalCommandCodec)
-  end sessionCommandCodec
+  end sessionCommandCodecWithIC
 end Codecs

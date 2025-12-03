@@ -78,9 +78,9 @@ object ResponseCachingSpec extends ZIOSpecDefault:
 
     protected def applyInternalCommand(
       createdAt: Instant,
-      command: TestCommand
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, command.Response & TestResponse] =
-      StateWriter.succeed(0.asInstanceOf[command.Response & TestResponse])
+      command: Nothing
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Nothing] =
+      throw new UnsupportedOperationException("IC = Nothing, internal commands disabled")
 
     override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
       false

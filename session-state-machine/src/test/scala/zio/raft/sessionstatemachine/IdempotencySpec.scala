@@ -94,9 +94,9 @@ object IdempotencySpec extends ZIOSpecDefault:
 
     protected def applyInternalCommand(
       createdAt: Instant,
-      command: TestCommand
-    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, command.Response & TestResponse] =
-      StateWriter.succeed(0.asInstanceOf[command.Response & TestResponse])
+      command: Nothing
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Nothing] =
+      throw new UnsupportedOperationException("IC = Nothing, internal commands disabled")
 
     // takeSnapshot and restoreFromSnapshot are now provided by SessionStateMachine base class!
 
@@ -271,7 +271,7 @@ object IdempotencySpec extends ZIOSpecDefault:
       import zio.stream.Stream
       import zio.{UIO, ZIO}
 
-      class ErrorStateMachine extends SessionStateMachine[ErrorCommand, ErrResponse, String, String, ErrSchema]:
+      class ErrorStateMachine extends SessionStateMachine[ErrorCommand, ErrResponse, String, String, ErrSchema, Nothing]:
         var callCount = 0
 
         protected def applyCommand(
@@ -298,9 +298,9 @@ object IdempotencySpec extends ZIOSpecDefault:
 
         protected def applyInternalCommand(
           createdAt: Instant,
-          command: ErrorCommand
-        ): StateWriter[HMap[Schema], ServerRequestForSession[String], Nothing, command.Response & ErrResponse] =
-          StateWriter.succeed(0.asInstanceOf[command.Response & ErrResponse])
+          command: Nothing
+        ): StateWriter[HMap[Schema], ServerRequestForSession[String], Nothing, Nothing] =
+          throw new UnsupportedOperationException("IC = Nothing, internal commands disabled")
 
         def takeSnapshot(state: HMap[Schema]): Stream[Nothing, Byte] = zio.stream.ZStream.empty
         def restoreFromSnapshot(stream: Stream[Nothing, Byte]): UIO[HMap[Schema]] = ZIO.succeed(HMap.empty[Schema])
@@ -312,20 +312,20 @@ object IdempotencySpec extends ZIOSpecDefault:
       val sessionId = SessionId("s-error")
 
       // Create session
-      val createCmd: SessionCommand[ErrorCommand, String, String] =
+      val createCmd: SessionCommand[ErrorCommand, String, String, Nothing] =
         SessionCommand.CreateSession[String, String](now, sessionId, Map.empty)
-          .asInstanceOf[SessionCommand[ErrorCommand, String, String]]
+          .asInstanceOf[SessionCommand[ErrorCommand, String, String, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 
       // First request - should execute and cache the error
-      val cmd1: SessionCommand[ErrorCommand, String, String] =
+      val cmd1: SessionCommand[ErrorCommand, String, String, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), ErrorCommand.Fail)
       val (state2, result1) = sm.apply(cmd1).run(state1)
       val (_, Left(RequestError.UserError(err1))) =
         (result1.asInstanceOf[(List[Any], Either[RequestError[String], Int])]): @unchecked
 
       // Duplicate request - should NOT execute and should return cached error
-      val cmd2: SessionCommand[ErrorCommand, String, String] =
+      val cmd2: SessionCommand[ErrorCommand, String, String, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), ErrorCommand.Fail)
       val (_, result2) = sm.apply(cmd2).run(state2)
       val (_, Left(RequestError.UserError(err2))) =

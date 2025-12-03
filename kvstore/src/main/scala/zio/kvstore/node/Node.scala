@@ -130,7 +130,7 @@ final case class Node(
               val cmd = SessionCommand.GetRequestsForRetry[KVServerRequest](now, lastSentBefore)
               val cont = ContinuationBuilder.withoutResult[KVServerRequest](envelopes =>
                 dispatchServerRequests(now, envelopes)
-              ).onNotALeader(_ => ZIO.unit).make
+              ).ignoreNotALeader.make
               raft.sendCommand(cmd, cont)
             else ZIO.unit
         yield ()

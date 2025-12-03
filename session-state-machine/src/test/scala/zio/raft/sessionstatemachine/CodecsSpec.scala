@@ -116,7 +116,31 @@ object CodecsSpec extends ZIOSpecDefault:
           assertTrue(decoded == cmd)
         }
 
-        // TODO: Add InternalCommand codec test with proper IC type parameter
+        test("InternalCommand") {
+          // Define separate command hierarchies for UC and IC
+          sealed trait ClientCmd extends Command
+          case object NoopClientCmd extends ClientCmd:
+            type Response = Unit
+
+          sealed trait InternalCmd extends Command
+          case class CleanupCmd(threshold: Int) extends InternalCmd:
+            type Response = Int
+
+          given Codec[NoopClientCmd.type] = provide(NoopClientCmd)
+          given Codec[CleanupCmd] = int32.as[CleanupCmd]
+          given Codec[InternalCmd] = summon[Codec[CleanupCmd]].upcast[InternalCmd]
+          given Codec[ClientCmd] = summon[Codec[NoopClientCmd.type]].upcast[ClientCmd]
+          given Codec[Unit] = provide(())
+
+          val cmd = SessionCommand.InternalCommand[InternalCmd, Unit](
+            createdAt = Instant.EPOCH,
+            command = CleanupCmd(42)
+          )
+          val codec = summon[Codec[SessionCommand[ClientCmd, Unit, Nothing, InternalCmd]]]
+          val bits = codec.encode(cmd).require
+          val decoded = codec.decode(bits).require.value
+          assertTrue(decoded == cmd)
+        }
       }
     }
 end CodecsSpec

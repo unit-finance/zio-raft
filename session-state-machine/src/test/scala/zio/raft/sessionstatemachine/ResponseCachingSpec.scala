@@ -41,7 +41,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
   given scodec.Codec[PendingServerRequest[?]] =
     summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]
 
-  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema]
+  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema, Nothing]
       with ScodecSerialization[TestResponse, String, Nothing, TestSchema]:
 
     val codecs = summon[HMap.TypeclassMap[CombinedSchema, scodec.Codec]]
@@ -94,10 +94,10 @@ object ResponseCachingSpec extends ZIOSpecDefault:
 
       val createCmd =
         SessionCommand.CreateSession[String, Nothing](now, sessionId, Map.empty)
-          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 
-      val cmd1: SessionCommand[TestCommand, String, Nothing] =
+      val cmd1: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(10))
       val (state2, result1) = sm.apply(cmd1).run(state1)
       val (_, Right(response1)) =
@@ -105,7 +105,7 @@ object ResponseCachingSpec extends ZIOSpecDefault:
 
       assertTrue(sm.callCount == 1) && assertTrue(response1 == 10)
 
-      val cmd2: SessionCommand[TestCommand, String, Nothing] =
+      val cmd2: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(999))
       val (_, result2) = sm.apply(cmd2).run(state2)
       val (_, Right(response2)) =

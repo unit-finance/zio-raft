@@ -32,7 +32,7 @@ object ServerRequestTargetingSpec extends ZIOSpecDefault:
   given scodec.Codec[PendingServerRequest[?]] =
     summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]
 
-  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema]
+  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema, Nothing]
       with ScodecSerialization[TestResponse, String, Nothing, TestSchema]:
 
     val codecs = summon[HMap.TypeclassMap[CombinedSchema, scodec.Codec]]
@@ -81,15 +81,15 @@ object ServerRequestTargetingSpec extends ZIOSpecDefault:
 
       val create1 =
         SessionCommand.CreateSession[String, Nothing](now, s1, Map.empty)
-          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing, Nothing]]
       val (state1, _) = sm.apply(create1).run(state0)
 
       val create2 =
         SessionCommand.CreateSession[String, Nothing](now, s2, Map.empty)
-          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing, Nothing]]
       val (state2, _) = sm.apply(create2).run(state1)
 
-      val cmd: SessionCommand[TestCommand, String, Nothing] =
+      val cmd: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, s1, RequestId(1), RequestId(0), TestCommand.Noop)
       val (state3, _) = sm.apply(cmd).run(state2)
 

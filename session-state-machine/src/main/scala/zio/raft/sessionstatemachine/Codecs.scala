@@ -57,13 +57,20 @@ object Codecs:
       p => (p.payload, p.lastSentAt.toEpochMilli)
     )
 
-  /** Codec for SessionCommand, parameterized by UC (user command) and SR (server request payload). Requires codecs for
-    * UC and SR in scope.
+  /** Codec for Nothing type - used when IC = Nothing (internal commands disabled).
+    *
+    * This codec should never actually be used at runtime since Nothing has no inhabitants.
     */
-  given sessionCommandCodec[UC <: zio.raft.Command, SR, E](using
+  given nothingCodec: Codec[Nothing] = scodec.codecs.fail(scodec.Err("Cannot encode/decode Nothing type"))
+
+  /** Codec for SessionCommand, parameterized by UC (user command), SR (server request payload), and IC (internal
+    * command). Requires codecs for UC, SR, and IC in scope.
+    */
+  given sessionCommandCodec[UC <: zio.raft.Command, SR, E, IC <: zio.raft.Command](using
     ucCodec: Codec[UC],
-    srCodec: Codec[SR]
-  ): Codec[SessionCommand[UC, SR, E]] =
+    srCodec: Codec[SR],
+    icCodec: Codec[IC]
+  ): Codec[SessionCommand[UC, SR, E, IC]] =
     val clientRequestV0: Codec[SessionCommand.ClientRequest[UC, SR, E]] =
       (instantCodec :: sessionIdCodec :: requestIdCodec :: requestIdCodec :: ucCodec)
         .as[SessionCommand.ClientRequest[UC, SR, E]]
@@ -105,15 +112,15 @@ object Codecs:
         cmd => (0, cmd)
       )
 
-    val internalCommandV0: Codec[SessionCommand.InternalCommand[UC, SR]] =
-      (instantCodec :: ucCodec).as[SessionCommand.InternalCommand[UC, SR]]
-    val internalCommandCodec: Codec[SessionCommand.InternalCommand[UC, SR]] =
+    val internalCommandV0: Codec[SessionCommand.InternalCommand[IC, SR]] =
+      (instantCodec :: icCodec).as[SessionCommand.InternalCommand[IC, SR]]
+    val internalCommandCodec: Codec[SessionCommand.InternalCommand[IC, SR]] =
       (uint8 :: internalCommandV0).xmap(
         { case (_, cmd) => cmd },
         cmd => (0, cmd)
       )
 
-    discriminated[SessionCommand[UC, SR, E]]
+    discriminated[SessionCommand[UC, SR, E, IC]]
       .by(uint8)
       .typecase(0, clientRequestCodec)
       .typecase(1, serverRequestAckCodec)

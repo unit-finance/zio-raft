@@ -11,7 +11,10 @@ package object kvstore:
       type Response = KVResponse.SetDone.type
     final case class Watch(key: String) extends KVCommand:
       type Response = KVResponse.WatchDone.type
-    case object PurgeUnwatchedKeys extends KVCommand:
+
+  sealed trait KVInternalCommand extends Command
+  object KVInternalCommand:
+    case object PurgeUnwatchedKeys extends KVInternalCommand:
       type Response = KVResponse.PurgeResult
 
   sealed trait KVResponse

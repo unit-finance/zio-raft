@@ -56,7 +56,7 @@ object IdempotencySpec extends ZIOSpecDefault:
   given scodec.Codec[PendingServerRequest[?]] =
     summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]
 
-  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema]
+  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema, Nothing]
       with ScodecSerialization[TestResponse, String, Nothing, TestSchema]:
 
     val codecs = summon[HMap.TypeclassMap[CombinedSchema, scodec.Codec]]
@@ -111,13 +111,13 @@ object IdempotencySpec extends ZIOSpecDefault:
       val sessionId = SessionId("s1")
 
       // Create session first (cast to match state machine type)
-      val createCmd: SessionCommand[TestCommand, String, Nothing] =
+      val createCmd: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.CreateSession[String, Nothing](now, sessionId, Map.empty)
-          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 
       // First request - should call applyCommand
-      val cmd1: SessionCommand[TestCommand, String, Nothing] =
+      val cmd1: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(10))
       val (state2, result1) = sm.apply(cmd1).run(state1)
       val (_, Right(response1)) =
@@ -127,7 +127,7 @@ object IdempotencySpec extends ZIOSpecDefault:
       assertTrue(response1 == 10)
 
       // Second request with same ID - should NOT call applyCommand
-      val cmd2: SessionCommand[TestCommand, String, Nothing] =
+      val cmd2: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(999))
       val (state3, result2) = sm.apply(cmd2).run(state2)
       val (_, Right(response2)) =
@@ -144,20 +144,20 @@ object IdempotencySpec extends ZIOSpecDefault:
       val now = Instant.now()
       val sessionId = SessionId("s1")
 
-      val createCmd: SessionCommand[TestCommand, String, Nothing] =
+      val createCmd: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.CreateSession[String, Nothing](now, sessionId, Map.empty)
-          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 
       // First request
-      val cmd1: SessionCommand[TestCommand, String, Nothing] =
+      val cmd1: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(5))
       val (state2, result1) = sm.apply(cmd1).run(state1)
       val (_, Right(response1)) =
         (result1.asInstanceOf[(List[Any], Either[RequestError[Nothing], Int])]): @unchecked
 
       // Second request with DIFFERENT ID
-      val cmd2: SessionCommand[TestCommand, String, Nothing] =
+      val cmd2: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(2), RequestId(1), TestCommand.Increment(3))
       val (state3, result2) = sm.apply(cmd2).run(state2)
       val (_, Right(response2)) =
@@ -176,20 +176,20 @@ object IdempotencySpec extends ZIOSpecDefault:
       val sessionId = SessionId("s1")
 
       // Create session
-      val createCmd: SessionCommand[TestCommand, String, Nothing] =
+      val createCmd: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.CreateSession[String, Nothing](now, sessionId, Map.empty)
-          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 
       // First request (requestId=1, lowestPendingRequestId=1)
-      val cmd1: SessionCommand[TestCommand, String, Nothing] =
+      val cmd1: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(10))
       val (state2, result1) = sm.apply(cmd1).run(state1)
       val (_, Right(response1)) =
         (result1.asInstanceOf[(List[Any], Either[RequestError[Nothing], Int])]): @unchecked
 
       // Second request (requestId=2, lowestPendingRequestId=1)
-      val cmd2: SessionCommand[TestCommand, String, Nothing] =
+      val cmd2: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(2), RequestId(1), TestCommand.Increment(5))
       val (state3, result2) = sm.apply(cmd2).run(state2)
       val (_, Right(response2)) =
@@ -198,12 +198,12 @@ object IdempotencySpec extends ZIOSpecDefault:
       // Third request (requestId=3, lowestPendingRequestId=2)
       // Client says "lowestPendingRequestId=2", so responses with requestId < 2 can be evicted (only 1)
       // This triggers cache cleanup AND updates highestLowestPendingRequestIdSeen to 2
-      val cmd3: SessionCommand[TestCommand, String, Nothing] =
+      val cmd3: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(3), RequestId(2), TestCommand.Increment(1))
       val (state4, _) = sm.apply(cmd3).run(state3)
 
       // Now retry request 1 - should fail with ResponseEvicted (evicted)
-      val cmd4: SessionCommand[TestCommand, String, Nothing] =
+      val cmd4: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(2), TestCommand.Increment(999))
       val (state5, result4) = sm.apply(cmd4).run(state4)
 
@@ -222,21 +222,21 @@ object IdempotencySpec extends ZIOSpecDefault:
       val sessionId = SessionId("s1")
 
       // Create session
-      val createCmd: SessionCommand[TestCommand, String, Nothing] =
+      val createCmd: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.CreateSession[String, Nothing](now, sessionId, Map.empty)
-          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 
       // Execute 3 requests (requestIds 1, 2, 3)
-      val cmd1: SessionCommand[TestCommand, String, Nothing] =
+      val cmd1: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(1), RequestId(1), TestCommand.Increment(10))
       val (state2, _) = sm.apply(cmd1).run(state1)
 
-      val cmd2: SessionCommand[TestCommand, String, Nothing] =
+      val cmd2: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(2), RequestId(1), TestCommand.Increment(5))
       val (state3, _) = sm.apply(cmd2).run(state2)
 
-      val cmd3: SessionCommand[TestCommand, String, Nothing] =
+      val cmd3: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(3), RequestId(1), TestCommand.Increment(3))
       val (state4, _) = sm.apply(cmd3).run(state3)
 
@@ -247,7 +247,7 @@ object IdempotencySpec extends ZIOSpecDefault:
       assertTrue(cache4.get["cache"]((sessionId, RequestId(3))).isDefined)
 
       // Execute request 4 with lowestPendingRequestId=2 (client says "lowest pending is 2")
-      val cmd4: SessionCommand[TestCommand, String, Nothing] =
+      val cmd4: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ClientRequest(now, sessionId, RequestId(4), RequestId(2), TestCommand.Increment(1))
       val (state5, _) = sm.apply(cmd4).run(state4)
 

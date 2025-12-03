@@ -13,8 +13,11 @@ import java.time.Instant
   *   The user command type (extends Command with dependent Response type)
   * @tparam SR
   *   Server-initiated request payload type
+  * @tparam IC
+  *   Internal command type (extends Command with dependent Response type). Defaults to Nothing for opt-in internal
+  *   commands.
   */
-sealed trait SessionCommand[+UC <: Command, SR, +E] extends Command
+sealed trait SessionCommand[+UC <: Command, SR, +E, +IC <: Command] extends Command
 
 object SessionCommand:
 
@@ -53,7 +56,7 @@ object SessionCommand:
     requestId: RequestId,
     lowestPendingRequestId: RequestId,
     command: UC
-  ) extends SessionCommand[UC, SR, E]:
+  ) extends SessionCommand[UC, SR, E, Nothing]:
     // Response type can be an error or the user command's response with server request envelopes
     type Response = (List[ServerRequestEnvelope[SR]], Either[RequestError[E], command.Response])
 
@@ -71,7 +74,7 @@ object SessionCommand:
     createdAt: Instant,
     sessionId: SessionId,
     requestId: RequestId
-  ) extends SessionCommand[Nothing, SR, Nothing]:
+  ) extends SessionCommand[Nothing, SR, Nothing, Nothing]:
     type Response = Unit
 
   /** Create a new session.
@@ -89,7 +92,7 @@ object SessionCommand:
     createdAt: Instant,
     sessionId: SessionId,
     capabilities: Map[String, String]
-  ) extends SessionCommand[Nothing, SR, E]:
+  ) extends SessionCommand[Nothing, SR, E, Nothing]:
     type Response = (List[ServerRequestEnvelope[SR]], Either[RequestError[E], Unit])
 
   /** Notification that a session has expired.
@@ -104,7 +107,7 @@ object SessionCommand:
   case class SessionExpired[SR](
     createdAt: Instant,
     sessionId: SessionId
-  ) extends SessionCommand[Nothing, SR, Nothing]:
+  ) extends SessionCommand[Nothing, SR, Nothing, Nothing]:
     type Response = List[ServerRequestEnvelope[SR]] // server request envelopes
 
   /** Command to atomically retrieve requests needing retry and update lastSentAt.
@@ -122,7 +125,7 @@ object SessionCommand:
   case class GetRequestsForRetry[SR](
     createdAt: Instant,
     lastSentBefore: Instant
-  ) extends SessionCommand[Nothing, SR, Nothing]:
+  ) extends SessionCommand[Nothing, SR, Nothing, Nothing]:
     type Response = List[ServerRequestEnvelope[SR]]
 
   /** Command for internal/background processes that modify state.
@@ -144,9 +147,9 @@ object SessionCommand:
     * @param createdAt
     *   Timestamp when the command was created (use for time-based logic)
     * @param command
-    *   The user command to execute
-    * @tparam UC
-    *   User command type
+    *   The internal command to execute
+    * @tparam IC
+    *   Internal command type
     * @tparam SR
     *   Server request type
     *
@@ -155,9 +158,9 @@ object SessionCommand:
     * @note
     *   Similar to GetRequestsForRetry - operates at system level, not session level
     */
-  case class InternalCommand[UC <: Command, SR](
+  case class InternalCommand[IC <: Command, SR](
     createdAt: Instant,
-    command: UC
-  ) extends SessionCommand[UC, SR, Nothing]:
+    command: IC
+  ) extends SessionCommand[Nothing, SR, Nothing, IC]:
     type Response = (List[ServerRequestEnvelope[SR]], command.Response)
 end SessionCommand

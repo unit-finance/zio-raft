@@ -14,6 +14,7 @@ import zio.kvstore.KVServer.KVServerAction
 import java.time.Instant
 import zio.kvstore.given
 import zio.kvstore.Codecs.given scodec.Codec[zio.kvstore.KVCommand]
+import zio.kvstore.Codecs.given scodec.Codec[zio.kvstore.KVInternalCommand]
 import zio.kvstore.node.Node.NodeAction
 import zio.kvstore.node.Node.NodeAction.*
 import zio.raft.stores.LmdbStable
@@ -31,7 +32,7 @@ final case class Node(
       zio.raft.sessionstatemachine.SessionSchema[KVResponse, KVServerRequest, Nothing],
       KVSchema
     ]],
-    SessionCommand[KVCommand, KVServerRequest, Nothing]
+    SessionCommand[KVCommand, KVServerRequest, Nothing, KVInternalCommand]
   ]
 ):
 
@@ -151,10 +152,10 @@ final case class Node(
           state <- raft.readStateDirty
           hasUnwatchedKeys = checkForUnwatchedKeys(state)
           _ <- if hasUnwatchedKeys then
-            val cmd = SessionCommand.InternalCommand[KVCommand, KVServerRequest](
+            val cmd = SessionCommand.InternalCommand[KVInternalCommand, KVServerRequest](
               now,
-              KVCommand.PurgeUnwatchedKeys
-            ).asInstanceOf[SessionCommand[KVCommand, KVServerRequest, Nothing]]
+              KVInternalCommand.PurgeUnwatchedKeys
+            ).asInstanceOf[SessionCommand[KVCommand, KVServerRequest, Nothing, KVInternalCommand]]
             val cont = (r: Either[NotALeaderError, cmd.Response]) =>
               r match
                 case Right(response) =>
@@ -280,9 +281,11 @@ object Node:
       stable <- LmdbStable.make.debug("LmdbStable.make")
 
       logStore <-
-        SegmentedLog.make[SessionCommand[KVCommand, KVServerRequest, Nothing]](logDirectory).debug("SegmentedLog.make")
+        SegmentedLog.make[SessionCommand[KVCommand, KVServerRequest, Nothing, KVInternalCommand]](logDirectory).debug(
+          "SegmentedLog.make"
+        )
       snapshotStore <- FileSnapshotStore.make(zio.nio.file.Path(snapshotDirectory)).debug("FileSnapshotStore.make")
-      rpc <- ZmqRpc.make[SessionCommand[KVCommand, KVServerRequest, Nothing]](
+      rpc <- ZmqRpc.make[SessionCommand[KVCommand, KVServerRequest, Nothing, KVInternalCommand]](
         nodeAddress,
         peers
       ).debug("ZmqRpc.make")

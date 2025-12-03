@@ -45,4 +45,9 @@ object Codecs:
       .by(fixedSizeBytes(1, ascii))
       .typecase("S", setCodec)
       .typecase("W", watchCodec)
-      .typecase("P", provide(KVCommand.PurgeUnwatchedKeys))
+
+  // Internal command codecs
+  given Codec[KVInternalCommand] =
+    discriminated[KVInternalCommand]
+      .by(fixedSizeBytes(1, ascii))
+      .typecase("P", provide(KVInternalCommand.PurgeUnwatchedKeys))

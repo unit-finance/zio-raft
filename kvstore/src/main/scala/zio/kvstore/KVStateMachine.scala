@@ -12,7 +12,14 @@ import zio.raft.sessionstatemachine.given
 import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
 
 class KVStateMachine
-    extends SessionStateMachine[KVCommand, KVResponse, zio.kvstore.protocol.KVServerRequest, Nothing, KVSchema]
+    extends SessionStateMachine[
+      KVCommand,
+      KVResponse,
+      zio.kvstore.protocol.KVServerRequest,
+      Nothing,
+      KVSchema,
+      KVInternalCommand
+    ]
     with ScodecSerialization[KVResponse, zio.kvstore.protocol.KVServerRequest, Nothing, KVSchema]:
 
   // Local alias to aid match-type reduction bug in scala 3.3
@@ -110,12 +117,12 @@ class KVStateMachine
   ): SW[Unit] =
     removeAllSubscriptions(sessionId)
 
-  protected def applyInternalCommand(
+  override protected def applyInternalCommand(
     createdAt: Instant,
-    command: KVCommand
+    command: KVInternalCommand
   ): SW[command.Response & KVResponse] =
     command match
-      case purge @ KVCommand.PurgeUnwatchedKeys =>
+      case purge @ KVInternalCommand.PurgeUnwatchedKeys =>
         for
           state <- StateWriter.get[HMap[Schema]]
 

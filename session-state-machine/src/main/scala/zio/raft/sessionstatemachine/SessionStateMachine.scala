@@ -47,6 +47,9 @@ import java.time.Instant
   *   Server-initiated request payload type
   * @tparam UserSchema
   *   User-defined schema (tuple of (Prefix, KeyType, ValueType) triples)
+  * @tparam IC
+  *   Internal command type (extends Command with dependent Response type). Set to Nothing to disable internal commands.
+  *   When IC = Nothing, internal commands cannot be used and applyInternalCommand has a default stub implementation.
   *
   * ## State Schema
   *
@@ -72,8 +75,8 @@ import java.time.Instant
   * @see
   *   StateWriter for the state + writer monad used in abstract methods
   */
-trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
-    extends StateMachine[HMap[Tuple.Concat[SessionSchema[R, SR, E], UserSchema]], SessionCommand[UC, SR, E]]:
+trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple, IC <: Command]
+    extends StateMachine[HMap[Tuple.Concat[SessionSchema[R, SR, E], UserSchema]], SessionCommand[UC, SR, E, IC]]:
 
   /** Type alias for the complete schema (SessionSchema[R, SR] ++ UserSchema).
     *
@@ -228,10 +231,12 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
     *   Return type is intersection: command.Response & R
     * @note
     *   Receives complete HMap[Schema] (both session state and user state)
+    * @note
+    *   When IC = Nothing, this method has a default stub implementation that should never be called
     *
     * @example
     *   {{{
-    * protected def applyInternalCommand(createdAt: Instant, cmd: UC): StateWriter[HMap[Schema], ServerRequestForSession[SR], Nothing, cmd.Response & R] =
+    * protected def applyInternalCommand(createdAt: Instant, cmd: IC): StateWriter[HMap[Schema], ServerRequestForSession[SR], Nothing, cmd.Response & R] =
     *   cmd match
     *     case TaskCommand.ExpireTimedOutTasks(cutoff) =>
     *       for {
@@ -252,8 +257,13 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
     */
   protected def applyInternalCommand(
     createdAt: Instant,
-    command: UC
-  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Nothing, command.Response & R]
+    command: IC
+  ): StateWriter[HMap[Schema], ServerRequestForSession[SR], Nothing, command.Response & R] =
+    // Default stub implementation for IC = Nothing
+    // This should never be called when IC = Nothing because InternalCommand[Nothing, SR] cannot be constructed
+    throw new UnsupportedOperationException(
+      "applyInternalCommand called but IC = Nothing. This should be unreachable - internal commands are disabled."
+    )
 
   // ====================================================================================
   // StateMachine INTERFACE - Implemented by this trait
@@ -284,7 +294,7 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
     *   Response type, and the compiler cannot verify exhaustiveness due to type erasure. This is safe because we handle
     *   all sealed trait cases explicitly.
     */
-  final def apply(command: SessionCommand[UC, SR, E]): State[HMap[Schema], command.Response] =
+  final def apply(command: SessionCommand[UC, SR, E, IC]): State[HMap[Schema], command.Response] =
     command match
       case cmd: SessionCommand.ClientRequest[UC, SR, E] @unchecked =>
         handleClientRequest(cmd).map(_.asResponseType(command, cmd))
@@ -301,7 +311,7 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
       case cmd: SessionCommand.GetRequestsForRetry[SR] @unchecked =>
         handleGetRequestsForRetry(cmd).map(_.asResponseType(command, cmd))
 
-      case cmd: SessionCommand.InternalCommand[UC, SR] @unchecked =>
+      case cmd: SessionCommand.InternalCommand[IC, SR] @unchecked =>
         handleInternalCommand(cmd).map(_.asResponseType(command, cmd))
 
   /** Snapshot behavior - users must implement.
@@ -504,7 +514,7 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple]
     * No session management overhead (no cache lookup, no idempotency checking). Directly executes the user's
     * applyInternalCommand method and returns the response with any emitted server requests.
     */
-  private def handleInternalCommand(cmd: SessionCommand.InternalCommand[UC, SR])
+  private def handleInternalCommand(cmd: SessionCommand.InternalCommand[IC, SR])
     : State[HMap[Schema], (List[ServerRequestEnvelope[SR]], cmd.command.Response)] =
     for
       (serverRequestsLog, response) <- applyInternalCommand(cmd.createdAt, cmd.command).withLog

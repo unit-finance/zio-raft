@@ -164,9 +164,6 @@ object ContinuationBuilder:
 
   /** Builder for results that may contain either a domain error ([[RequestError]]) or a success.
     *
-    * Note: In the current implementation, `make` ignores `NotALeaderError` and returns `ZIO.unit`, even if
-    * `onNotALeader` was provided via the builder. Handle this case explicitly if needed.
-    *
     * @tparam SR
     *   server request envelope payload type
     * @tparam E
@@ -179,10 +176,7 @@ object ContinuationBuilder:
     onFailure: (List[ServerRequestEnvelope[SR]], RequestError[E]) => ZIO[Any, Nothing, Unit],
     onNotALeader: NotALeaderError => ZIO[Any, Nothing, Unit]
   ):
-    /** Replace the handler for [[NotALeaderError]].
-      *
-      * Note: The current `make` implementation does not invoke this handler.
-      */
+    /** Replace the handler for [[NotALeaderError]]. */
     def onNotALeader(onNotALeader: NotALeaderError => ZIO[Any, Nothing, Unit]): EitherContinuationBuilder[SR, E, A] =
       EitherContinuationBuilder(onSuccess, onFailure, onNotALeader)
 

@@ -32,7 +32,7 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
   given scodec.Codec[PendingServerRequest[?]] =
     summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]
 
-  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema]
+  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema, Nothing]
       with ScodecSerialization[TestResponse, String, Nothing, TestSchema]:
 
     val codecs = summon[HMap.TypeclassMap[CombinedSchema, scodec.Codec]]
@@ -62,6 +62,12 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
       StateWriter.log(ServerRequestForSession[String](SessionId("admin"), s"expired:${SessionId.unwrap(sid)}"))
         .as(())
 
+    protected def applyInternalCommand(
+      createdAt: Instant,
+      command: Nothing
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Nothing] =
+      throw new UnsupportedOperationException("IC = Nothing, internal commands disabled")
+
     override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
       false
 
@@ -75,7 +81,7 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
       // Create session
       val create =
         SessionCommand.CreateSession[String, Nothing](now, sid, Map("k" -> "v"))
-          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing, Nothing]]
       val (state1, _) = sm.apply(create).run(state0)
 
       // Verify admin request exists
@@ -88,7 +94,7 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
       // Expire session
       val expire =
         SessionCommand.SessionExpired[String](now, sid)
-          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing, Nothing]]
       val (state2, _) = sm.apply(expire).run(state1)
 
       // Verify session data cleaned
@@ -100,5 +106,6 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
 
       assertTrue(noMetadata && noCache && noServerRequests && noLastId)
     }
+    // InternalCommand behavioral tests demonstrated in KVStore module
   )
 end SessionLifecycleSpec

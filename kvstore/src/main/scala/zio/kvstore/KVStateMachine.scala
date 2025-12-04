@@ -12,7 +12,14 @@ import zio.raft.sessionstatemachine.given
 import zio.raft.sessionstatemachine.Codecs.{sessionMetadataCodec, requestIdCodec, pendingServerRequestCodec}
 
 class KVStateMachine
-    extends SessionStateMachine[KVCommand, KVResponse, zio.kvstore.protocol.KVServerRequest, Nothing, KVSchema]
+    extends SessionStateMachine[
+      KVCommand,
+      KVResponse,
+      zio.kvstore.protocol.KVServerRequest,
+      Nothing,
+      KVSchema,
+      KVInternalCommand
+    ]
     with ScodecSerialization[KVResponse, zio.kvstore.protocol.KVServerRequest, Nothing, KVSchema]:
 
   // Local alias to aid match-type reduction bug in scala 3.3
@@ -109,6 +116,34 @@ class KVStateMachine
     capabilities: Map[String, String]
   ): SW[Unit] =
     removeAllSubscriptions(sessionId)
+
+  override protected def applyInternalCommand(
+    createdAt: Instant,
+    command: KVInternalCommand
+  ): SW[command.Response & KVResponse] =
+    command match
+      case purge @ KVInternalCommand.PurgeUnwatchedKeys =>
+        for
+          state <- StateWriter.get[HMap[Schema]]
+
+          // Find all keys in the KV store
+          allKeys = state.iterator["kv"].map { case (key, _) => key }.toSet
+
+          // Find keys that have active watchers
+          watchedKeys = state.iterator["subsByKey"].collect {
+            case (key, subs) if subs.nonEmpty => key
+          }.toSet
+
+          // Keys to purge: in KV store but not watched
+          keysToPurge = allKeys -- watchedKeys
+
+          // Remove unwatched keys from KV store
+          _ <- StateWriter.update[HMap[Schema], HMap[Schema]](s =>
+            keysToPurge.foldLeft(s) { (acc, key) =>
+              acc.removed["kv"](key).removed["subsByKey"](key)
+            }
+          )
+        yield KVResponse.PurgeResult(keysToPurge.size).asInstanceOf[command.Response & KVResponse]
 
   override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
     (commitIndex.value - lastSnapshotIndex.value) >= 100

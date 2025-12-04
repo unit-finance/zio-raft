@@ -40,14 +40,14 @@ object CodecsSpec extends ZIOSpecDefault:
             type Response = Unit
           given Codec[DummyCmd.type] = provide(DummyCmd)
           given Codec[Unit] = provide(())
-          val cmd: SessionCommand[DummyCmd.type, Unit, Nothing] = SessionCommand.ClientRequest[DummyCmd.type, Unit, Nothing](
+          val cmd: SessionCommand[DummyCmd.type, Unit, Nothing, Nothing] = SessionCommand.ClientRequest[DummyCmd.type, Unit, Nothing](
             createdAt = Instant.EPOCH,
             sessionId = SessionId.fromString("s-1"),
             requestId = RequestId(1L),
             lowestPendingRequestId = RequestId(0L),
             command = DummyCmd
           )
-          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing]]]
+          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing, Nothing]]]
           val bits = codec.encode(cmd).require
           val decoded = codec.decode(bits).require.value
           assertTrue(decoded == cmd)
@@ -64,7 +64,7 @@ object CodecsSpec extends ZIOSpecDefault:
             sessionId = SessionId.fromString("s-2"),
             requestId = RequestId(2L)
           )
-          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing]]]
+          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing, Nothing]]]
           val bits = codec.encode(cmd).require
           val decoded = codec.decode(bits).require.value
           assertTrue(decoded == cmd)
@@ -80,7 +80,7 @@ object CodecsSpec extends ZIOSpecDefault:
             sessionId = SessionId.fromString("s-3"),
             capabilities = Map("k" -> "v")
           )
-          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing]]]
+          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing, Nothing]]]
           val bits = codec.encode(cmd).require
           val decoded = codec.decode(bits).require.value
           assertTrue(decoded == cmd)
@@ -95,7 +95,7 @@ object CodecsSpec extends ZIOSpecDefault:
             createdAt = Instant.EPOCH,
             sessionId = SessionId.fromString("s-4")
           )
-          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing]]]
+          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing, Nothing]]]
           val bits = codec.encode(cmd).require
           val decoded = codec.decode(bits).require.value
           assertTrue(decoded == cmd)
@@ -110,7 +110,33 @@ object CodecsSpec extends ZIOSpecDefault:
             createdAt = Instant.EPOCH,
             lastSentBefore = Instant.ofEpochMilli(500L)
           )
-          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing]]]
+          val codec = summon[Codec[SessionCommand[DummyCmd.type, Unit, Nothing, Nothing]]]
+          val bits = codec.encode(cmd).require
+          val decoded = codec.decode(bits).require.value
+          assertTrue(decoded == cmd)
+        }
+
+        test("InternalCommand") {
+          // Define separate command hierarchies for UC and IC
+          sealed trait ClientCmd extends Command
+          case object NoopClientCmd extends ClientCmd:
+            type Response = Unit
+
+          sealed trait InternalCmd extends Command
+          case class CleanupCmd(threshold: Int) extends InternalCmd:
+            type Response = Int
+
+          given Codec[NoopClientCmd.type] = provide(NoopClientCmd)
+          given Codec[CleanupCmd] = int32.as[CleanupCmd]
+          given Codec[InternalCmd] = summon[Codec[CleanupCmd]].upcast[InternalCmd]
+          given Codec[ClientCmd] = summon[Codec[NoopClientCmd.type]].upcast[ClientCmd]
+          given Codec[Unit] = provide(())
+
+          val cmd = SessionCommand.InternalCommand[InternalCmd, Unit](
+            createdAt = Instant.EPOCH,
+            command = CleanupCmd(42)
+          )
+          val codec = summon[Codec[SessionCommand[ClientCmd, Unit, Nothing, InternalCmd]]]
           val bits = codec.encode(cmd).require
           val decoded = codec.decode(bits).require.value
           assertTrue(decoded == cmd)

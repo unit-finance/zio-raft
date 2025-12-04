@@ -232,7 +232,7 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple, IC <: Co
     * @note
     *   Receives complete HMap[Schema] (both session state and user state)
     * @note
-    *   When IC = Nothing, this method has a default stub implementation that should never be called
+    *   When IC = Nothing, implementations must throw UnsupportedOperationException as this method should never be called
     *
     * @example
     *   {{{

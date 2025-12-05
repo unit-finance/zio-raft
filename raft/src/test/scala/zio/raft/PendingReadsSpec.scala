@@ -1,6 +1,6 @@
 package zio.raft
 
-import zio.{Promise, ZIO}
+import zio.{Promise, Queue, ZIO}
 import zio.test.ZIOSpecDefault
 import zio.test.Spec
 import zio.test.TestEnvironment
@@ -19,10 +19,14 @@ object PendingReadsSpec extends ZIOSpecDefault:
         promise2 <- makeTestPromise[String]()
         promise3 <- makeTestPromise[String]()
 
+        c1: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise1.fail, promise1.succeed).unit
+        c2: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise2.fail, promise2.succeed).unit
+        c3: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise3.fail, promise3.succeed).unit
+
         pendingReads = PendingReads.empty[String]
-          .withPendingCommand(promise1, Index(5))
-          .withPendingCommand(promise2, Index(2))
-          .withPendingCommand(promise3, Index(8))
+          .withPendingCommand(c1, Index(5))
+          .withPendingCommand(c2, Index(2))
+          .withPendingCommand(c3, Index(8))
 
         commandsList = pendingReads.readsPendingCommands.list
       yield assertTrue(
@@ -42,10 +46,14 @@ object PendingReadsSpec extends ZIOSpecDefault:
         earlier = now.minusSeconds(60)
         later = now.plusSeconds(60)
 
+        c1: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise1.fail, promise1.succeed).unit
+        c2: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise2.fail, promise2.succeed).unit
+        c3: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise3.fail, promise3.succeed).unit
+
         pendingReads = PendingReads.empty[String]
-          .withPendingHeartbeat(promise1, later)
-          .withPendingHeartbeat(promise2, earlier)
-          .withPendingHeartbeat(promise3, now)
+          .withPendingHeartbeat(c1, later)
+          .withPendingHeartbeat(c2, earlier)
+          .withPendingHeartbeat(c3, now)
 
         heartbeatsList = pendingReads.readsPendingHeartbeats.list
       yield assertTrue(
@@ -62,13 +70,25 @@ object PendingReadsSpec extends ZIOSpecDefault:
         promise3 <- makeTestPromise[String]()
         promise4 <- makeTestPromise[String]()
 
-        initialReads = PendingReads.empty[String]
-          .withPendingCommand(promise1, Index(1))
-          .withPendingCommand(promise2, Index(3))
-          .withPendingCommand(promise3, Index(5))
-          .withPendingCommand(promise4, Index(7))
+        c1: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise1.fail, promise1.succeed).unit
+        c2: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise2.fail, promise2.succeed).unit
+        c3: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise3.fail, promise3.succeed).unit
+        c4: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise4.fail, promise4.succeed).unit
 
-        updatedReads <- initialReads.resolveReadsForCommand(Index(4), "completed_state")
+        initialReads = PendingReads.empty[String]
+          .withPendingCommand(c1, Index(1))
+          .withPendingCommand(c2, Index(3))
+          .withPendingCommand(c3, Index(5))
+          .withPendingCommand(c4, Index(7))
+
+        queue <- Queue.unbounded[RaftAction]
+        updatedReads <- initialReads.resolveReadsForCommand(queue, Index(4), "completed_state")
+        // Run all enqueued continuation effects
+        actions <- queue.takeAll
+        _ <- ZIO.foreachDiscard(actions) {
+          case RaftAction.ReadContinuation(eff) => eff
+          case _                                => ZIO.unit
+        }
 
         // Check which promises are completed
         isDone1 <- promise1.isDone
@@ -103,16 +123,31 @@ object PendingReadsSpec extends ZIOSpecDefault:
         member1 = MemberId("member1")
         member2 = MemberId("member2")
 
-        initialReads = PendingReads.empty[String]
-          .withPendingHeartbeat(promise1, earlier)
-          .withPendingHeartbeat(promise2, now)
-          .withPendingHeartbeat(promise3, later)
+        c1: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise1.fail, promise1.succeed).unit
+        c2: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise2.fail, promise2.succeed).unit
+        c3: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise3.fail, promise3.succeed).unit
 
+        initialReads = PendingReads.empty[String]
+          .withPendingHeartbeat(c1, earlier)
+          .withPendingHeartbeat(c2, now)
+          .withPendingHeartbeat(c3, later)
+
+        queue <- Queue.unbounded[RaftAction]
         // First heartbeat response (not enough for majority in 3-node cluster)
-        afterFirst <- initialReads.resolveReadsForHeartbeat(member1, now, "heartbeat_state", 3)
+        afterFirst <- initialReads.resolveReadsForHeartbeat(queue, member1, now, "heartbeat_state", 3)
+        actions1 <- queue.takeAll
+        _ <- ZIO.foreachDiscard(actions1) {
+          case RaftAction.ReadContinuation(eff) => eff
+          case _                                => ZIO.unit
+        }
 
         // Second heartbeat response (should complete heartbeats <= now)
-        afterSecond <- afterFirst.resolveReadsForHeartbeat(member2, now, "heartbeat_state", 3)
+        afterSecond <- afterFirst.resolveReadsForHeartbeat(queue, member2, now, "heartbeat_state", 3)
+        actions2 <- queue.takeAll
+        _ <- ZIO.foreachDiscard(actions2) {
+          case RaftAction.ReadContinuation(eff) => eff
+          case _                                => ZIO.unit
+        }
 
         // Check promises with timeout to avoid hanging
         result1 <-
@@ -143,13 +178,28 @@ object PendingReadsSpec extends ZIOSpecDefault:
         leaderId = Some(MemberId("new_leader"))
         now = Instant.now()
 
-        pendingReads = PendingReads.empty[String]
-          .withPendingCommand(commandPromise1, Index(1))
-          .withPendingCommand(commandPromise2, Index(2))
-          .withPendingHeartbeat(heartbeatPromise1, now)
-          .withPendingHeartbeat(heartbeatPromise2, now.plusSeconds(10))
+        c1: ReadContinuation[String] = (e: Either[NotALeaderError, String]) =>
+          e.fold(commandPromise1.fail, commandPromise1.succeed).unit
+        c2: ReadContinuation[String] = (e: Either[NotALeaderError, String]) =>
+          e.fold(commandPromise2.fail, commandPromise2.succeed).unit
+        h1: ReadContinuation[String] = (e: Either[NotALeaderError, String]) =>
+          e.fold(heartbeatPromise1.fail, heartbeatPromise1.succeed).unit
+        h2: ReadContinuation[String] = (e: Either[NotALeaderError, String]) =>
+          e.fold(heartbeatPromise2.fail, heartbeatPromise2.succeed).unit
 
-        _ <- pendingReads.stepDown(leaderId)
+        pendingReads = PendingReads.empty[String]
+          .withPendingCommand(c1, Index(1))
+          .withPendingCommand(c2, Index(2))
+          .withPendingHeartbeat(h1, now)
+          .withPendingHeartbeat(h2, now.plusSeconds(10))
+
+        queue <- Queue.unbounded[RaftAction]
+        _ <- pendingReads.stepDown(queue, leaderId)
+        actions <- queue.takeAll
+        _ <- ZIO.foreachDiscard(actions) {
+          case RaftAction.ReadContinuation(eff) => eff
+          case _                                => ZIO.unit
+        }
 
         commandResult1 <- commandPromise1.await.either.timeoutFail("timeout error")(zio.Duration.fromMillis(100))
         commandResult2 <- commandPromise2.await.either.timeoutFail("timeout error")(zio.Duration.fromMillis(100))
@@ -180,16 +230,33 @@ object PendingReadsSpec extends ZIOSpecDefault:
         member1 = MemberId("member1")
         member2 = MemberId("member2")
 
+        c1: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise1.fail, promise1.succeed).unit
+        c2: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise2.fail, promise2.succeed).unit
+        c3: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise3.fail, promise3.succeed).unit
+        c4: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise4.fail, promise4.succeed).unit
+        c5: ReadContinuation[String] = (e: Either[NotALeaderError, String]) => e.fold(promise5.fail, promise5.succeed).unit
+
         initialReads = PendingReads.empty[String]
-          .withPendingHeartbeat(promise1, t1)
-          .withPendingHeartbeat(promise2, t2)
-          .withPendingHeartbeat(promise3, t3)
-          .withPendingHeartbeat(promise4, t4)
-          .withPendingHeartbeat(promise5, t5)
+          .withPendingHeartbeat(c1, t1)
+          .withPendingHeartbeat(c2, t2)
+          .withPendingHeartbeat(c3, t3)
+          .withPendingHeartbeat(c4, t4)
+          .withPendingHeartbeat(c5, t5)
 
         // Add some heartbeat responses to build up majority for earlier timestamps
-        withFirstResponse <- initialReads.resolveReadsForHeartbeat(member1, t3, "state", 3)
-        finalReads <- withFirstResponse.resolveReadsForHeartbeat(member2, t3, "state", 3)
+        queue <- Queue.unbounded[RaftAction]
+        withFirstResponse <- initialReads.resolveReadsForHeartbeat(queue, member1, t3, "state", 3)
+        actions1 <- queue.takeAll
+        _ <- ZIO.foreachDiscard(actions1) {
+          case RaftAction.ReadContinuation(eff) => eff
+          case _                                => ZIO.unit
+        }
+        finalReads <- withFirstResponse.resolveReadsForHeartbeat(queue, member2, t3, "state", 3)
+        actions2 <- queue.takeAll
+        _ <- ZIO.foreachDiscard(actions2) {
+          case RaftAction.ReadContinuation(eff) => eff
+          case _                                => ZIO.unit
+        }
 
         // Check that some promises were completed (with timeout)
         result1 <-

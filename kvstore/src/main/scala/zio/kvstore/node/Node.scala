@@ -8,12 +8,12 @@ import zio.kvstore.protocol.{KVClientRequest, KVQuery}
 import zio.kvstore.protocol.KVClientResponse.given
 import zio.raft.Raft
 import zio.raft.protocol.*
-import zio.raft.sessionstatemachine.{SessionCommand, SessionStateMachine, RequestError}
+import zio.raft.sessionstatemachine.{SessionCommand, SessionStateMachine}
 import zio.raft.sessionstatemachine.Codecs.given
 import zio.kvstore.KVServer.KVServerAction
 import java.time.Instant
 import zio.kvstore.given
-import zio.kvstore.Codecs.given scodec.Codec[zio.kvstore.KVCommand]
+import zio.kvstore.Codecs.given
 import zio.kvstore.node.Node.NodeAction
 import zio.kvstore.node.Node.NodeAction.*
 import zio.raft.stores.LmdbStable
@@ -21,16 +21,13 @@ import zio.raft.stores.segmentedlog.SegmentedLog
 import zio.raft.stores.FileSnapshotStore
 import zio.raft.zmq.ZmqRpc
 import zio.raft.NotALeaderError
-import zio.raft.sessionstatemachine.ServerRequestEnvelope
+import zio.raft.sessionstatemachine.ContinuationBuilder
 
 /** Node wiring KVServer, Raft core, and KV state machine. */
 final case class Node(
   kvServer: KVServer,
   raft: zio.raft.Raft[
-    zio.raft.HMap[Tuple.Concat[
-      zio.raft.sessionstatemachine.SessionSchema[KVResponse, KVServerRequest, Nothing],
-      KVSchema
-    ]],
+    zio.raft.HMap[CombinedSchema],
     SessionCommand[KVCommand, KVServerRequest, Nothing]
   ]
 ):
@@ -51,24 +48,19 @@ final case class Node(
           now <- Clock.instant
           cmd = SessionCommand.CreateSession[KVServerRequest, Nothing](now, sessionId, capabilities)
 
-          cont = (r: Either[
-            NotALeaderError,
-            (List[ServerRequestEnvelope[KVServerRequest]], Either[RequestError[Nothing], Unit])
-          ]) =>
-            r match
-              case Right((envelopes, Right(_))) =>
-                for
-                  // It's important to confirm session creation before sending server requests
-                  // As the session might be one of the recipients of the server requests
-                  _ <- kvServer.confirmSessionCreation(sessionId)
-                  _ <- dispatchServerRequests(now, envelopes)
-                yield ()
-              case Right((envelopes, Left(error))) =>
-                for
-                  _ <- kvServer.rejectSession(sessionId, RejectionReason.InvalidCapabilities)
-                  _ <- dispatchServerRequests(now, envelopes)
-                yield ()
-              case Left(_) => ZIO.unit
+          cont = ContinuationBuilder.onSuccess[KVServerRequest, Unit]((envelopes, _) =>
+            for
+              // It's important to confirm session creation before sending server requests
+              // As the session might be one of the recipients of the server requests
+              _ <- kvServer.confirmSessionCreation(sessionId)
+              _ <- dispatchServerRequests(now, envelopes)
+            yield ()
+          ).onFailure((envelopes, error) =>
+            for
+              _ <- kvServer.rejectSession(sessionId, RejectionReason.InvalidCapabilities)
+              _ <- dispatchServerRequests(now, envelopes)
+            yield ()
+          ).ignoreNotALeader.make
 
           _ <- raft.sendCommand(cmd, cont)
         yield ()
@@ -98,12 +90,11 @@ final case class Node(
       case NodeAction.FromServer(KVServerAction.Query(sessionId, correlationId, query)) =>
         query match
           case KVQuery.Get(k) =>
-            raft.readState.either.flatMap {
-              case Right(state) =>
-                val value = state.get["kv"](KVKey(k))
-                kvServer.replyQuery(sessionId, correlationId, value)
-              case Left(_) => ZIO.unit
-            }
+            val cont = ContinuationBuilder.query[CombinedSchema](state =>
+              val value = state.get["kv"](KVKey(k))
+              kvServer.replyQuery(sessionId, correlationId, value)
+            ).ignoreNotALeader.make
+            raft.readState(cont)
           case _ => ZIO.unit
 
       case NodeAction.FromServer(KVServerAction.ServerRequestAck(sessionId, requestId)) =>
@@ -117,10 +108,10 @@ final case class Node(
         for
           now <- Clock.instant
           cmd = SessionCommand.SessionExpired[KVServerRequest](now, sessionId)
-          cont = (r: Either[NotALeaderError, List[ServerRequestEnvelope[KVServerRequest]]]) =>
-            r match
-              case Right(envelopes) => dispatchServerRequests(now, envelopes)
-              case Left(_)          => ZIO.unit
+          cont = ContinuationBuilder.withoutResult[KVServerRequest](envelopes =>
+            dispatchServerRequests(now, envelopes)
+          ).ignoreNotALeader.make
+
           _ <- raft.sendCommand(cmd, cont)
         yield ()
 
@@ -137,10 +128,9 @@ final case class Node(
           _ <-
             if hasPending then
               val cmd = SessionCommand.GetRequestsForRetry[KVServerRequest](now, lastSentBefore)
-              val cont = (r: Either[NotALeaderError, List[ServerRequestEnvelope[KVServerRequest]]]) =>
-                r match
-                  case Right(envelopes) => dispatchServerRequests(now, envelopes)
-                  case Left(_)          => ZIO.unit
+              val cont = ContinuationBuilder.withoutResult[KVServerRequest](envelopes =>
+                dispatchServerRequests(now, envelopes)
+              ).ignoreNotALeader.make
               raft.sendCommand(cmd, cont)
             else ZIO.unit
         yield ()
@@ -149,25 +139,26 @@ final case class Node(
       case NodeAction.FromRaft(action) =>
         action match
           case zio.raft.RaftAction.SteppedUp =>
+            val cont = ContinuationBuilder.query[CombinedSchema](state =>
+              val sessions =
+                SessionStateMachine.getSessions[KVResponse, KVServerRequest, Nothing, KVSchema](state).map {
+                  case (sessionId: SessionId, metadata) =>
+                    (
+                      sessionId,
+                      zio.raft.sessionstatemachine.SessionMetadata(metadata.capabilities, metadata.createdAt)
+                    )
+                }
+              kvServer.stepUp(sessions)
+            ).ignoreNotALeader.make
             ZIO.logInfo("Node stepped up") *>
-              raft.readState.either.flatMap {
-                case Right(state) =>
-                  val sessions =
-                    SessionStateMachine.getSessions[KVResponse, KVServerRequest, Nothing, KVSchema](state).map {
-                      case (sessionId: SessionId, metadata) =>
-                        (
-                          sessionId,
-                          zio.raft.sessionstatemachine.SessionMetadata(metadata.capabilities, metadata.createdAt)
-                        )
-                    }
-                  kvServer.stepUp(sessions)
-                case Left(_) => ZIO.unit
-              }
+              raft.readState(cont)
           case zio.raft.RaftAction.SteppedDown(leaderId) =>
             kvServer.stepDown(leaderId)
           case zio.raft.RaftAction.LeaderChanged(leaderId) =>
             kvServer.leaderChanged(leaderId)
           case zio.raft.RaftAction.CommandContinuation(continuation) =>
+            continuation
+          case zio.raft.RaftAction.ReadContinuation(continuation) =>
             continuation
 
       case NodeAction.FromServer(_) => ZIO.unit

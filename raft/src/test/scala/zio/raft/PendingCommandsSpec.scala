@@ -33,7 +33,7 @@ object PendingCommandsSpec extends ZIOSpecDefault:
         queue <- Queue.unbounded[RaftAction]
         continuation: CommandContinuation[String] = (r: Either[NotALeaderError, String]) => ref.set(Some(r))
         initial = PendingCommands.empty.withAdded(Index(1), continuation)
-        completed <- initial.withCompleted(Index(1), "test-response", queue)
+        completed <- initial.withCompleted(queue, Index(1), "test-response")
         // run the produced continuation effect
         action <- queue.take
         _ <- action match
@@ -51,7 +51,7 @@ object PendingCommandsSpec extends ZIOSpecDefault:
         queue <- Queue.unbounded[RaftAction]
         continuation: CommandContinuation[String] = (_: Either[NotALeaderError, String]) => ZIO.unit
         initial = PendingCommands.empty.withAdded(Index(1), continuation)
-        completed <- initial.withCompleted(Index(2), "test-response", queue)
+        completed <- initial.withCompleted(queue, Index(2), "test-response")
         maybeAction <- queue.poll
       yield assertTrue(
         completed.map.size == 1,
@@ -63,7 +63,7 @@ object PendingCommandsSpec extends ZIOSpecDefault:
     test("stepDown - empty commands has no effect") {
       for
         queue <- Queue.unbounded[RaftAction]
-        _ <- PendingCommands.empty.stepDown(Some(MemberId("leader1")), queue)
+        _ <- PendingCommands.empty.stepDown(queue, Some(MemberId("leader1")))
         isEmpty <- queue.isEmpty
       yield assertTrue(isEmpty) // No actions enqueued
     },
@@ -78,7 +78,7 @@ object PendingCommandsSpec extends ZIOSpecDefault:
         pendingCommands = PendingCommands.empty
           .withAdded(Index(1), c1)
           .withAdded(Index(2), c2)
-        _ <- pendingCommands.stepDown(leaderId, queue)
+        _ <- pendingCommands.stepDown(queue, leaderId)
         // two actions expected, run both
         a1 <- queue.take
         _ <- a1 match

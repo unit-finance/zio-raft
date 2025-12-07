@@ -39,8 +39,10 @@ object KVStoreQueryGetSpec extends ZIOSpec[TestEnvironment & ZContext]:
   ): Task[A] =
     receiveServerMessage(socket).timeout(timeout).flatMap {
       case Some(msg: A) => ZIO.succeed(msg)
-      case Some(other)  => ZIO.fail(new RuntimeException(s"Expected ${ct.runtimeClass.getSimpleName}, got ${other.getClass.getSimpleName}"))
-      case None         => ZIO.fail(new RuntimeException(s"Timeout waiting for ${ct.runtimeClass.getSimpleName}"))
+      case Some(other) => ZIO.fail(
+          new RuntimeException(s"Expected ${ct.runtimeClass.getSimpleName}, got ${other.getClass.getSimpleName}")
+        )
+      case None => ZIO.fail(new RuntimeException(s"Timeout waiting for ${ct.runtimeClass.getSimpleName}"))
     }
 
   private val serverPort = 26555
@@ -55,7 +57,7 @@ object KVStoreQueryGetSpec extends ZIOSpec[TestEnvironment & ZContext]:
         for
           logDir <- ZIO.attempt(Files.createTempDirectory("kv-log-").toFile).map(_.getAbsolutePath)
           snapDir <- ZIO.attempt(Files.createTempDirectory("kv-snap-").toFile).map(_.getAbsolutePath)
-          lmdbDir <- ZIO.attempt(Files.createTempDirectory("kv-lmdb-").toFile).map(_.getAbsolutePath)
+          lmdbDir <- ZIO.attempt(Files.createTempFile("kv-lmdb-", ".lmdb").toFile).map(_.getAbsolutePath)
 
           result <- (for
             // Start node (single-node bootstrap)
@@ -82,7 +84,9 @@ object KVStoreQueryGetSpec extends ZIOSpec[TestEnvironment & ZContext]:
 
             // Send ClientRequest(Set)
             rid = RequestId.fromLong(1L)
-            payloadSet <- ZIO.fromEither(implicitly[Codec[KVClientRequest]].encode(KVClientRequest.Set("foo", "bar")).toEither).map(_.bytes)
+            payloadSet <- ZIO.fromEither(
+              implicitly[Codec[KVClientRequest]].encode(KVClientRequest.Set("foo", "bar")).toEither
+            ).map(_.bytes)
             _ <- sendClientMessage(client, ClientRequest(rid, rid, payloadSet, java.time.Instant.now()))
             _ <- waitForMessage[ClientResponse](client)
 
@@ -93,14 +97,17 @@ object KVStoreQueryGetSpec extends ZIOSpec[TestEnvironment & ZContext]:
             qres <- waitForMessage[QueryResponse](client)
 
             // Decode Query result Option[String]
-            getResult <- ZIO.fromEither(implicitly[Codec[Option[String]]].decode(qres.result.bits).toEither.map(_.value))
+            getResult <-
+              ZIO.fromEither(implicitly[Codec[Option[String]]].decode(qres.result.bits).toEither.map(_.value))
           yield assertTrue(getResult.contains("bar"))).provideSomeLayer(
-            LmdbEnv.builder.withMaxDbs(3).layer(new java.io.File(lmdbDir))
+            LmdbEnv.builder.withFlags(
+              org.lmdbjava.EnvFlags.MDB_NOSUBDIR,
+              org.lmdbjava.EnvFlags.MDB_NOSYNC,
+              org.lmdbjava.EnvFlags.MDB_NOLOCK
+            ).withMaxDbs(3).layer(new java.io.File(lmdbDir))
           )
         yield result
       }
     }
   } @@ TestAspect.sequential @@ TestAspect.withLiveClock
 end KVStoreQueryGetSpec
-
-

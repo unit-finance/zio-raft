@@ -2,6 +2,7 @@ package zio
 
 import zio.raft.{Command, HMap}
 import zio.prelude.Newtype
+import zio.kvstore.protocol.KVServerRequest
 
 package object kvstore:
 
@@ -30,6 +31,23 @@ package object kvstore:
 
   type KVSchema =
     ("kv", KVKey, String) *:
+      ("subsByKey", KVKey, Set[zio.raft.protocol.SessionId]) *:
+      ("subsBySession", zio.raft.protocol.SessionId, Set[KVKey]) *:
+      EmptyTuple
+
+  // Explicitly expand CombinedSchema to help Scala 3 reduce match types for HMap.KeyAt/ValueAt
+  // Tuple.Concat can be used in later scala versions (>= 3.5)
+  type CombinedSchema =
+    ("metadata", zio.raft.protocol.SessionId, zio.raft.sessionstatemachine.SessionMetadata) *:
+      ("cache", (zio.raft.protocol.SessionId, zio.raft.protocol.RequestId), Either[Nothing, KVResponse]) *:
+      (
+        "serverRequests",
+        (zio.raft.protocol.SessionId, zio.raft.protocol.RequestId),
+        zio.raft.sessionstatemachine.PendingServerRequest[KVServerRequest]
+      ) *:
+      ("lastServerRequestId", zio.raft.protocol.SessionId, zio.raft.protocol.RequestId) *:
+      ("highestLowestPendingRequestIdSeen", zio.raft.protocol.SessionId, zio.raft.protocol.RequestId) *:
+      ("kv", KVKey, String) *:
       ("subsByKey", KVKey, Set[zio.raft.protocol.SessionId]) *:
       ("subsBySession", zio.raft.protocol.SessionId, Set[KVKey]) *:
       EmptyTuple

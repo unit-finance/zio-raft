@@ -3,7 +3,7 @@ package zio.raft
 import zio.{UIO, ZIO}
 
 case class PendingCommands(map: Map[Index, Any]):
-  def withCompleted[R](index: Index, response: R, queue: zio.Queue[RaftAction]): UIO[PendingCommands] =
+  def withCompleted[R](queue: zio.Queue[RaftAction], index: Index, response: R): UIO[PendingCommands] =
     ZIO
       .foreach(map.get(index).asInstanceOf[Option[CommandContinuation[R]]]) { continuation =>
         queue.offer(RaftAction.CommandContinuation(continuation(Right(response))))
@@ -13,7 +13,7 @@ case class PendingCommands(map: Map[Index, Any]):
   def withAdded[R](index: Index, continuation: CommandContinuation[R]): PendingCommands =
     PendingCommands(map + (index -> continuation))
 
-  def stepDown(leaderId: Option[MemberId], queue: zio.Queue[RaftAction]): UIO[Unit] =
+  def stepDown(queue: zio.Queue[RaftAction], leaderId: Option[MemberId]): UIO[Unit] =
     ZIO
       .foreach(map.values.map(_.asInstanceOf[CommandContinuation[Any]])) { continuation =>
         queue.offer(RaftAction.CommandContinuation(continuation(Left(NotALeaderError(leaderId)))))

@@ -75,6 +75,7 @@ case class NotALeaderError(leaderId: Option[MemberId])
   */
 type CommandContinuation[A] = Either[NotALeaderError, A] => ZIO[Any, Nothing, Unit]
 
+type ReadContinuation[S] = Either[NotALeaderError, S] => ZIO[Any, Nothing, Unit]
 sealed trait LogEntry[+A <: Command]:
   val term: Term
   val index: Index
@@ -166,3 +167,8 @@ object RaftAction:
     *     context/stream.
     */
   case class CommandContinuation(continuation: ZIO[Any, Nothing, Unit]) extends RaftAction
+
+  /** An effect that, when run by the embedding application, will invoke the user's read continuation with either a
+    * state or `NotALeaderError`.
+    */
+  case class ReadContinuation(continuation: ZIO[Any, Nothing, Unit]) extends RaftAction

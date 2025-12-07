@@ -57,13 +57,18 @@ object Codecs:
       p => (p.payload, p.lastSentAt.toEpochMilli)
     )
 
-  /** Codec for SessionCommand, parameterized by UC (user command) and SR (server request payload). Requires codecs for
-    * UC and SR in scope.
+  /** Codec for SessionCommand, parameterized by UC (user command), SR (server request payload), and IC (internal
+    * command). Requires codecs for UC and SR in scope. IC codec is required only when IC != Nothing.
     */
-  given sessionCommandCodec[UC <: zio.raft.Command, SR, E](using
+  /** Base codec factory for SessionCommand that handles all command types except InternalCommand.
+    *
+    * This creates the shared codec structure for typecases 0-4 (ClientRequest, ServerRequestAck, CreateSession,
+    * SessionExpired, GetRequestsForRetry).
+    */
+  private def baseSessionCommandCodec[UC <: zio.raft.Command, SR, E, IC <: zio.raft.Command](
     ucCodec: Codec[UC],
     srCodec: Codec[SR]
-  ): Codec[SessionCommand[UC, SR, E]] =
+  ): scodec.codecs.DiscriminatorCodec[SessionCommand[UC, SR, E, IC], Int] =
     val clientRequestV0: Codec[SessionCommand.ClientRequest[UC, SR, E]] =
       (instantCodec :: sessionIdCodec :: requestIdCodec :: requestIdCodec :: ucCodec)
         .as[SessionCommand.ClientRequest[UC, SR, E]]
@@ -105,12 +110,44 @@ object Codecs:
         cmd => (0, cmd)
       )
 
-    discriminated[SessionCommand[UC, SR, E]]
+    discriminated[SessionCommand[UC, SR, E, IC]]
       .by(uint8)
       .typecase(0, clientRequestCodec)
       .typecase(1, serverRequestAckCodec)
       .typecase(2, createSessionCodec)
       .typecase(3, sessionExpiredCodec)
       .typecase(4, getRequestsForRetryCodec)
-  end sessionCommandCodec
+  end baseSessionCommandCodec
+
+  /** Codec for SessionCommand when IC = Nothing (no internal commands).
+    *
+    * Uses only the base codec structure without InternalCommand typecase.
+    */
+  given sessionCommandCodecWithoutIC[UC <: zio.raft.Command, SR, E](using
+    ucCodec: Codec[UC],
+    srCodec: Codec[SR]
+  ): Codec[SessionCommand[UC, SR, E, Nothing]] =
+    baseSessionCommandCodec[UC, SR, E, Nothing](ucCodec, srCodec)
+  end sessionCommandCodecWithoutIC
+
+  /** Codec for SessionCommand when IC != Nothing (with internal commands).
+    *
+    * Extends the base codec structure with InternalCommand typecase (typecase 5).
+    */
+  given sessionCommandCodecWithIC[UC <: zio.raft.Command, SR, E, IC <: zio.raft.Command](using
+    ucCodec: Codec[UC],
+    srCodec: Codec[SR],
+    icCodec: Codec[IC]
+  ): Codec[SessionCommand[UC, SR, E, IC]] =
+    val internalCommandV0: Codec[SessionCommand.InternalCommand[IC, SR]] =
+      (instantCodec :: icCodec).as[SessionCommand.InternalCommand[IC, SR]]
+    val internalCommandCodec: Codec[SessionCommand.InternalCommand[IC, SR]] =
+      (uint8 :: internalCommandV0).xmap(
+        { case (_, cmd) => cmd },
+        cmd => (0, cmd)
+      )
+
+    // Extend base codec with InternalCommand typecase
+    baseSessionCommandCodec[UC, SR, E, IC](ucCodec, srCodec)
+      .typecase(5, internalCommandCodec)
 end Codecs

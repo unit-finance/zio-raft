@@ -33,7 +33,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
   given scodec.Codec[PendingServerRequest[?]] =
     summon[scodec.Codec[PendingServerRequest[String]]].asInstanceOf[scodec.Codec[PendingServerRequest[?]]]
 
-  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema]
+  class TestStateMachine extends SessionStateMachine[TestCommand, TestResponse, String, Nothing, TestSchema, Nothing]
       with ScodecSerialization[TestResponse, String, Nothing, TestSchema]:
 
     val codecs = summon[HMap.TypeclassMap[CombinedSchema, scodec.Codec]]
@@ -59,6 +59,12 @@ object CumulativeAckSpec extends ZIOSpecDefault:
     ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Unit] =
       StateWriter.succeed(())
 
+    protected def applyInternalCommand(
+      createdAt: Instant,
+      command: Nothing
+    ): StateWriter[HMap[CombinedSchema], ServerRequestForSession[String], Nothing, Nothing] =
+      throw new UnsupportedOperationException("IC = Nothing, internal commands disabled")
+
     override def shouldTakeSnapshot(lastSnapshotIndex: Index, lastSnapshotSize: Long, commitIndex: Index): Boolean =
       false
 
@@ -71,7 +77,7 @@ object CumulativeAckSpec extends ZIOSpecDefault:
 
       val createCmd =
         SessionCommand.CreateSession[String, Nothing](now, sessionId, Map.empty)
-          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing, Nothing]]
       val (state1, _) = sm.apply(createCmd).run(state0)
 
       // Seed pending server requests manually (IDs 1..5)
@@ -92,9 +98,9 @@ object CumulativeAckSpec extends ZIOSpecDefault:
       val state2 = s2.asInstanceOf[HMap[sm.Schema]]
 
       // Acknowledge up to RequestId(1) should remove first batch
-      val ack1: SessionCommand[TestCommand, String, Nothing] =
+      val ack1: SessionCommand[TestCommand, String, Nothing, Nothing] =
         SessionCommand.ServerRequestAck[String](now, sessionId, RequestId(1))
-          .asInstanceOf[SessionCommand[TestCommand, String, Nothing]]
+          .asInstanceOf[SessionCommand[TestCommand, String, Nothing, Nothing]]
       val (state3, _) = sm.apply(ack1).run(state2)
 
       val pendingAfterAck1 = state3.asInstanceOf[HMap[CombinedSchema]].iterator["serverRequests"].toList

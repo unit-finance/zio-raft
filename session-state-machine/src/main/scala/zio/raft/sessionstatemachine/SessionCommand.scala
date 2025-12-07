@@ -13,8 +13,21 @@ import java.time.Instant
   *   The user command type (extends Command with dependent Response type)
   * @tparam SR
   *   Server-initiated request payload type
+  * @tparam IC
+  *   Internal command type (extends Command with dependent Response type). Defaults to Nothing for opt-in internal
+  *   commands.
+  *
+  * @note
+  *   '''Codec Selection:''' When using codecs from `Codecs.scala`, the appropriate codec is automatically selected:
+  *   - When `IC = Nothing` (no internal commands): Use `sessionCommandCodecWithoutIC` (automatically selected via given
+  *     resolution)
+  *   - When `IC` is a concrete type: Use `sessionCommandCodecWithIC` (automatically selected via given resolution,
+  *     requires `Codec[IC]` in scope)
+  * @note
+  *   You typically don't need to explicitly select the codec - Scala's given resolution will choose the correct one
+  *   based on the IC type parameter.
   */
-sealed trait SessionCommand[+UC <: Command, SR, +E] extends Command
+sealed trait SessionCommand[+UC <: Command, SR, +E, +IC <: Command] extends Command
 
 object SessionCommand:
 
@@ -53,7 +66,7 @@ object SessionCommand:
     requestId: RequestId,
     lowestPendingRequestId: RequestId,
     command: UC
-  ) extends SessionCommand[UC, SR, E]:
+  ) extends SessionCommand[UC, SR, E, Nothing]:
     // Response type can be an error or the user command's response with server request envelopes
     type Response = (List[ServerRequestEnvelope[SR]], Either[RequestError[E], command.Response])
 
@@ -71,7 +84,7 @@ object SessionCommand:
     createdAt: Instant,
     sessionId: SessionId,
     requestId: RequestId
-  ) extends SessionCommand[Nothing, SR, Nothing]:
+  ) extends SessionCommand[Nothing, SR, Nothing, Nothing]:
     type Response = Unit
 
   /** Create a new session.
@@ -89,7 +102,7 @@ object SessionCommand:
     createdAt: Instant,
     sessionId: SessionId,
     capabilities: Map[String, String]
-  ) extends SessionCommand[Nothing, SR, E]:
+  ) extends SessionCommand[Nothing, SR, E, Nothing]:
     type Response = (List[ServerRequestEnvelope[SR]], Either[RequestError[E], Unit])
 
   /** Notification that a session has expired.
@@ -104,7 +117,7 @@ object SessionCommand:
   case class SessionExpired[SR](
     createdAt: Instant,
     sessionId: SessionId
-  ) extends SessionCommand[Nothing, SR, Nothing]:
+  ) extends SessionCommand[Nothing, SR, Nothing, Nothing]:
     type Response = List[ServerRequestEnvelope[SR]] // server request envelopes
 
   /** Command to atomically retrieve requests needing retry and update lastSentAt.
@@ -122,6 +135,42 @@ object SessionCommand:
   case class GetRequestsForRetry[SR](
     createdAt: Instant,
     lastSentBefore: Instant
-  ) extends SessionCommand[Nothing, SR, Nothing]:
+  ) extends SessionCommand[Nothing, SR, Nothing, Nothing]:
     type Response = List[ServerRequestEnvelope[SR]]
+
+  /** Command for internal/background processes that modify state.
+    *
+    * Used by system processes (timeouts, cleanup, retries) that need to modify state outside of client session context.
+    * Unlike ClientRequest, these commands:
+    *   - Do NOT go through session management (no cache, no idempotency checking)
+    *   - Do NOT require sessionId/requestId parameters
+    *   - Are executed directly by calling applyInternalCommand on the state machine
+    *   - Can emit server requests to notify affected sessions
+    *   - Are deterministic but not idempotent (re-execution may have different effects)
+    *
+    * Example: A background process that scans all async tasks, expires timed-out ones, and notifies owning sessions.
+    *
+    * WARNING: Unlike ClientRequest, internal commands do NOT have idempotency protection. If the leader fails
+    * mid-execution and the command is replayed after leadership change, it will execute again. Design internal commands
+    * to be safe under re-execution (e.g., use timestamps to determine eligibility).
+    *
+    * @param createdAt
+    *   Timestamp when the command was created (use for time-based logic)
+    * @param command
+    *   The internal command to execute
+    * @tparam IC
+    *   Internal command type
+    * @tparam SR
+    *   Server request type
+    *
+    * @note
+    *   Response type is (List[ServerRequestEnvelope[SR]], command.Response)
+    * @note
+    *   Similar to GetRequestsForRetry - operates at system level, not session level
+    */
+  case class InternalCommand[IC <: Command, SR](
+    createdAt: Instant,
+    command: IC
+  ) extends SessionCommand[Nothing, SR, Nothing, IC]:
+    type Response = (List[ServerRequestEnvelope[SR]], command.Response)
 end SessionCommand

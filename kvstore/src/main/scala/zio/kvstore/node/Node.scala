@@ -22,13 +22,14 @@ import zio.raft.stores.FileSnapshotStore
 import zio.raft.zmq.ZmqRpc
 import zio.raft.NotALeaderError
 import zio.raft.sessionstatemachine.ContinuationBuilder
+import zio.raft.sessionstatemachine.ServerRequestEnvelope
 
 /** Node wiring KVServer, Raft core, and KV state machine. */
 final case class Node(
   kvServer: KVServer,
   raft: zio.raft.Raft[
     zio.raft.HMap[CombinedSchema],
-    SessionCommand[KVCommand, KVServerRequest, Nothing]
+    SessionCommand[KVCommand, KVServerRequest, Nothing, KVInternalCommand]
   ]
 ):
 
@@ -135,6 +136,30 @@ final case class Node(
             else ZIO.unit
         yield ()
 
+      // Cleanup unwatched keys every 5 minutes
+      case NodeAction.CleanupTick(now) =>
+        for
+          // Use dirty read to check if cleanup is needed before sending expensive command
+          state <- raft.readStateDirty
+          hasUnwatchedKeys = checkForUnwatchedKeys(state)
+          _ <- if hasUnwatchedKeys then
+            val cmd = SessionCommand.InternalCommand[KVInternalCommand, KVServerRequest](
+              now,
+              KVInternalCommand.PurgeUnwatchedKeys
+            ).asInstanceOf[SessionCommand[KVCommand, KVServerRequest, Nothing, KVInternalCommand]]
+            val cont = (r: Either[NotALeaderError, cmd.Response]) =>
+              r match
+                case Right(response) =>
+                  val (envelopes, result) =
+                    response.asInstanceOf[(List[ServerRequestEnvelope[KVServerRequest]], KVResponse.PurgeResult)]
+                  ZIO.logInfo(s"Purged ${result.keysRemoved} unwatched keys") *>
+                    dispatchServerRequests(now, envelopes)
+                case Left(_) =>
+                  ZIO.unit
+            raft.sendCommand(cmd, cont)
+          else ZIO.unit
+        yield ()
+
       // State notifications mapping to server leadership signals
       case NodeAction.FromRaft(action) =>
         action match
@@ -163,12 +188,25 @@ final case class Node(
 
       case NodeAction.FromServer(_) => ZIO.unit
 
+  private def checkForUnwatchedKeys(
+    state: zio.raft.HMap[Tuple.Concat[
+      zio.raft.sessionstatemachine.SessionSchema[KVResponse, KVServerRequest, Nothing],
+      KVSchema
+    ]]
+  ): Boolean =
+    val allKeys = state.iterator["kv"].map { case (key, _) => key }.toSet
+    val watchedKeys = state.iterator["subsByKey"].collect {
+      case (key, subs) if subs.nonEmpty => key
+    }.toSet
+    (allKeys -- watchedKeys).nonEmpty
+
   // Unified stream construction
   private val unifiedStream: ZStream[Any, Nothing, NodeAction] =
     ZStream.mergeAllUnbounded(16)(
       kvServer.stream.map(NodeAction.FromServer.apply),
       // TODO: filter this if we are not the leader
       ZStream.tick(10.seconds).mapZIO(_ => Clock.instant.map(NodeAction.RetryTick.apply)),
+      ZStream.tick(5.minutes).mapZIO(_ => Clock.instant.map(NodeAction.CleanupTick.apply)),
       raft.raftActions.map(NodeAction.FromRaft.apply)
     )
 
@@ -235,9 +273,11 @@ object Node:
       stable <- LmdbStable.make.debug("LmdbStable.make")
 
       logStore <-
-        SegmentedLog.make[SessionCommand[KVCommand, KVServerRequest, Nothing]](logDirectory).debug("SegmentedLog.make")
+        SegmentedLog.make[SessionCommand[KVCommand, KVServerRequest, Nothing, KVInternalCommand]](logDirectory).debug(
+          "SegmentedLog.make"
+        )
       snapshotStore <- FileSnapshotStore.make(zio.nio.file.Path(snapshotDirectory)).debug("FileSnapshotStore.make")
-      rpc <- ZmqRpc.make[SessionCommand[KVCommand, KVServerRequest, Nothing]](
+      rpc <- ZmqRpc.make[SessionCommand[KVCommand, KVServerRequest, Nothing, KVInternalCommand]](
         nodeAddress,
         peers
       ).debug("ZmqRpc.make")
@@ -261,4 +301,5 @@ object Node:
   object NodeAction:
     case class FromServer(action: KVServerAction) extends NodeAction
     case class RetryTick(now: Instant) extends NodeAction
+    case class CleanupTick(now: Instant) extends NodeAction
     case class FromRaft(action: zio.raft.RaftAction) extends NodeAction

@@ -106,6 +106,5 @@ object SessionLifecycleSpec extends ZIOSpecDefault:
 
       assertTrue(noMetadata && noCache && noServerRequests && noLastId)
     }
-    // InternalCommand behavioral tests demonstrated in KVStore module
   )
 end SessionLifecycleSpec

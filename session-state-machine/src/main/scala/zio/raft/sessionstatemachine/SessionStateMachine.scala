@@ -49,7 +49,8 @@ import java.time.Instant
   *   User-defined schema (tuple of (Prefix, KeyType, ValueType) triples)
   * @tparam IC
   *   Internal command type (extends Command with dependent Response type). Set to Nothing to disable internal commands.
-  *   When IC = Nothing, internal commands cannot be used and applyInternalCommand has a default stub implementation.
+  *   When IC = Nothing, internal commands cannot be used and implementations must provide a stub that throws
+  *   UnsupportedOperationException.
   *
   * ## State Schema
   *
@@ -232,7 +233,8 @@ trait SessionStateMachine[UC <: Command, R, SR, E, UserSchema <: Tuple, IC <: Co
     * @note
     *   Receives complete HMap[Schema] (both session state and user state)
     * @note
-    *   When IC = Nothing, implementations must throw UnsupportedOperationException as this method should never be called
+    *   When IC = Nothing, implementations must throw UnsupportedOperationException as this method should never be
+    *   called
     *
     * @example
     *   {{{

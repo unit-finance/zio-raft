@@ -16,6 +16,16 @@ import java.time.Instant
   * @tparam IC
   *   Internal command type (extends Command with dependent Response type). Defaults to Nothing for opt-in internal
   *   commands.
+  *
+  * @note
+  *   '''Codec Selection:''' When using codecs from `Codecs.scala`, the appropriate codec is automatically selected:
+  *   - When `IC = Nothing` (no internal commands): Use `sessionCommandCodecWithoutIC` (automatically selected via given
+  *     resolution)
+  *   - When `IC` is a concrete type: Use `sessionCommandCodecWithIC` (automatically selected via given resolution,
+  *     requires `Codec[IC]` in scope)
+  * @note
+  *   You typically don't need to explicitly select the codec - Scala's given resolution will choose the correct one
+  *   based on the IC type parameter.
   */
 sealed trait SessionCommand[+UC <: Command, SR, +E, +IC <: Command] extends Command
 

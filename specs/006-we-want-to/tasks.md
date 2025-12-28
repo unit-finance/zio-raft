@@ -74,21 +74,21 @@
 
 ## Phase 3.2: Core Type Definitions
 
-- [ ] **T006** [P] Implement branded types in `typescript-client/src/types.ts`:
+- [X] **T006** [P] Implement branded types in `typescript-client/src/types.ts`:
   - `SessionId` (string brand) with `fromString()`, `unwrap()`
   - `RequestId` (bigint brand) with `zero`, `fromBigInt()`, `next()`, `unwrap()`
   - `MemberId` (string brand) with `fromString()`, `unwrap()`
   - `Nonce` (bigint brand) with `generate()`, `fromBigInt()`, `unwrap()`
   - `CorrelationId` (string brand) with `generate()`, `fromString()`, `unwrap()`
 
-- [ ] **T007** [P] Define protocol constants in `typescript-client/src/protocol/constants.ts`:
+- [X] **T007** [P] Define protocol constants in `typescript-client/src/protocol/constants.ts`:
   - `PROTOCOL_SIGNATURE`: Buffer `[0x7a, 0x72, 0x61, 0x66, 0x74]` ("zraft")
   - `PROTOCOL_VERSION`: number `1`
   - `ClientMessageType` enum (1-8)
   - `ServerMessageType` enum (1-9)
   - `RejectionReasonCode`, `SessionCloseReasonCode`, `CloseReasonCode`, `RequestErrorReasonCode` enums
 
-- [ ] **T008** Define protocol message types in `typescript-client/src/protocol/messages.ts`:
+- [X] **T008** Define protocol message types in `typescript-client/src/protocol/messages.ts`:
   - Client messages: `CreateSession`, `ContinueSession`, `KeepAlive`, `ClientRequest`, `Query`, `ServerRequestAck`, `CloseSession`, `ConnectionClosed`
   - Server messages: `SessionCreated`, `SessionContinued`, `SessionRejected`, `SessionClosed`, `KeepAliveResponse`, `ClientResponse`, `QueryResponse`, `ServerRequest`, `RequestError`
   - Discriminated unions: `ClientMessage`, `ServerMessage`

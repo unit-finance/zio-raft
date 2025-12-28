@@ -164,22 +164,22 @@
 
 ## Phase 3.5: State Management Structures
 
-- [ ] **T017** [P] Implement RequestId counter in `typescript-client/src/utils/requestIdRef.ts`:
+- [X] **T017** [P] Implement RequestId counter in `typescript-client/src/utils/requestIdRef.ts`:
   - Interface `RequestIdRef` with `current: RequestId` and `next(): RequestId`
   - Factory function `createRequestIdRef(): RequestIdRef` starting at 0n
   - Thread-safe increment (Node.js single-threaded, but document the pattern)
 
-- [ ] **T018** Implement PendingRequests tracker in `typescript-client/src/state/pendingRequests.ts`:
+- [X] **T018** Implement PendingRequests tracker in `typescript-client/src/state/pendingRequests.ts`:
   - Interface `PendingRequestData`: `payload`, `resolve`, `reject`, `createdAt`, `lastSentAt`
   - Class `PendingRequests` with Map<RequestId, PendingRequestData>
   - Methods: `add()`, `complete()`, `contains()`, `lowestPendingRequestIdOr()`, `resendAll()`, `resendExpired()`, `dieAll()`
 
-- [ ] **T019** [P] Implement PendingQueries tracker in `typescript-client/src/state/pendingQueries.ts`:
+- [X] **T019** [P] Implement PendingQueries tracker in `typescript-client/src/state/pendingQueries.ts`:
   - Interface `PendingQueryData`: `payload`, `resolve`, `reject`, `createdAt`, `lastSentAt`
   - Class `PendingQueries` with Map<CorrelationId, PendingQueryData>
   - Methods: `add()`, `complete()`, `contains()`, `resendAll()`, `resendExpired()`, `dieAll()`
 
-- [ ] **T020** [P] Implement ServerRequestTracker in `typescript-client/src/state/serverRequestTracker.ts`:
+- [X] **T020** [P] Implement ServerRequestTracker in `typescript-client/src/state/serverRequestTracker.ts`:
   - Interface `ServerRequestTracker` with `lastAcknowledgedRequestId: RequestId`
   - Type `ServerRequestResult`: `Process | OldRequest | OutOfOrder`
   - Method `shouldProcess(requestId: RequestId): ServerRequestResult`

@@ -126,6 +126,9 @@ As a JavaScript/TypeScript application developer, I want to connect to a ZIO Raf
 - Q: What level of built-in logging/tracing should the client provide? → A: None (application handles all logging)
 - Q: What capabilities should be included in the initial session creation? → A: User-provided, passed through library
 
+### Session 2025-12-28
+- Q: CRITICAL ARCHITECTURAL REQUIREMENT - Should the TypeScript client implementation follow Scala patterns or be idiomatic TypeScript? → A: The TypeScript client must use IDIOMATIC TYPESCRIPT patterns everywhere (not just public API). Wire protocol must match Scala byte-for-byte, but all implementation patterns, state management, error handling, and API design must feel natural to TypeScript/Node.js developers. Use standard patterns: EventEmitter (not ZStream), Promises/async-await (not ZIO effects), classes with private state (not Ref objects), simple OOP where appropriate (not purely functional). The library should feel like using ioredis, pg, or mongodb - professional, clean, idiomatic Node.js/TypeScript.
+
 ---
 
 ## Dependencies & Assumptions
@@ -137,6 +140,7 @@ As a JavaScript/TypeScript application developer, I want to connect to a ZIO Raf
 - The client follows the same reconnection and session expiry semantics as the Scala client: on session expiry, pending requests fail and the client terminates.
 - Each client instance manages a single session; this matches the Scala client architecture.
 - Capabilities are application-defined and passed through the client library (similar to how maitred wraps the Scala client); the TypeScript client does not define specific capability values.
+- **CRITICAL**: While wire protocol compatibility with Scala is mandatory, all implementation patterns must be idiomatic TypeScript/Node.js (see Clarifications 2025-12-28). The library should not be a direct port of Scala patterns.
 - Packaging and distribution will be handled separately from this feature.
 - Example applications are not included in the initial implementation.
 

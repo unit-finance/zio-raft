@@ -6,6 +6,8 @@
 ## Overview
 This document consolidates research findings for implementing a TypeScript client library that communicates with ZIO Raft clusters using the same wire protocol as the Scala client.
 
+**CRITICAL ARCHITECTURAL CONSTRAINT (2025-12-28)**: While wire protocol compatibility is mandatory, ALL implementation patterns must be idiomatic TypeScript/Node.js. This is NOT a Scala-to-TypeScript port. See Section 13 for detailed idiom guidance.
+
 ---
 
 ## 1. Wire Protocol Analysis
@@ -395,6 +397,190 @@ client.on('sessionExpired', () => { ... });
 
 ---
 
+## 13. TypeScript Idiom Guidelines (CRITICAL - Added 2025-12-28)
+
+### Decision: Idiomatic TypeScript Everywhere
+**Rationale**: This library is written by TypeScript engineers for TypeScript engineers. While wire protocol must match Scala exactly, all other patterns should feel natural to Node.js developers.
+
+**Core Principle**: The library should feel like using `ioredis`, `pg`, or `mongodb` - professional, clean, idiomatic Node.js/TypeScript.
+
+### What This Means in Practice
+
+#### 1. State Management - Use Classes with Private Fields
+**DON'T** (Scala ZRef port):
+```typescript
+// Too Scala-ish - mimicking ZRef
+interface RequestIdRef { current: RequestId; next(): RequestId; }
+const ref = createRequestIdRef();
+```
+
+**DO** (Idiomatic TypeScript):
+```typescript
+// Just use private class field
+class RaftClient {
+  private nextRequestId: bigint = 0n;
+  private allocateRequestId(): RequestId {
+    return this.nextRequestId++ as RequestId;
+  }
+}
+```
+
+#### 2. Observable State - Use EventEmitter
+**DON'T** (ZStream port):
+```typescript
+// Too functional - mimicking ZStream
+observable: Observable<StateChange>
+```
+
+**DO** (Idiomatic TypeScript):
+```typescript
+// Standard Node.js pattern
+import { EventEmitter } from 'events';
+class RaftClient extends EventEmitter {
+  // client.on('stateChange', handler)
+}
+```
+
+#### 3. Async Operations - Use Promises/Async-Await
+**DON'T** (ZIO effect port):
+```typescript
+// Too Scala-ish - mimicking ZIO effects
+submitCommand(payload: Buffer): Effect<Buffer, Error>
+```
+
+**DO** (Idiomatic TypeScript):
+```typescript
+// Standard Promise-based API
+async submitCommand(payload: Buffer): Promise<Buffer>
+```
+
+#### 4. Error Handling - Standard TypeScript Patterns
+**DON'T** (Complex ADTs):
+```typescript
+// Overly functional
+type Result<T, E> = Success<T> | Failure<E>
+```
+
+**DO** (Idiomatic TypeScript):
+```typescript
+// Sync errors: throw
+if (!config.clusterMembers.size) {
+  throw new Error('clusterMembers cannot be empty');
+}
+
+// Async errors: Promise rejection
+async connect(): Promise<void> {
+  // Network errors reject the promise naturally
+}
+```
+
+#### 5. Immutability - Strategic, Not Pervasive
+**DON'T** (Everything immutable):
+```typescript
+// Too Scala-ish - immutable updates everywhere
+acknowledge(id: RequestId): ServerRequestTracker {
+  return new ServerRequestTracker(id); // Creates new instance
+}
+```
+
+**DO** (Mutable private state, immutable public interface):
+```typescript
+// Encapsulated mutable state is fine
+class ServerRequestTracker {
+  private lastAcknowledgedRequestId: RequestId;
+  
+  acknowledge(id: RequestId): void {
+    this.lastAcknowledgedRequestId = id; // Mutate private state
+  }
+}
+```
+
+#### 6. Configuration - Plain Objects
+**DON'T** (Builder pattern):
+```typescript
+// Too Java-ish
+const config = new ConfigBuilder()
+  .withMembers(...)
+  .withTimeout(...)
+  .build();
+```
+
+**DO** (Plain object):
+```typescript
+// Simple, clear, TypeScript-native
+const config: ClientConfig = {
+  clusterMembers: new Map([...]),
+  connectionTimeout: 5000,
+};
+const client = new RaftClient(config);
+```
+
+#### 7. Type Safety - Use TypeScript Features
+**Current branded types are GOOD**:
+```typescript
+// This is idiomatic TypeScript
+type SessionId = string & { readonly __brand: 'SessionId' };
+```
+
+But don't overdo the helper objects - keep them minimal:
+```typescript
+// Helper functions are fine, but don't make them complex
+export function isSessionId(value: string): value is SessionId {
+  return value.length > 0;
+}
+```
+
+#### 8. Class Design - Use OOP Where It Makes Sense
+**DON'T** (Everything functional):
+```typescript
+// Too functional
+export function createPendingRequests(): {
+  add: (...) => PendingRequests,
+  complete: (...) => PendingRequests,
+}
+```
+
+**DO** (Classes for stateful entities):
+```typescript
+// Clear, encapsulated, testable
+export class PendingRequests {
+  private requests: Map<RequestId, PendingRequestData> = new Map();
+  
+  add(id: RequestId, data: PendingRequestData): void { ... }
+  complete(id: RequestId, result: Buffer): boolean { ... }
+}
+```
+
+### Implementation Review Checklist
+
+Before implementing any module, ask:
+- [ ] Does this feel like code I'd find in `ioredis` or `pg`?
+- [ ] Would a TypeScript engineer understand this without Scala knowledge?
+- [ ] Am I using standard Node.js patterns (EventEmitter, Promises, Buffer)?
+- [ ] Am I avoiding Scala patterns (ZIO, ZStream, ZRef, immutable everything)?
+- [ ] Is mutable private state used appropriately (not forcing immutability)?
+- [ ] Are classes used where they make sense (not everything functional)?
+- [ ] Is the API simple and predictable (not overly clever)?
+
+### What's Still Fine to Keep Functional
+
+- **Protocol codecs**: Low-level binary encoding can be functional
+- **Pure utility functions**: Functions without side effects
+- **Type definitions**: Discriminated unions, branded types
+- **Immutable message types**: Protocol messages should be readonly
+
+### Bottom Line
+
+**Wire Protocol Layer**: Must match Scala exactly (byte-for-byte)
+**Everything Else**: Must feel like natural TypeScript/Node.js code
+
+**Alternatives Considered**:
+- Direct Scala port: Rejected - produces unnatural TypeScript code
+- Full functional programming: Rejected - not idiomatic for Node.js libraries
+- Mix of patterns: Rejected - confusing and inconsistent
+
+---
+
 ## Summary
 
 All critical technical decisions have been made:
@@ -405,5 +591,6 @@ All critical technical decisions have been made:
 - Event emission for observability (no built-in logging)
 - Request batching for high throughput
 - Comprehensive testing strategy
+- **IDIOMATIC TYPESCRIPT EVERYWHERE** (added 2025-12-28)
 
 **Ready for Phase 1: Design**

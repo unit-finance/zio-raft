@@ -139,14 +139,14 @@
 
 ## Phase 3.4: Transport Layer
 
-- [ ] **T014** [P] Define transport interface in `typescript-client/src/transport/transport.ts`:
+- [X] **T014** [P] Define transport interface in `typescript-client/src/transport/transport.ts`:
   - Interface `ClientTransport` with methods:
     - `connect(address: string): Promise<void>`
     - `disconnect(): Promise<void>`
     - `send(message: ClientMessage): Promise<void>`
     - `receive(): AsyncIterator<ServerMessage>`
 
-- [ ] **T015** Implement ZMQ transport in `typescript-client/src/transport/zmqTransport.ts`:
+- [X] **T015** Implement ZMQ transport in `typescript-client/src/transport/zmqTransport.ts`:
   - Class `ZmqTransport implements ClientTransport`
   - Constructor: create zeromq DEALER socket, configure options (linger=0, heartbeat, high water marks)
   - `connect()`: connect to ZMQ address, store current address
@@ -154,7 +154,7 @@
   - `send()`: encode message, send via socket
   - `receive()`: async generator yielding decoded server messages from socket
 
-- [ ] **T016** [P] Implement mock transport for testing in `typescript-client/src/transport/mockTransport.ts`:
+- [X] **T016** [P] Implement mock transport for testing in `typescript-client/src/transport/mockTransport.ts`:
   - Class `MockTransport implements ClientTransport`
   - In-memory queue for sent messages
   - Manual control for injecting server messages

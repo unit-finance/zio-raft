@@ -38,19 +38,19 @@
 
 ## Phase 3.1: Project Setup
 
-- [ ] **T001** Create typescript-client project structure:
+- [X] **T001** Create typescript-client project structure:
   - Initialize directory: `typescript-client/`
   - Create subdirectories: `src/`, `src/protocol/`, `src/state/`, `src/transport/`, `src/events/`, `src/utils/`, `tests/unit/`, `tests/integration/`
   - Create placeholder files: `src/index.ts`, `README.md`, `.gitignore`
 
-- [ ] **T002** Initialize package.json with dependencies:
+- [X] **T002** Initialize package.json with dependencies:
   - Package name: `@zio-raft/typescript-client`
   - Dependencies: `zeromq` (latest), `@types/node`
   - DevDependencies: `typescript` (5.0+), `@types/jest`, `jest`, `ts-jest`, `prettier`, `eslint`, `@typescript-eslint/parser`, `@typescript-eslint/eslint-plugin`
   - Scripts: `build`, `test`, `lint`, `format`
   - File: `typescript-client/package.json`
 
-- [ ] **T003** [P] Configure TypeScript compiler:
+- [X] **T003** [P] Configure TypeScript compiler:
   - Target: ES2020
   - Module: CommonJS
   - Strict mode: enabled
@@ -59,12 +59,12 @@
   - Output directory: `dist/`
   - File: `typescript-client/tsconfig.json`
 
-- [ ] **T004** [P] Configure ESLint and Prettier:
+- [X] **T004** [P] Configure ESLint and Prettier:
   - ESLint: TypeScript parser, recommended rules, no-explicit-any, strict-boolean-expressions
   - Prettier: single quotes, trailing commas, 120 char width
   - Files: `typescript-client/.eslintrc.js`, `typescript-client/.prettierrc`
 
-- [ ] **T005** [P] Configure Jest for TypeScript:
+- [X] **T005** [P] Configure Jest for TypeScript:
   - Preset: ts-jest
   - Test environment: node
   - Coverage thresholds: 80% branches, statements, functions, lines

@@ -98,7 +98,7 @@
 
 ## Phase 3.3: Binary Protocol Codecs
 
-- [ ] **T009** Implement encoding primitives in `typescript-client/src/protocol/codecs.ts`:
+- [X] **T009** Implement encoding primitives in `typescript-client/src/protocol/codecs.ts`:
   - `encodeString(str: string): Buffer` - uint16 length prefix + UTF-8 bytes
   - `encodePayload(payload: Buffer): Buffer` - int32 length prefix + raw bytes
   - `encodeMap(map: Map<string, string>): Buffer` - uint16 count + entries
@@ -109,7 +109,7 @@
   - `encodeMemberId(id: MemberId): Buffer` - uint16 length + UTF-8
   - `encodeCorrelationId(id: CorrelationId): Buffer` - uint16 length + UTF-8
 
-- [ ] **T010** Implement decoding primitives in `typescript-client/src/protocol/codecs.ts`:
+- [X] **T010** Implement decoding primitives in `typescript-client/src/protocol/codecs.ts`:
   - `decodeString(buffer: Buffer, offset: number): { value: string, newOffset: number }`
   - `decodePayload(buffer: Buffer, offset: number): { value: Buffer, newOffset: number }`
   - `decodeMap(buffer: Buffer, offset: number): { value: Map<string, string>, newOffset: number }`
@@ -120,17 +120,17 @@
   - `decodeMemberId(buffer: Buffer, offset: number): { value: MemberId, newOffset: number }`
   - `decodeCorrelationId(buffer: Buffer, offset: number): { value: CorrelationId, newOffset: number }`
 
-- [ ] **T011** Implement protocol header codec in `typescript-client/src/protocol/codecs.ts`:
+- [X] **T011** Implement protocol header codec in `typescript-client/src/protocol/codecs.ts`:
   - `encodeProtocolHeader(): Buffer` - signature (5 bytes) + version (1 byte)
   - `decodeProtocolHeader(buffer: Buffer, offset: number): number` - verify signature and version, return newOffset
   - Throw error if signature doesn't match or version != 1
 
-- [ ] **T012** Implement client message encoding in `typescript-client/src/protocol/codecs.ts`:
+- [X] **T012** Implement client message encoding in `typescript-client/src/protocol/codecs.ts`:
   - `encodeClientMessage(message: ClientMessage): Buffer`
   - Protocol header + message type discriminator + message-specific fields
   - Handle all 8 client message types per discriminator
 
-- [ ] **T013** Implement server message decoding in `typescript-client/src/protocol/codecs.ts`:
+- [X] **T013** Implement server message decoding in `typescript-client/src/protocol/codecs.ts`:
   - `decodeServerMessage(buffer: Buffer): ServerMessage`
   - Verify protocol header, read discriminator, decode message-specific fields
   - Handle all 9 server message types per discriminator

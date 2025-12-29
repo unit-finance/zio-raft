@@ -169,7 +169,7 @@ Before implementing any task, review research.md Section 13:
 
 **Guidance**: Use Promises/async-await, classes with private state, simple configuration objects. Reference: research.md Section 13.3, 13.6
 
-- [ ] **T028** Implement ClientConfig in `typescript-client/src/config.ts`:
+- [X] **T028** Implement ClientConfig in `typescript-client/src/config.ts`:
   - Interface `ClientConfig` with fields: `clusterMembers`, `capabilities`, `connectionTimeout`, `keepAliveInterval`, `requestTimeout`
   - Default constants
   - `validate(config: ClientConfig): void` - throw if invalid

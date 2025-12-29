@@ -135,7 +135,7 @@ Before implementing any task, review research.md Section 13:
   - Handle timeout: try next member
   - **IDIOMATIC**: State handlers can be classes with private helper methods
 
-- [ ] **T024** Implement ConnectingExistingSession state handler in `typescript-client/src/state/clientState.ts`:
+- [X] **T024** Implement ConnectingExistingSession state handler in `typescript-client/src/state/clientState.ts`:
   - `class ConnectingExistingSessionStateHandler`
   - Handle `SessionContinued`: transition to Connected if nonce matches, resend pending
   - Handle `SessionRejected(SessionExpired)`: fail pending, terminate

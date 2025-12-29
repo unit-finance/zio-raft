@@ -157,7 +157,7 @@ Before implementing any task, review research.md Section 13:
   - Each event interface with readonly fields
   - **IDIOMATIC**: Discriminated unions for events are TypeScript-native
 
-- [ ] **T027** [P] Implement event emitter utilities in `typescript-client/src/events/eventEmitter.ts`:
+- [X] **T027** [P] Implement event emitter utilities in `typescript-client/src/events/eventEmitter.ts`:
   - Type-safe event emitter wrapper using Node.js EventEmitter
   - Type-safe `on()` and `off()` methods for each ClientEvent type
   - `emit()` helper that takes ClientEvent and dispatches to listeners

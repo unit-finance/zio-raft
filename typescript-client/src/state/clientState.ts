@@ -2,24 +2,10 @@
 // Implements idiomatic TypeScript state machine pattern with discriminated unions
 
 import { SessionId, MemberId, Nonce, RequestId } from '../types';
+import { ClientConfig } from '../config';
 import { PendingRequests } from './pendingRequests';
 import { PendingQueries } from './pendingQueries';
 import { ServerRequestTracker } from './serverRequestTracker';
-
-// ============================================================================
-// Client Configuration
-// ============================================================================
-
-/**
- * Client configuration
- */
-export interface ClientConfig {
-  readonly clusterMembers: Map<MemberId, string>; // memberId -> ZMQ address
-  readonly capabilities: Map<string, string>; // user-provided capabilities
-  readonly connectionTimeout: number; // milliseconds
-  readonly keepAliveInterval: number; // milliseconds
-  readonly requestTimeout: number; // milliseconds
-}
 
 // ============================================================================
 // Client State (Discriminated Union)

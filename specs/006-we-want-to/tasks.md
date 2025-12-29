@@ -141,7 +141,7 @@ Before implementing any task, review research.md Section 13:
   - Handle `SessionRejected(SessionExpired)`: fail pending, terminate
   - **IDIOMATIC**: Same pattern as T023
 
-- [ ] **T025** Implement Connected state handler in `typescript-client/src/state/clientState.ts`:
+- [X] **T025** Implement Connected state handler in `typescript-client/src/state/clientState.ts`:
   - `class ConnectedStateHandler`
   - Handle all operations: SubmitCommand, SubmitQuery, ClientResponse, QueryResponse, SessionClosed, etc.
   - **IDIOMATIC**: Complex state logic in class methods, not nested functions

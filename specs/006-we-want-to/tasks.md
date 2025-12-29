@@ -121,7 +121,7 @@ Before implementing any task, review research.md Section 13:
   - Each state interface per data-model.md design
   - **IDIOMATIC**: Use discriminated unions (already TypeScript-native)
 
-- [ ] **T022** Implement Disconnected state handler in `typescript-client/src/state/clientState.ts`:
+- [X] **T022** Implement Disconnected state handler in `typescript-client/src/state/clientState.ts`:
   - `class DisconnectedStateHandler`
   - `handle(event: StreamEvent): Promise<ClientState>`
   - Handle `Connect` action: transition to ConnectingNewSession, send CreateSession

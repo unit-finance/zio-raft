@@ -116,7 +116,7 @@ Before implementing any task, review research.md Section 13:
 
 **Guidance**: Use classes with private state, NOT functional state updates. Reference: research.md Section 13.5
 
-- [ ] **T021** Define state types in `typescript-client/src/state/clientState.ts`:
+- [X] **T021** Define state types in `typescript-client/src/state/clientState.ts`:
   - Type `ClientState` = discriminated union of: `DisconnectedState`, `ConnectingNewSessionState`, `ConnectingExistingSessionState`, `ConnectedState`
   - Each state interface per data-model.md design
   - **IDIOMATIC**: Use discriminated unions (already TypeScript-native)

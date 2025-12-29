@@ -152,7 +152,7 @@ Before implementing any task, review research.md Section 13:
 
 **Guidance**: Use Node.js EventEmitter, NOT custom observables or ZStream patterns. Reference: research.md Section 13.2
 
-- [ ] **T026** [P] Define event types in `typescript-client/src/events/eventTypes.ts`:
+- [X] **T026** [P] Define event types in `typescript-client/src/events/eventTypes.ts`:
   - Type `ClientEvent` = discriminated union of: `StateChangeEvent`, `ConnectionAttemptEvent`, `ConnectionSuccessEvent`, etc.
   - Each event interface with readonly fields
   - **IDIOMATIC**: Discriminated unions for events are TypeScript-native

@@ -128,7 +128,7 @@ Before implementing any task, review research.md Section 13:
   - Handle `SubmitCommand`/`SubmitQuery`: reject with "Not connected"
   - **IDIOMATIC**: Use class with methods, return new state (state transitions are immutable)
 
-- [ ] **T023** Implement ConnectingNewSession state handler in `typescript-client/src/state/clientState.ts`:
+- [X] **T023** Implement ConnectingNewSession state handler in `typescript-client/src/state/clientState.ts`:
   - `class ConnectingNewSessionStateHandler`
   - Handle `SessionCreated`: transition to Connected if nonce matches, resend pending
   - Handle `SessionRejected(NotLeader)`: try leader or next member

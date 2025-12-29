@@ -4,6 +4,7 @@
     "target": "ES2020",
     "module": "commonjs",
     "lib": ["ES2020"],
+    "types": ["node"],
     
     // Output
     "outDir": "./dist",

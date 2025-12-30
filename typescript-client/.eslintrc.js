@@ -1,7 +1,7 @@
 module.exports = {
   parser: '@typescript-eslint/parser',
   parserOptions: {
-    ecmaVersion: 2020,
+    ecmaVersion: 2022,
     sourceType: 'module',
     project: './tsconfig.json',
   },
@@ -13,8 +13,17 @@ module.exports = {
   plugins: ['@typescript-eslint'],
   env: {
     node: true,
-    es2020: true,
-    jest: true,
+    es2022: true,
+  },
+  globals: {
+    vi: 'readonly',
+    describe: 'readonly',
+    it: 'readonly',
+    expect: 'readonly',
+    beforeEach: 'readonly',
+    afterEach: 'readonly',
+    beforeAll: 'readonly',
+    afterAll: 'readonly',
   },
   rules: {
     // Enforce no explicit any

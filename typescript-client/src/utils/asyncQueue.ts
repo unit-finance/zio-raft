@@ -4,17 +4,18 @@
 /**
  * Async queue for handling items asynchronously
  * Used for queuing user actions (connect, disconnect, submit)
+ * Implements AsyncIterable for consumption via for-await-of
  */
-export class AsyncQueue<T> {
+export class AsyncQueue<T> implements AsyncIterable<T> {
   private queue: T[] = [];
-  private waiting: Array<(item: T) => void> = [];
+  private waiting: Array<(item: T | IteratorResult<T>) => void> = [];
   private closed = false;
 
   /**
-   * Put an item into the queue
-   * Resolves immediately if there's a waiting taker, otherwise queues the item
+   * Offer an item to the queue (non-blocking)
+   * Resolves immediately - item is queued
    */
-  async put(item: T): Promise<void> {
+  offer(item: T): void {
     if (this.closed) {
       throw new Error('Queue is closed');
     }
@@ -27,6 +28,14 @@ export class AsyncQueue<T> {
       // No one waiting - queue the item
       this.queue.push(item);
     }
+  }
+
+  /**
+   * Put an item into the queue
+   * Resolves immediately if there's a waiting taker, otherwise queues the item
+   */
+  async put(item: T): Promise<void> {
+    this.offer(item);
   }
 
   /**
@@ -49,8 +58,43 @@ export class AsyncQueue<T> {
 
     // No items available - wait for one
     return new Promise<T>((resolve) => {
-      this.waiting.push(resolve);
+      this.waiting.push((item) => {
+        if (typeof item === 'object' && item !== null && 'done' in item) {
+          // IteratorResult - queue is closed
+          throw new Error('Queue is closed and empty');
+        }
+        resolve(item as T);
+      });
     });
+  }
+
+  /**
+   * Async iterator implementation for for-await-of support
+   */
+  async *[Symbol.asyncIterator](): AsyncIterator<T> {
+    while (true) {
+      if (this.queue.length > 0) {
+        const item = this.queue.shift();
+        if (item !== undefined) {
+          yield item;
+        }
+      } else if (this.closed) {
+        // Queue is closed and empty - stop iteration
+        return;
+      } else {
+        // Wait for next item
+        const result = await new Promise<T | IteratorResult<T>>((resolve) => {
+          this.waiting.push(resolve);
+        });
+        
+        if (typeof result === 'object' && result !== null && 'done' in result && result.done) {
+          // IteratorResult with done=true - stop iteration
+          return;
+        }
+        
+        yield result as T;
+      }
+    }
   }
 
   /**
@@ -78,17 +122,15 @@ export class AsyncQueue<T> {
   /**
    * Close the queue
    * After closing, put() will throw an error
-   * Pending take() calls will be rejected
+   * Pending take() calls will receive done signal
    */
   close(): void {
     this.closed = true;
     
-    // Reject all waiting takers
-    const error = new Error('Queue is closed');
+    // Signal all waiting consumers that queue is closed
+    const doneResult: IteratorResult<T> = { done: true, value: undefined };
     for (const waiter of this.waiting) {
-      // This will cause the Promise to never resolve
-      // In practice, we should reject waiting promises, but the waiter is a resolve function
-      // For now, we'll just clear the waiting list
+      waiter(doneResult);
     }
     this.waiting = [];
   }

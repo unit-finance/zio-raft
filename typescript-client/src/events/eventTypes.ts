@@ -1,12 +1,47 @@
 // Event types for client observability
 // Uses discriminated unions for type-safe event handling
 
-import { MemberId, RequestId, CorrelationId } from '../types';
+import { MemberId, RequestId, CorrelationId, SessionId } from '../types';
 import type { ServerRequest } from '../protocol/messages';
 import type { ClientState } from '../state/clientState';
 
 /**
- * All events emitted by the RaftClient
+ * Connection state change events (public API)
+ */
+export type ConnectionEvent =
+  | ConnectedEventType
+  | DisconnectedEventType
+  | ReconnectingEventType
+  | SessionExpiredEventType;
+
+export interface ConnectedEventType {
+  readonly type: 'connected';
+  readonly sessionId: SessionId;
+  readonly endpoint: string;
+  readonly timestamp: Date;
+}
+
+export interface DisconnectedEventType {
+  readonly type: 'disconnected';
+  readonly reason: 'network' | 'server-closed' | 'client-shutdown';
+  readonly timestamp: Date;
+}
+
+export interface ReconnectingEventType {
+  readonly type: 'reconnecting';
+  readonly attempt: number;
+  readonly endpoint: string;
+  readonly timestamp: Date;
+}
+
+export interface SessionExpiredEventType {
+  readonly type: 'sessionExpired';
+  readonly sessionId: SessionId;
+  readonly timestamp: Date;
+}
+
+/**
+ * All events emitted by the RaftClient (internal)
  * Discriminated union for type-safe event handling
  */
 export type ClientEvent =

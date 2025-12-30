@@ -12,7 +12,7 @@ export class MockTransport implements ClientTransport {
   
   // In-memory queues
   public sentMessages: ClientMessage[] = [];
-  private incomingMessages: ServerMessage[] = [];
+  private receivedMessages: ServerMessage[] = [];
   private messageIteratorCallbacks: Array<(msg: ServerMessage) => void> = [];
 
   /**
@@ -37,7 +37,7 @@ export class MockTransport implements ClientTransport {
   /**
    * Send a client message (store in sentMessages queue)
    */
-  async send(message: ClientMessage): Promise<void> {
+  async sendMessage(message: ClientMessage): Promise<void> {
     if (!this.connected) {
       throw new Error('Not connected');
     }
@@ -45,17 +45,25 @@ export class MockTransport implements ClientTransport {
   }
 
   /**
-   * Receive server messages as an async iterator
-   * Messages must be injected via injectServerMessage()
+   * Incoming messages as an async iterable
    */
-  async *receive(): AsyncIterator<ServerMessage> {
+  get incomingMessages(): AsyncIterable<ServerMessage> {
+    const self = this;
+    return {
+      [Symbol.asyncIterator]() {
+        return self.createMessageStream();
+      }
+    };
+  }
+
+  private async *createMessageStream(): AsyncIterator<ServerMessage> {
     if (!this.connected) {
       throw new Error('Not connected');
     }
 
     // Yield any messages already in the queue
-    while (this.incomingMessages.length > 0) {
-      const msg = this.incomingMessages.shift();
+    while (this.receivedMessages.length > 0) {
+      const msg = this.receivedMessages.shift();
       if (msg !== undefined) {
         yield msg;
       }
@@ -77,7 +85,7 @@ export class MockTransport implements ClientTransport {
    * This simulates receiving a message from the server
    */
   injectServerMessage(message: ServerMessage): void {
-    this.incomingMessages.push(message);
+    this.receivedMessages.push(message);
     
     // Notify any waiting iterator
     const callback = this.messageIteratorCallbacks.shift();
@@ -87,13 +95,13 @@ export class MockTransport implements ClientTransport {
   }
 
   /**
-   * Wait for the next message (used internally by receive())
+   * Wait for the next message (used internally by createMessageStream())
    */
   private waitForMessage(): Promise<ServerMessage | null> {
     return new Promise((resolve) => {
       // Check if message is already available
-      if (this.incomingMessages.length > 0) {
-        const msg = this.incomingMessages.shift();
+      if (this.receivedMessages.length > 0) {
+        const msg = this.receivedMessages.shift();
         resolve(msg ?? null);
         return;
       }
@@ -134,7 +142,7 @@ export class MockTransport implements ClientTransport {
    */
   reset(): void {
     this.sentMessages = [];
-    this.incomingMessages = [];
+    this.receivedMessages = [];
     this.messageIteratorCallbacks = [];
   }
 

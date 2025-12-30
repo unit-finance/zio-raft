@@ -1,596 +1,605 @@
-# Research: TypeScript Client Library
+# Phase 0: Research & Technical Decisions
 
-**Date**: 2025-12-24  
-**Feature**: TypeScript Client for ZIO Raft
+**Feature**: TypeScript Client Library  
+**Date**: 2025-12-29  
+**Status**: Complete
 
 ## Overview
-This document consolidates research findings for implementing a TypeScript client library that communicates with ZIO Raft clusters using the same wire protocol as the Scala client.
 
-**CRITICAL ARCHITECTURAL CONSTRAINT (2025-12-28)**: While wire protocol compatibility is mandatory, ALL implementation patterns must be idiomatic TypeScript/Node.js. This is NOT a Scala-to-TypeScript port. See Section 13 for detailed idiom guidance.
+This document consolidates technical research and decisions for the TypeScript client library. The library provides Node.js/TypeScript applications with access to ZIO Raft clusters using idiomatic JavaScript patterns while maintaining wire protocol compatibility with the Scala client.
 
 ---
 
-## 1. Wire Protocol Analysis
+## Research Areas
 
-### Decision: Use scodec-compatible binary format
-**Rationale**: The Scala implementation uses scodec for binary serialization with a specific protocol structure. The TypeScript client must encode/decode messages in the exact same format for compatibility.
+### 1. Wire Protocol Compatibility
 
-**Protocol Structure**:
-```
-[Protocol Header] [Message Type] [Message Data]
-   5 bytes + 1        1 byte        variable
-```
+**Decision**: Use scodec-style binary encoding with discriminated unions
 
-- **Protocol Signature**: `[0x7a, 0x72, 0x61, 0x66, 0x74]` (ASCII "zraft")
-- **Protocol Version**: `1` (1 byte)
-- **Message Type Discriminator**: 1 byte (uint8)
-- **Message Data**: Variable length, depends on message type
+**Rationale**:
+- The Scala client-server-protocol uses scodec for binary serialization
+- Protocol format: `[signature:5 bytes][version:1 byte][discriminator:1 byte][message data]`
+- Signature: `0x7a 0x72 0x61 0x66 0x74` ("zraft")
+- Protocol version: `0x01`
+- Each message type has a discriminator value (1-9)
+- Fields encoded using standard binary formats (varints, length-prefixed strings, ISO instant timestamps)
+
+**Implementation Strategy**:
+- Create TypeScript codec functions matching each Scala codec
+- Use `Buffer` for binary manipulation (Node.js native, zero-copy)
+- Implement discriminated encoding/decoding for message hierarchies
+- Test byte-for-byte compatibility against Scala reference implementation
 
 **Alternatives Considered**:
-- JSON over WebSocket: Rejected - requires protocol translation layer, adds latency
-- Protocol Buffers: Rejected - would require server changes, not compatible with existing scodec implementation
-- Custom binary format: Rejected - must match existing Scala implementation exactly
+- Protocol Buffers/gRPC: Rejected - requires changing server protocol
+- JSON over WebSocket: Rejected - incompatible with existing ZMQ transport
+- MessagePack: Considered for internal use but not required for wire compatibility
+
+**Reference Files**:
+- `/client-server-protocol/src/main/scala/zio/raft/protocol/Codecs.scala` (lines 1-336)
+- `/client-server-protocol/src/main/scala/zio/raft/protocol/ClientMessages.scala` (lines 1-90)
+- `/client-server-protocol/src/main/scala/zio/raft/protocol/ServerMessages.scala` (lines 1-133)
 
 ---
 
-## 2. Binary Encoding Strategy
+### 2. Transport Layer (ZeroMQ)
 
-### Decision: Implement scodec-compatible codecs in TypeScript
-**Rationale**: Each protocol message type requires precise binary encoding matching the Scala scodec codecs. TypeScript will use Buffer API with manual byte manipulation.
+**Decision**: Use `zeromq` npm package (v6.x) with DEALER socket pattern
 
-**Key Encoding Patterns**:
+**Rationale**:
+- ZeroMQ provides high-performance, async message transport
+- DEALER socket pattern matches Scala client (client-side DEALER, server-side ROUTER)
+- Automatic reconnection support built into ZMQ
+- Node.js bindings are mature and stable (N-API based, no native recompilation needed)
 
-1. **Variable-size strings** (UTF-8):
-   - Length prefix (uint8 or uint16 depending on field)
-   - UTF-8 encoded bytes
+**Implementation Strategy**:
+- Wrap ZMQ socket in TypeScript transport abstraction
+- Use `zeromq` async iterator API for receiving messages
+- Handle ZMQ-specific concerns (routing identity, reconnection) in transport layer
+- Provide clean separation between transport and protocol layers
 
-2. **Variable-size byte arrays** (payloads):
-   - Length prefix (int32)
-   - Raw bytes
-
-3. **Maps** (capabilities):
-   - Count (uint16)
-   - For each entry: length-prefixed key + length-prefixed value
-
-4. **Timestamps** (Instant):
-   - int64 epoch milliseconds
-
-5. **Discriminated unions** (enums):
-   - uint8 discriminator
-   - No additional data for singleton cases
-
-**Client Message Type IDs**:
-- 1: CreateSession
-- 2: ContinueSession
-- 3: KeepAlive
-- 4: ClientRequest
-- 5: ServerRequestAck
-- 6: CloseSession
-- 7: ConnectionClosed
-- 8: Query
-
-**Server Message Type IDs**:
-- 1: SessionCreated
-- 2: SessionContinued
-- 3: SessionRejected
-- 4: SessionClosed
-- 5: KeepAliveResponse
-- 6: ClientResponse
-- 7: ServerRequest
-- 8: RequestError
-- 9: QueryResponse
+**Performance Characteristics**:
+- ZMQ provides sub-millisecond latency for local connections
+- Supports 10K+ messages/second easily on modern hardware
+- Zero-copy message passing where possible
 
 **Alternatives Considered**:
-- Use existing JavaScript binary serialization libraries: Rejected - none match scodec's exact encoding behavior
-- Generate codecs from Scala definitions: Deferred - manual implementation faster for initial version
+- TCP sockets: Rejected - requires manual reconnection logic and framing
+- WebSocket: Rejected - incompatible with server's ZMQ ROUTER
+- HTTP/2: Rejected - requires server changes
+
+**Reference**:
+- `zeromq` package: https://www.npmjs.com/package/zeromq
+- `/client-server-client/src/main/scala/zio/raft/client/ClientTransport.scala`
 
 ---
 
-## 3. ZeroMQ Integration
+### 3. State Machine Architecture
 
-### Decision: Use zeromq.js (Node.js native bindings)
-**Rationale**: The Scala client uses ZMQ DEALER sockets for client communication. zeromq.js provides native ZMQ bindings for Node.js with the required socket types.
+**Decision**: Functional state machine with discriminated union types
 
-**Socket Configuration** (mirroring Scala ClientTransport):
-```typescript
-Socket Type: DEALER
-Linger: 0 (immediate close)
-Heartbeat: interval=1s, ttl=10s, timeout=30s
-High Water Mark: send=200000, receive=200000
-```
+**Rationale**:
+- TypeScript discriminated unions provide type-safe state transitions
+- Matches Scala client's functional ADT pattern conceptually
+- Each state implements same `handle(event)` interface
+- Compiler enforces exhaustive pattern matching
+- Immutable state transitions (each handler returns new state)
 
-**Connection Pattern**:
-- Multiple addresses (cluster members) configured upfront
-- Connect to first member, try next on failure/rejection
-- Support disconnect/reconnect to different addresses
-
-**Alternatives Considered**:
-- ws (WebSocket): Rejected - requires server-side WebSocket support, ZMQ not available
-- net (TCP sockets): Rejected - missing ZMQ features like automatic reconnection, heartbeat
-- zmq.js: Rejected - older library, less maintained than zeromq.js
-
----
-
-## 4. Event Loop Architecture
-
-### Decision: Single event loop with merged streams
-**Rationale**: The Scala client uses ZIO's ZStream.merge to combine action commands, server messages, keep-alive ticks, and timeout checks into a unified event stream. TypeScript will use Node.js EventEmitter pattern with async iteration.
-
-**Event Sources**:
-1. **Action Queue**: User commands (connect, disconnect, submitCommand, submitQuery)
-2. **ZMQ Messages**: Incoming server messages from ZMQ socket
-3. **Keep-Alive Timer**: Periodic (configurable, default 30s)
-4. **Timeout Timer**: Periodic checks for request retry (100ms intervals)
-
-**Event Processing**:
-- Single state machine processes all events sequentially
-- State transitions are deterministic based on current state + event type
-- No concurrent state modifications
-
-**Alternatives Considered**:
-- Separate event loops per concern: Rejected - difficult to coordinate, race conditions
-- Promise-based async/await: Rejected - doesn't handle streaming events well
-- RxJS observables: Rejected - adds dependency, EventEmitter sufficient
-
----
-
-## 5. State Machine Design
-
-### Decision: Mimic Scala ClientState sealed trait with TypeScript classes
-**Rationale**: The Scala client uses a functional state machine with sealed trait hierarchy. TypeScript will use discriminated union of state objects with state-specific event handlers.
-
-**Client States**:
+**States**:
 1. **Disconnected**: Initial state, waiting for connect() call
-2. **ConnectingNewSession**: Creating new session, waiting for SessionCreated
-3. **ConnectingExistingSession**: Resuming session, waiting for SessionContinued
-4. **Connected**: Active session, processing requests/queries
+2. **ConnectingNewSession**: Creating new session with CreateSession message
+3. **ConnectingExistingSession**: Resuming session with ContinueSession message
+4. **Connected**: Active session, processing requests/responses
 
-**State Transitions**:
-- Each state implements `handle(event)` method returning next state
-- Immutable state updates (new state object per transition)
-- Leader redirection: transition to Connecting state with different member
-- Session expiry: fail pending requests, transition to terminal state
+**Event Types**:
+- **Action**: User API calls (connect, submitCommand, submitQuery, disconnect)
+- **ServerMessage**: Incoming protocol messages from server
+- **KeepAliveTick**: Timer event for heartbeat
+- **TimeoutCheck**: Timer event for request timeout detection
 
-**Alternatives Considered**:
-- Mutable state object: Rejected - harder to reason about, doesn't match Scala pattern
-- State machine library (XState): Rejected - overkill, manual implementation clearer
-- Async/await control flow: Rejected - doesn't model concurrent operations well
-
----
-
-## 6. Request/Response Correlation
-
-### Decision: Map-based tracking with Request ID / Correlation ID
-**Rationale**: Scala client uses separate PendingRequests and PendingQueries structures. TypeScript will mirror this pattern with Map<RequestId, PendingData> and Map<CorrelationId, PendingData>.
-
-**Request ID Management**:
-- Client maintains monotonic counter (Long, starts at 0)
-- Each command gets unique incrementing ID
-- Requests track: payload, promise/callback, createdAt, lastSentAt
-
-**Query Correlation**:
-- Each query gets UUID-based correlation ID
-- Queries track: payload, promise/callback, createdAt, lastSentAt
-
-**Timeout & Retry**:
-- Periodic check (100ms) compares lastSentAt vs current time
-- Resend if elapsed > configurable timeout (default 10s)
-- Update lastSentAt on each send
-
-**Alternatives Considered**:
-- Single unified pending map: Rejected - commands and queries have different ID spaces
-- Promise-only (no explicit tracking): Rejected - can't implement retry without tracking
-- External request ID (UUID): Rejected - must match Scala's Long-based counter for interop
-
----
-
-## 7. Error Handling Strategy
-
-### Decision: Synchronous exceptions + Promise rejections
-**Rationale**: Per clarifications, validation errors throw sync exceptions immediately. Async errors (timeouts, network failures, server rejections) reject returned promises.
-
-**Error Categories**:
-
-1. **Immediate Validation Errors** (throw sync):
-   - Invalid config (empty capabilities, no cluster members)
-   - Invalid payload encoding
-   - Client not connected
-
-2. **Async Operation Errors** (reject Promise):
-   - Network timeout
-   - Session rejection by server
-   - Request timeout after retries
-   - Session expiry
-
-3. **Terminal Errors** (emit event + reject all pending):
-   - Session expired: fail all pending, emit 'terminated' event
-   - Unrecoverable network error
-
-**Alternatives Considered**:
-- Result/Either types: Rejected - not idiomatic TypeScript, adds complexity
-- Error codes only (no exceptions): Rejected - misses validation errors early
-- All errors async: Rejected - clarification specified sync exceptions for validation
-
----
-
-## 8. Binary Framing Reference
-
-### Decision: Use maitred Frame.ts pattern for framing
-**Rationale**: User specified maitred Frame.ts as reference. This provides length-prefixed framing for delimiting messages over streaming ZMQ sockets.
-
-**Framing Pattern** (from maitred reference):
+**Implementation Pattern**:
 ```typescript
-// Outgoing: [4-byte length][message bytes]
-function frame(data: Buffer): Buffer {
-  const length = Buffer.allocUnsafe(4);
-  length.writeUInt32BE(data.length, 0);
-  return Buffer.concat([length, data]);
-}
-
-// Incoming: accumulate until full message available
-function unframe(accumulated: Buffer): { message: Buffer | null, remaining: Buffer } {
-  if (accumulated.length < 4) return { message: null, remaining: accumulated };
-  const length = accumulated.readUInt32BE(0);
-  if (accumulated.length < 4 + length) return { message: null, remaining: accumulated };
-  const message = accumulated.slice(4, 4 + length);
-  const remaining = accumulated.slice(4 + length);
-  return { message, remaining };
+interface StateHandler {
+  handle(event: StreamEvent): Promise<ClientState>;
 }
 ```
 
-**Integration with ZMQ**:
-- ZMQ DEALER socket already provides message framing
-- Additional framing may not be needed if using ZMQ message boundaries
-- Research needed: confirm ZMQ message semantics match Scala implementation
-
 **Alternatives Considered**:
-- No framing: Investigate if ZMQ DEALER already provides sufficient message boundaries
-- Delimiter-based: Rejected - length-prefix more efficient and unambiguous
+- Class hierarchy with inheritance: Rejected - discriminated unions are more idiomatic TypeScript
+- Simple if/else state checking: Rejected - loses type safety
+- XState library: Rejected - adds unnecessary dependency for simple state machine
+
+**Reference Files**:
+- `/typescript-client/src/state/clientState.ts` (existing implementation)
+- `/client-server-client/src/main/scala/zio/raft/client/RaftClient.scala` (lines 110-579)
 
 ---
 
-## 9. Performance Optimization
+### 4. Request Queue Management
 
-### Decision: Implement request batching for high throughput
-**Rationale**: Spec requires 1K-10K+ req/sec. Batching multiple requests into single ZMQ sends reduces syscall overhead.
+**Decision**: In-memory Map-based pending request tracking
 
-**Batching Strategy**:
-- Accumulate requests in micro-batches (e.g., 10ms window or 100 requests, whichever comes first)
-- Send all as separate ZMQ messages in single send operation
-- Maintain individual request ID tracking for correlation
+**Rationale**:
+- Requests identified by RequestId (uint64)
+- Queries identified by CorrelationId (UUID string)
+- Need O(1) lookup by ID for response correlation
+- Need O(1) insertion/deletion
+- Need timeout tracking per request
 
-**Other Optimizations**:
-- Reuse Buffer allocations where possible
-- Lazy encode-on-send (don't encode until batching window closes)
-- Pre-allocate Maps with expected size
+**Data Structures**:
+- `PendingRequests`: Map<RequestId, PendingRequest>
+- `PendingQueries`: Map<CorrelationId, PendingQuery>
+- Each entry contains: payload, promise (for result), timestamp (for timeout)
+
+**Request ID Generation**:
+- Use incrementing counter for RequestId (matches Scala client)
+- Counter starts at 1 (zero reserved as sentinel)
+- Use UUID v4 for CorrelationId (query correlation)
+
+**Timeout Strategy**:
+- Periodic timeout check (100ms interval)
+- Compare current time vs request timestamp + configured timeout
+- Reject promise with TimeoutError on timeout
+- **No automatic retry** - application decides whether to retry manually
+
+**Memory Management**:
+- Completed requests removed immediately from map
+- Timed-out requests removed after promise rejection
+- Server uses `lowestPendingRequestId` to evict cache entries
 
 **Alternatives Considered**:
-- No batching: May not achieve 10K+ req/sec target
-- Protocol-level batching: Rejected - requires server changes
-- Multi-connection pooling: Rejected - spec specifies single session per client instance
+- Priority queue for timeouts: Rejected - overkill for expected request volumes
+- Automatic retry on timeout: Rejected - spec requires manual retry only
+- Persistent queue: Rejected - requests are transient, session expiry terminates client
+
+**Reference Files**:
+- `/typescript-client/src/state/pendingRequests.ts` (existing implementation)
+- `/typescript-client/src/state/pendingQueries.ts` (existing implementation)
 
 ---
 
-## 10. Testing Strategy
+### 5. Async API Design (Promises vs Callbacks)
 
-### Decision: Unit tests + integration tests against mock/real server
-**Rationale**: Protocol compatibility is critical. Test both encoding correctness and behavioral correctness.
+**Decision**: Promise-based API with async/await support
 
-**Test Categories**:
+**Rationale**:
+- Modern JavaScript/TypeScript standard for async operations
+- Composable with async/await syntax
+- Error handling via try/catch or .catch()
+- Matches ecosystem expectations (ioredis, pg, mongodb patterns)
 
-1. **Codec Tests**:
-   - Encode/decode roundtrip for each message type
-   - Edge cases (empty maps, max lengths, boundary values)
-   - Compare with Scala-encoded bytes (golden files)
+**API Shape**:
+```typescript
+class RaftClient {
+  constructor(config: ClientConfig); // Lazy init, no connection
+  async connect(): Promise<void>;
+  async submitCommand(payload: Uint8Array): Promise<Uint8Array>;
+  async submitQuery(payload: Uint8Array): Promise<Uint8Array>;
+  async disconnect(): Promise<void>;
+  
+  // EventEmitter methods
+  on(event: 'connected', handler: (evt: ConnectedEvent) => void): this;
+  on(event: 'disconnected', handler: (evt: DisconnectedEvent) => void): this;
+  on(event: 'reconnecting', handler: (evt: ReconnectingEvent) => void): this;
+  on(event: 'sessionExpired', handler: (evt: SessionExpiredEvent) => void): this;
+}
+```
 
-2. **State Machine Tests**:
-   - State transitions for each event type
-   - Reconnection scenarios (leader change, network failure)
+**Promise Behavior**:
+- Constructor: Synchronous, no Promise
+- `connect()`: Resolves when session established, rejects on failure
+- `submitCommand()`/`submitQuery()`:
+  - Throws synchronously if validation fails (bad payload format)
+  - Returns Promise that:
+    - Resolves with Uint8Array response when received
+    - Rejects with TimeoutError if timeout expires
+    - If called while disconnected: waits for reconnection (up to configured timeout)
+
+**Error Types**:
+- `ValidationError`: Synchronous throw for bad input
+- `TimeoutError`: Promise rejection for request timeout
+- `ConnectionError`: Promise rejection for connection failures
+- `SessionExpiredError`: Promise rejection when session expires
+
+**Alternatives Considered**:
+- Callback-based API: Rejected - outdated Node.js pattern
+- Observable/Stream API (RxJS): Rejected - heavy dependency, not idiomatic for simple request/response
+- Separate typed/untyped methods: Rejected - generic decoders add complexity without benefit
+
+**Reference**:
+- Spec clarifications Session 2025-12-29 (lazy init, queue-with-timeout, raw binary)
+
+---
+
+### 6. Event System (Observability)
+
+**Decision**: Node.js EventEmitter with minimal event set
+
+**Rationale**:
+- `EventEmitter` is standard Node.js pattern for event-driven APIs
+- TypeScript provides strong typing for event names and payloads
+- Minimal event set as per spec: only connection state changes
+- No built-in logging - applications observe events for diagnostics
+
+**Event Types** (all emitted from client):
+1. **connected**: Session established (includes sessionId, endpoint)
+2. **disconnected**: Connection lost (includes reason)
+3. **reconnecting**: Attempting reconnection (includes attempt count)
+4. **sessionExpired**: Session expired by server (terminal event)
+
+**Event Payloads**:
+```typescript
+interface ConnectedEvent {
+  sessionId: string;
+  endpoint: string;
+  timestamp: Date;
+}
+
+interface DisconnectedEvent {
+  reason: 'network' | 'server-closed' | 'client-shutdown';
+  timestamp: Date;
+}
+
+interface ReconnectingEvent {
+  attempt: number;
+  endpoint: string;
+  timestamp: Date;
+}
+
+interface SessionExpiredEvent {
+  sessionId: string;
+  timestamp: Date;
+}
+```
+
+**Usage Pattern**:
+```typescript
+client.on('connected', (evt) => {
+  logger.info('Connected', { sessionId: evt.sessionId });
+});
+
+client.on('sessionExpired', () => {
+  logger.error('Session expired - terminating');
+  process.exit(1);
+});
+```
+
+**Alternatives Considered**:
+- Verbose events (requestSent, responseReceived): Rejected - spec requires minimal
+- Tiered event system: Rejected - adds complexity without clear benefit
+- Separate logger interface: Rejected - EventEmitter is simpler and more flexible
+
+**Reference**:
+- Spec clarifications Session 2025-12-29 (minimal events only)
+- FR-015, FR-016 (event requirements)
+
+---
+
+### 7. Session Management & Reconnection
+
+**Decision**: Automatic reconnection with session resumption using ContinueSession
+
+**Rationale**:
+- Server maintains session state across client disconnections
+- Session identified by SessionId (UUID string)
+- Client stores sessionId after SessionCreated response
+- On reconnection: send ContinueSession(sessionId, nonce) instead of CreateSession
+- Pending requests preserved across reconnections
+
+**Reconnection Logic**:
+1. Detect disconnection (ZMQ socket event)
+2. Transition to ConnectingExistingSession state (preserving sessionId)
+3. Try next cluster member in round-robin fashion
+4. Send ContinueSession message
+5. On SessionContinued: resume Connected state with preserved pending requests
+6. On SessionRejected(SessionNotFound): fall back to CreateSession (new session)
+
+**Session Expiry**:
+- Server expires session if keep-alives not received within configured window
+- Server sends SessionClosed(SessionExpired) or SessionRejected(SessionExpired)
+- Client emits 'sessionExpired' event
+- Client fails all pending requests with SessionExpiredError
+- Client terminates (matches Scala client behavior)
+
+**Keep-Alive Protocol**:
+- Client sends KeepAlive(timestamp) at configured interval (default 30s)
+- Server responds with KeepAliveResponse(clientTimestamp, serverTimestamp)
+- Provides RTT measurement capability (client timestamp round-trip)
+- Session ID derived from ZMQ routing identity (not in message body)
+
+**Alternatives Considered**:
+- No automatic reconnection: Rejected - poor UX for transient network issues
+- Exponential backoff: Deferred to configuration (could add later)
+- Session persistence to disk: Rejected - adds complexity, server state is authoritative
+
+**Reference**:
+- FR-003, FR-005, FR-011 (session requirements)
+- `/client-server-client/src/main/scala/zio/raft/client/RaftClient.scala` (session states)
+
+---
+
+### 8. Performance & Batching
+
+**Decision**: Optional request batching at application level, not in library
+
+**Rationale**:
+- Target: 1,000-10,000+ requests/second throughput
+- Single request overhead: protocol encoding + ZMQ send (sub-millisecond)
+- At 10K req/s: ~100μs per request budget
+- Node.js event loop can handle this easily
+
+**Performance Strategy**:
+- Minimize allocations in hot path (reuse Buffers where possible)
+- Protocol encoding: pre-compute message headers
+- Use ZMQ zero-copy where possible
+- Avoid JSON serialization in protocol layer (binary only)
+
+**Batching Consideration**:
+- Spec mentions "batching optimizations" (NFR-002)
+- Decision: Provide Promise.all() pattern example in docs
+- Application can batch multiple submitCommand() calls
+- Library sends immediately (no internal batching)
+- Internal batching would add latency and complexity
+
+**Batching Example** (application-level):
+```typescript
+const results = await Promise.all([
+  client.submitCommand(payload1),
+  client.submitCommand(payload2),
+  client.submitCommand(payload3)
+]);
+// All sent immediately, responses arrive as ready
+```
+
+**Alternatives Considered**:
+- Automatic request batching: Rejected - adds latency, unclear API semantics
+- Nagle-style algorithm: Rejected - inappropriate for request/response pattern
+- Explicit batch API: Deferred - can add later if needed
+
+**Reference**:
+- NFR-001, NFR-002 (performance requirements)
+
+---
+
+### 9. Testing Strategy
+
+**Decision**: Vitest for unit/integration tests, mock transport for unit tests
+
+**Rationale**:
+- Vitest: Modern, fast, TypeScript-native test framework
+- Better DX than Jest (faster, better error messages)
+- Mock transport layer for unit testing state machine
+- Integration tests against real ZMQ sockets
+- Property-based testing for protocol encoding (if needed)
+
+**Test Coverage**:
+1. **Unit Tests**:
+   - Protocol encoding/decoding (byte-for-byte verification)
+   - State machine transitions (all states, all events)
+   - Pending request/query management
+   - Timeout detection
+   - Error handling
+
+2. **Integration Tests**:
+   - Full client lifecycle (connect, request, disconnect)
+   - Reconnection scenarios
+   - Session resumption
+   - Keep-alive protocol
+   - Server-initiated requests
    - Session expiry handling
 
-3. **Integration Tests**:
-   - Connect to real/mock Raft cluster
-   - Submit commands and verify responses
-   - Reconnection and retry behavior
-   - Performance: verify 1K+ req/sec throughput
+3. **Compatibility Tests**:
+   - Wire protocol compatibility with Scala server
+   - Codec round-trip tests (encode/decode identity)
 
-4. **Protocol Compatibility Tests**:
-   - Test against actual Scala server implementation
-   - Verify session lifecycle matches Scala client behavior
-
-**Testing Tools**:
-- Jest or Vitest for unit tests
-- Mock ZMQ sockets for transport layer tests
-- Dockerized Raft cluster for integration tests
-
-**Alternatives Considered**:
-- Property-based testing: Deferred - implement after initial release
-- Load testing: Required but separate from unit/integration tests
-- Contract testing: Could be added for protocol guarantees
-
----
-
-## 11. Type Safety
-
-### Decision: Strong TypeScript types for all protocol entities
-**Rationale**: Leverage TypeScript's type system to prevent encoding errors and match Scala's type safety.
-
-**Type Strategy**:
-```typescript
-// Newtype-style branded types
-type SessionId = string & { readonly __brand: 'SessionId' };
-type RequestId = bigint & { readonly __brand: 'RequestId' };
-type MemberId = string & { readonly __brand: 'MemberId' };
-type Nonce = bigint & { readonly __brand: 'Nonce' };
-type CorrelationId = string & { readonly __brand: 'CorrelationId' };
-
-// Discriminated unions for messages
-type ClientMessage = 
-  | { type: 'CreateSession'; capabilities: Map<string, string>; nonce: Nonce }
-  | { type: 'ContinueSession'; sessionId: SessionId; nonce: Nonce }
-  | ... // other message types
-
-// State as discriminated union
-type ClientState =
-  | { state: 'Disconnected'; config: ClientConfig }
-  | { state: 'Connecting'; sessionId: SessionId | null; ... }
-  | { state: 'Connected'; sessionId: SessionId; ... }
+**Test Structure**:
+```
+tests/
+├── unit/
+│   ├── protocol/
+│   │   ├── codecs.test.ts
+│   │   └── messages.test.ts
+│   ├── state/
+│   │   ├── clientState.test.ts
+│   │   ├── pendingRequests.test.ts
+│   │   └── pendingQueries.test.ts
+│   └── transport/
+│       └── mockTransport.test.ts
+└── integration/
+    ├── client-lifecycle.test.ts
+    ├── reconnection.test.ts
+    └── compatibility.test.ts
 ```
 
-**Benefits**:
-- Compile-time type checking prevents many bugs
-- IDE autocomplete for message types
-- Matches Scala's sealed trait + newtype pattern
-
 **Alternatives Considered**:
-- Loose typing (any/unknown): Rejected - defeats purpose of TypeScript
-- Classes instead of discriminated unions: Rejected - more verbose, less pattern matching
-- io-ts for runtime validation: Deferred - focus on compile-time first
+- Jest: Currently used, but Vitest offers better TypeScript support
+- No mock transport: Rejected - makes unit tests flaky and slow
+- E2E tests only: Rejected - slow feedback loop, hard to test edge cases
+
+**Reference**:
+- V. Test-Driven Maintenance (Constitution)
+- Existing test structure in `/typescript-client/tests/`
 
 ---
 
-## 12. No Built-in Logging
+### 10. Error Handling Patterns
 
-### Decision: Event emission for all diagnostic information
-**Rationale**: Per clarifications, no built-in logging. Applications observe events and implement their own logging.
+**Decision**: Custom error classes extending Error, Promise rejections for async errors
 
-**Event Types for Observability**:
+**Rationale**:
+- TypeScript/JavaScript standard: extend Error class
+- Type-safe error handling with instanceof checks
+- Promise rejections for all async failures
+- Synchronous throws only for validation errors (fail-fast)
+
+**Error Hierarchy**:
 ```typescript
-client.on('stateChange', (oldState, newState) => { ... });
-client.on('connectionAttempt', (memberId, address) => { ... });
-client.on('connectionSuccess', (memberId) => { ... });
-client.on('connectionFailure', (memberId, error) => { ... });
-client.on('messageReceived', (message) => { ... });
-client.on('messageSent', (message) => { ... });
-client.on('requestTimeout', (requestId) => { ... });
-client.on('sessionExpired', () => { ... });
+class RaftClientError extends Error {
+  name = 'RaftClientError';
+}
+
+class ValidationError extends RaftClientError {
+  name = 'ValidationError';
+  // Thrown synchronously for bad input
+}
+
+class TimeoutError extends RaftClientError {
+  name = 'TimeoutError';
+  requestId?: RequestId;
+  correlationId?: CorrelationId;
+}
+
+class ConnectionError extends RaftClientError {
+  name = 'ConnectionError';
+  endpoint?: string;
+  cause?: Error;
+}
+
+class SessionExpiredError extends RaftClientError {
+  name = 'SessionExpiredError';
+  sessionId: string;
+}
+
+class ProtocolError extends RaftClientError {
+  name = 'ProtocolError';
+  // For wire protocol violations
+}
 ```
 
-**Application Responsibility**:
-- Listen to events and log as needed
-- Implement structured logging (JSON, etc.)
-- Configure log levels and filtering
-
-**Alternatives Considered**:
-- Built-in console.log: Rejected - per clarifications, no logging
-- Optional logger injection: Rejected - adds complexity, events cleaner
-- Debug module: Rejected - still built-in logging
-
----
-
-## Open Questions
-
-### Q1: ZMQ Framing Semantics
-**Question**: Does ZMQ DEALER socket preserve message boundaries, making additional framing unnecessary?  
-**Research Needed**: Test ZMQ message send/receive to confirm each send() corresponds to one receive() message.  
-**Impact**: May simplify implementation if ZMQ handles framing.
-
-### Q2: Batching Implementation
-**Question**: Should batching combine multiple requests into single ZMQ message or send them as separate messages in rapid succession?  
-**Research Needed**: Benchmark both approaches.  
-**Impact**: Affects codec design and performance.
-
-### Q3: TypeScript Target Version
-**Question**: Compile to ES2020, ES2021, or ESNext?  
-**Decision Needed**: Based on Node.js 18+ support and library dependencies.  
-**Impact**: Affects available language features (bigint, etc.).
-
----
-
-## 13. TypeScript Idiom Guidelines (CRITICAL - Added 2025-12-28)
-
-### Decision: Idiomatic TypeScript Everywhere
-**Rationale**: This library is written by TypeScript engineers for TypeScript engineers. While wire protocol must match Scala exactly, all other patterns should feel natural to Node.js developers.
-
-**Core Principle**: The library should feel like using `ioredis`, `pg`, or `mongodb` - professional, clean, idiomatic Node.js/TypeScript.
-
-### What This Means in Practice
-
-#### 1. State Management - Use Classes with Private Fields
-**DON'T** (Scala ZRef port):
+**Error Handling Examples**:
 ```typescript
-// Too Scala-ish - mimicking ZRef
-interface RequestIdRef { current: RequestId; next(): RequestId; }
-const ref = createRequestIdRef();
-```
-
-**DO** (Idiomatic TypeScript):
-```typescript
-// Just use private class field
-class RaftClient {
-  private nextRequestId: bigint = 0n;
-  private allocateRequestId(): RequestId {
-    return this.nextRequestId++ as RequestId;
+// Synchronous validation error
+try {
+  await client.submitCommand(invalidPayload); // throws ValidationError immediately
+} catch (err) {
+  if (err instanceof ValidationError) {
+    // Handle bad input
   }
 }
-```
 
-#### 2. Observable State - Use EventEmitter
-**DON'T** (ZStream port):
-```typescript
-// Too functional - mimicking ZStream
-observable: Observable<StateChange>
-```
-
-**DO** (Idiomatic TypeScript):
-```typescript
-// Standard Node.js pattern
-import { EventEmitter } from 'events';
-class RaftClient extends EventEmitter {
-  // client.on('stateChange', handler)
-}
-```
-
-#### 3. Async Operations - Use Promises/Async-Await
-**DON'T** (ZIO effect port):
-```typescript
-// Too Scala-ish - mimicking ZIO effects
-submitCommand(payload: Buffer): Effect<Buffer, Error>
-```
-
-**DO** (Idiomatic TypeScript):
-```typescript
-// Standard Promise-based API
-async submitCommand(payload: Buffer): Promise<Buffer>
-```
-
-#### 4. Error Handling - Standard TypeScript Patterns
-**DON'T** (Complex ADTs):
-```typescript
-// Overly functional
-type Result<T, E> = Success<T> | Failure<E>
-```
-
-**DO** (Idiomatic TypeScript):
-```typescript
-// Sync errors: throw
-if (!config.clusterMembers.size) {
-  throw new Error('clusterMembers cannot be empty');
-}
-
-// Async errors: Promise rejection
-async connect(): Promise<void> {
-  // Network errors reject the promise naturally
-}
-```
-
-#### 5. Immutability - Strategic, Not Pervasive
-**DON'T** (Everything immutable):
-```typescript
-// Too Scala-ish - immutable updates everywhere
-acknowledge(id: RequestId): ServerRequestTracker {
-  return new ServerRequestTracker(id); // Creates new instance
-}
-```
-
-**DO** (Mutable private state, immutable public interface):
-```typescript
-// Encapsulated mutable state is fine
-class ServerRequestTracker {
-  private lastAcknowledgedRequestId: RequestId;
-  
-  acknowledge(id: RequestId): void {
-    this.lastAcknowledgedRequestId = id; // Mutate private state
+// Async timeout error
+try {
+  const result = await client.submitCommand(payload);
+} catch (err) {
+  if (err instanceof TimeoutError) {
+    // Manually retry if desired
+    const result = await client.submitCommand(payload);
   }
 }
+
+// Session expired (terminal)
+client.on('sessionExpired', (evt) => {
+  // Cleanup and exit
+  process.exit(1);
+});
 ```
-
-#### 6. Configuration - Plain Objects
-**DON'T** (Builder pattern):
-```typescript
-// Too Java-ish
-const config = new ConfigBuilder()
-  .withMembers(...)
-  .withTimeout(...)
-  .build();
-```
-
-**DO** (Plain object):
-```typescript
-// Simple, clear, TypeScript-native
-const config: ClientConfig = {
-  clusterMembers: new Map([...]),
-  connectionTimeout: 5000,
-};
-const client = new RaftClient(config);
-```
-
-#### 7. Type Safety - Use TypeScript Features
-**Current branded types are GOOD**:
-```typescript
-// This is idiomatic TypeScript
-type SessionId = string & { readonly __brand: 'SessionId' };
-```
-
-But don't overdo the helper objects - keep them minimal:
-```typescript
-// Helper functions are fine, but don't make them complex
-export function isSessionId(value: string): value is SessionId {
-  return value.length > 0;
-}
-```
-
-#### 8. Class Design - Use OOP Where It Makes Sense
-**DON'T** (Everything functional):
-```typescript
-// Too functional
-export function createPendingRequests(): {
-  add: (...) => PendingRequests,
-  complete: (...) => PendingRequests,
-}
-```
-
-**DO** (Classes for stateful entities):
-```typescript
-// Clear, encapsulated, testable
-export class PendingRequests {
-  private requests: Map<RequestId, PendingRequestData> = new Map();
-  
-  add(id: RequestId, data: PendingRequestData): void { ... }
-  complete(id: RequestId, result: Buffer): boolean { ... }
-}
-```
-
-### Implementation Review Checklist
-
-Before implementing any module, ask:
-- [ ] Does this feel like code I'd find in `ioredis` or `pg`?
-- [ ] Would a TypeScript engineer understand this without Scala knowledge?
-- [ ] Am I using standard Node.js patterns (EventEmitter, Promises, Buffer)?
-- [ ] Am I avoiding Scala patterns (ZIO, ZStream, ZRef, immutable everything)?
-- [ ] Is mutable private state used appropriately (not forcing immutability)?
-- [ ] Are classes used where they make sense (not everything functional)?
-- [ ] Is the API simple and predictable (not overly clever)?
-
-### What's Still Fine to Keep Functional
-
-- **Protocol codecs**: Low-level binary encoding can be functional
-- **Pure utility functions**: Functions without side effects
-- **Type definitions**: Discriminated unions, branded types
-- **Immutable message types**: Protocol messages should be readonly
-
-### Bottom Line
-
-**Wire Protocol Layer**: Must match Scala exactly (byte-for-byte)
-**Everything Else**: Must feel like natural TypeScript/Node.js code
 
 **Alternatives Considered**:
-- Direct Scala port: Rejected - produces unnatural TypeScript code
-- Full functional programming: Rejected - not idiomatic for Node.js libraries
-- Mix of patterns: Rejected - confusing and inconsistent
+- Result<T, E> type: Rejected - not idiomatic JavaScript, awkward with Promises
+- Error codes vs classes: Rejected - classes provide better type safety
+- Automatic retry on timeout: Rejected - spec requires manual retry
+
+**Reference**:
+- II. Explicit Error Handling (Constitution interpretation for TypeScript)
+- Spec clarifications Session 2025-12-29 (no automatic retry)
 
 ---
 
-## Summary
+### 11. Configuration & Defaults
 
-All critical technical decisions have been made:
-- Binary protocol encoding matches Scala scodec exactly
-- ZeroMQ transport using zeromq.js
-- Event-loop based state machine architecture
-- Strong TypeScript types throughout
-- Event emission for observability (no built-in logging)
-- Request batching for high throughput
-- Comprehensive testing strategy
-- **IDIOMATIC TYPESCRIPT EVERYWHERE** (added 2025-12-28)
+**Decision**: Single configuration object with sensible defaults
 
-**Ready for Phase 1: Design**
+**Rationale**:
+- Simple, idiomatic TypeScript configuration pattern
+- All timeouts configurable
+- Cluster endpoints required, rest optional
+
+**Configuration Interface**:
+```typescript
+interface ClientConfig {
+  // Required
+  endpoints: string[]; // ['tcp://localhost:5555', ...]
+  capabilities: Record<string, string>; // { version: '1.0.0' }
+  
+  // Optional (with defaults)
+  connectionTimeout?: number; // 5000ms
+  requestTimeout?: number; // 30000ms
+  keepAliveInterval?: number; // 30000ms
+  queuedRequestTimeout?: number; // 60000ms (for disconnected queue)
+  maxReconnectAttempts?: number; // Infinity (keep trying)
+  reconnectInterval?: number; // 1000ms
+}
+```
+
+**Default Values Rationale**:
+- Connection timeout: 5s (enough for local/LAN, fail fast for misconfig)
+- Request timeout: 30s (long enough for slow Raft writes, short enough to detect issues)
+- Keep-alive interval: 30s (matches typical session timeout / 2)
+- Queued request timeout: 60s (balance responsiveness vs resilience during reconnection)
+- Max reconnect attempts: Infinity (keep trying indefinitely)
+- Reconnect interval: 1s (fast recovery without hammering server)
+
+**Validation**:
+- Endpoints: Must be non-empty array
+- Capabilities: Must be non-empty object
+- Timeouts: Must be positive integers
+- Throw ValidationError in constructor for invalid config
+
+**Alternatives Considered**:
+- Builder pattern: Rejected - overkill for simple config object
+- Separate config classes per concern: Rejected - single object is simpler
+- Environment variable overrides: Deferred - can add later
+
+**Reference**:
+- FR-002 (constructor validation)
+- FR-008 (configurable timeouts)
+
+---
+
+## Summary of Key Decisions
+
+| Area | Decision | Rationale |
+|------|----------|-----------|
+| Wire Protocol | Scodec-style binary with discriminated unions | Byte-for-byte compatibility with Scala |
+| Transport | ZeroMQ via `zeromq` npm package | High performance, mature Node.js bindings |
+| State Machine | Functional with discriminated union types | Type-safe transitions, idiomatic TypeScript |
+| Request Queue | Map-based in-memory tracking | O(1) operations, simple timeout handling |
+| Async API | Promise-based with async/await | Modern JavaScript standard |
+| Events | EventEmitter with 4 minimal events | Spec requirement, flexible observability |
+| Session Management | Automatic reconnection with ContinueSession | Resilient to transient failures |
+| Performance | Application-level batching, no internal batching | Low latency, simple semantics |
+| Testing | Vitest with mock transport | Fast, type-safe, good DX |
+| Error Handling | Custom Error classes, Promise rejections | Type-safe, idiomatic TypeScript |
+| Configuration | Single config object with defaults | Simple, flexible, well-documented |
+
+---
+
+## Dependencies Confirmed
+
+**Production Dependencies**:
+- `zeromq` (v6.x): ZeroMQ Node.js bindings
+
+**Development Dependencies**:
+- `typescript` (v5.x): Language toolchain
+- `vitest` (to be added): Test framework
+- `@types/node` (v18.x): Node.js type definitions
+- `eslint` + `@typescript-eslint/*`: Linting
+- `prettier`: Code formatting
+
+**No Additional Dependencies Needed**:
+- MessagePack: Not needed (binary encoding is manual)
+- UUID library: Use built-in `crypto.randomUUID()` (Node.js 18+)
+- Event library: Use built-in `EventEmitter`
+
+---
+
+## Next Steps
+
+Phase 0 complete. Ready for Phase 1 (Design):
+1. Extract entities to data-model.md
+2. Create comprehensive design.md with architecture diagrams
+3. Extract test scenarios to tests.md
+4. Generate quickstart.md for end-to-end validation
+5. Update agent context file
+
+All technical unknowns resolved. No NEEDS CLARIFICATION markers remain.

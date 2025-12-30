@@ -1,628 +1,886 @@
 # Design: TypeScript Client Library
 
-**Date**: 2025-12-24  
-**Feature**: TypeScript Client for ZIO Raft
+**Feature**: TypeScript Client Library  
+**Date**: 2025-12-29  
+**Status**: Complete
 
 ## Overview
-This document describes the high-level architecture and design of the TypeScript client library for ZIO Raft clusters. The design mirrors the Scala client architecture while adapting to TypeScript/Node.js idioms.
+
+This document provides a high-level architectural design for the idiomatic TypeScript/Node.js client library for ZIO Raft clusters. The design ensures wire protocol compatibility with the Scala client while using modern Node.js patterns (EventEmitter, Promises, async/await).
 
 ---
 
-## 1. Architecture Overview
+## Design Principles
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Application Layer                       │
-│  (Uses RaftClient API, observes events, handles responses) │
-└────────────────────────────┬────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        RaftClient                            │
-│  - connect() / disconnect()                                  │
-│  - submitCommand(payload): Promise<Buffer>                   │
-│  - query(payload): Promise<Buffer>                           │
-│  - serverRequests(): AsyncIterator<ServerRequest>           │
-│  - on(event, handler): EventEmitter pattern                  │
-└────────────────────────────┬────────────────────────────────┘
-                             │
-         ┌───────────────────┼───────────────────┐
-         ▼                   ▼                   ▼
-   ┌──────────┐      ┌─────────────┐     ┌─────────────┐
-   │  Action  │      │   ZMQ       │     │ Timer       │
-   │  Queue   │      │  Messages   │     │  Events     │
-   └──────────┘      └─────────────┘     └─────────────┘
-         │                   │                   │
-         └───────────────────┼───────────────────┘
-                             ▼
-                    ┌─────────────────┐
-                    │  Unified Event  │
-                    │  Loop (merged)  │
-                    └─────────────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │  State Machine  │
-                    │  (ClientState)  │
-                    └─────────────────┘
-         ┌───────────────────┼───────────────────┐
-         ▼                   ▼                   ▼
-   ┌──────────┐      ┌──────────────┐   ┌──────────────┐
-   │ Pending  │      │  Pending     │   │  Server      │
-   │ Requests │      │  Queries     │   │  Request     │
-   │          │      │              │   │  Tracker     │
-   └──────────┘      └──────────────┘   └──────────────┘
-         │                   │                   │
-         └───────────────────┼───────────────────┘
-                             ▼
-                    ┌─────────────────┐
-                    │   Transport     │
-                    │  (ZMQ DEALER)   │
-                    └─────────────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │  Protocol       │
-                    │  Codecs         │
-                    │  (encode/decode)│
-                    └─────────────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │ ZIO Raft Server │
-                    │   (Scala)       │
-                    └─────────────────┘
-```
+1. **Idiomatic TypeScript**: Use Node.js ecosystem patterns, not Scala ports
+2. **Wire Protocol Compatibility**: Byte-for-byte compatible with Scala client-server-protocol
+3. **Type Safety**: Leverage TypeScript's type system for compile-time safety
+4. **Minimal API Surface**: Simple, focused API following principle of least surprise
+5. **Zero Built-in Logging**: Applications handle all logging via event observation
+6. **High Performance**: 1K-10K+ req/sec throughput with low latency overhead
 
 ---
 
-## 2. Module Structure
-
-### 2.1 Core Modules
+## High-Level Architecture
 
 ```
-typescript-client/src/
-├── index.ts                    # Public API exports
-├── client.ts                   # RaftClient main class
-├── config.ts                   # ClientConfig and validation
-├── types.ts                    # Shared type definitions (branded types)
-│
-├── transport/
-│   ├── transport.ts            # ClientTransport interface
-│   ├── zmqTransport.ts         # ZMQ implementation
-│   └── mockTransport.ts        # Mock for testing
-│
-├── protocol/
-│   ├── messages.ts             # Message type definitions
-│   ├── codecs.ts               # Binary encoding/decoding
-│   ├── constants.ts            # Protocol constants
-│   └── frame.ts                # Binary framing utilities (if needed)
-│
-├── state/
-│   ├── clientState.ts          # State machine implementation
-│   ├── pendingRequests.ts      # PendingRequests tracker
-│   ├── pendingQueries.ts       # PendingQueries tracker
-│   ├── serverRequestTracker.ts # Server request deduplication
-│   └── requestIdRef.ts         # RequestId counter
-│
-├── events/
-│   ├── eventTypes.ts           # ClientEvent definitions
-│   └── eventEmitter.ts         # Event emission utilities
-│
-└── utils/
-    ├── asyncQueue.ts           # Async action queue
-    └── timer.ts                # Timer utilities
+┌─────────────────────────────────────────────────────────────────┐
+│                      Application Layer                          │
+│  (User Code: submitCommand, submitQuery, event handlers)        │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ├─── Constructor(config) → validates
+                         ├─── connect() → Promise<void>
+                         ├─── submitCommand(payload) → Promise<Uint8Array>
+                         ├─── submitQuery(payload) → Promise<Uint8Array>
+                         ├─── disconnect() → Promise<void>
+                         └─── on(event, handler) → EventEmitter
+                         │
+┌────────────────────────┴────────────────────────────────────────┐
+│                       RaftClient (Main Class)                   │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │              Unified Event Stream                         │  │
+│  │  (Merges: ActionQueue, ServerMessages, Timers)           │  │
+│  └────────┬─────────────────────────────────────────────────┘  │
+│           │                                                      │
+│  ┌────────▼──────────────────────────────────────────────────┐ │
+│  │          ClientState (State Machine)                      │ │
+│  │  • Disconnected                                           │ │
+│  │  • ConnectingNewSession                                   │ │
+│  │  • ConnectingExistingSession                              │ │
+│  │  • Connected                                              │ │
+│  │                                                           │ │
+│  │  Each state: handle(event) → Promise<nextState>          │ │
+│  └────────┬──────────────────────────────────────────────────┘ │
+│           │                                                      │
+│  ┌────────▼────────┐  ┌─────────────────┐  ┌────────────────┐ │
+│  │ PendingRequests │  │ PendingQueries  │  │ ServerRequest  │ │
+│  │  (Map<ID, Req>) │  │ (Map<ID, Query>)│  │    Tracker     │ │
+│  └─────────────────┘  └─────────────────┘  └────────────────┘ │
+│                                                                  │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+┌────────────────────────┴────────────────────────────────────────┐
+│                  Protocol Layer                                 │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Message Codecs (Binary Serialization)                   │  │
+│  │  • ClientMessage encoding (CreateSession, ClientRequest..│  │
+│  │  • ServerMessage decoding (SessionCreated, ClientResponse│  │
+│  │  • Protocol header validation (signature + version)      │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+┌────────────────────────┴────────────────────────────────────────┐
+│                  Transport Layer (ZeroMQ)                       │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  ClientTransport                                         │  │
+│  │  • ZMQ DEALER socket                                     │  │
+│  │  • connect(endpoint) / disconnect()                      │  │
+│  │  • sendMessage(msg: ClientMessage)                       │  │
+│  │  • incomingMessages: AsyncIterable<ServerMessage>       │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+                         │
+                         ▼
+                  ┌──────────────┐
+                  │ ZIO Raft     │
+                  │ Server       │
+                  │ (ZMQ ROUTER) │
+                  └──────────────┘
 ```
 
 ---
 
-## 3. State Machine Design
+## Component Breakdown
 
-### 3.1 States and Transitions
+### 1. RaftClient (Main Entry Point)
 
+**Responsibility**: Public API facade, lifecycle management, event loop orchestration
+
+**Key Methods**:
+```typescript
+class RaftClient extends EventEmitter {
+  constructor(config: ClientConfig) {
+    // 1. Validate config (throw ValidationError if invalid)
+    // 2. Create transport (ZMQ DEALER socket)
+    // 3. Create action queue (unbounded async queue)
+    // 4. Create server request queue
+    // 5. Initialize state to Disconnected
+    // 6. Event loop not started yet (lazy)
+  }
+  
+  async connect(): Promise<void> {
+    // 1. Start event loop (if not already running)
+    // 2. Enqueue Connect action
+    // 3. Return (state machine handles actual connection)
+  }
+  
+  async submitCommand(payload: Uint8Array): Promise<Uint8Array> {
+    // 1. Validate payload (throw ValidationError if bad)
+    // 2. Create Promise + resolve/reject callbacks
+    // 3. Enqueue SubmitCommand action with promise
+    // 4. Return promise (resolves when response received or timeout)
+  }
+  
+  async submitQuery(payload: Uint8Array): Promise<Uint8Array> {
+    // Similar to submitCommand but uses SubmitQuery action
+  }
+  
+  async disconnect(): Promise<void> {
+    // 1. Enqueue Disconnect action
+    // 2. Wait for event loop to terminate
+  }
+  
+  onServerRequest(handler: (req: ServerRequest) => void): void {
+    // Register handler for server-initiated requests
+    // Internally: read from serverRequestQueue, invoke handler
+  }
+}
 ```
-┌─────────────┐
-│             │ connect()
-│ Disconnected├────────────────────┐
-│             │                    │
-└─────────────┘                    ▼
-                        ┌────────────────────────┐
-                        │ ConnectingNewSession   │
-                        │  - Send CreateSession  │
-                        └───────┬────────────────┘
-                                │
-              SessionCreated    │    SessionRejected
-              ┌─────────────────┼─────────────┐
-              │                 │             │
-              ▼                 │             ▼
-      ┌─────────────┐           │     ┌──────────────┐
-      │             │           │     │ Try next     │
-      │  Connected  │           │     │ member       │
-      │             │           │     └──────────────┘
-      └──────┬──────┘           │
-             │                  │
-             │ SessionClosed    │
-             │ (not expired)    │
-             └──────────────────┘
-                     │
-                     ▼
-          ┌─────────────────────────┐
-          │ ConnectingExistingSession│
-          │  - Send ContinueSession │
-          └────────────────────────┘
+
+**Event Loop**:
+```typescript
+private async runEventLoop(): Promise<void> {
+  // Merge streams:
+  // 1. actionQueue (user API calls)
+  // 2. transport.incomingMessages (server responses)
+  // 3. keepAliveTimer (periodic tick)
+  // 4. timeoutChecker (periodic timeout check)
+  
+  let currentState: ClientState = new DisconnectedState(this.config);
+  
+  for await (const event of this.unifiedStream()) {
+    currentState = await currentState.handle(event, this.transport, ...);
+  }
+}
 ```
 
-### 3.2 State Handler Pattern
+---
+
+### 2. ClientState (State Machine)
+
+**Responsibility**: Functional state machine, handles all events, transitions between states
+
+**State Diagram**:
+```
+┌──────────────┐
+│ Disconnected │──────connect()──────┐
+└──────────────┘                     │
+                                     ▼
+                         ┌────────────────────────┐
+                         │ ConnectingNewSession   │
+                         │ (send CreateSession)   │
+                         └───────────┬────────────┘
+                                     │
+                         SessionCreated
+                                     │
+                                     ▼
+                         ┌────────────────────────┐
+            ┌───────────►│      Connected         │
+            │            │ (active session)       │
+            │            └───────────┬────────────┘
+            │                        │
+            │            disconnect() │  network failure
+            │                        ▼
+            │            ┌────────────────────────┐
+            │            │ ConnectingExisting     │
+            └────────────│ Session (resume)       │
+      SessionContinued   └────────────────────────┘
+                                     │
+                         SessionExpired (terminal)
+                                     ▼
+                                  [EXIT]
+```
+
+**State Handlers**:
 
 Each state implements:
 ```typescript
 interface StateHandler {
-  handle(event: StreamEvent): Promise<ClientState>;
+  handle(
+    event: StreamEvent,
+    transport: ClientTransport,
+    serverRequestQueue: AsyncQueue<ServerRequest>
+  ): Promise<ClientState>;
 }
 ```
 
-The state machine processes events sequentially, transitioning between states based on:
-- User actions (connect, disconnect, submit)
-- Server messages (responses, rejections, closures)
-- Timer events (keep-alive, timeout checks)
+**Event Handling Examples**:
+
+1. **Disconnected + Connect**:
+   - Generate nonce
+   - Pick first cluster member
+   - Connect transport to endpoint
+   - Send CreateSession message
+   - Transition to ConnectingNewSession
+
+2. **ConnectingNewSession + SessionCreated**:
+   - Store sessionId
+   - Emit 'connected' event
+   - Transition to Connected
+
+3. **Connected + SubmitCommand**:
+   - Generate requestId
+   - Add to pendingRequests
+   - Send ClientRequest message
+   - Stay in Connected (wait for response)
+
+4. **Connected + ClientResponse**:
+   - Lookup pending request by requestId
+   - Resolve promise with response payload
+   - Remove from pendingRequests
+   - Stay in Connected
+
+5. **Connected + Network Disconnect**:
+   - Emit 'disconnected' event
+   - Transition to ConnectingExistingSession (preserve sessionId, pending requests)
+
+6. **ConnectingExistingSession + SessionContinued**:
+   - Emit 'connected' event
+   - Resend all pending requests
+   - Transition to Connected
+
+7. **Connected + SessionClosed(SessionExpired)**:
+   - Emit 'sessionExpired' event
+   - Fail all pending requests with SessionExpiredError
+   - Terminate event loop (exit process)
 
 ---
 
-## 4. Event Loop Architecture
+### 3. Protocol Layer (Binary Codecs)
 
-### 4.1 Unified Event Stream
+**Responsibility**: Byte-level encoding/decoding of protocol messages
 
-The client merges multiple event sources into a single async iterator:
+**Message Format**:
+```
+┌────────────┬──────────┬──────────────┬─────────────────────┐
+│ Signature  │ Version  │ Discriminator│  Message Payload    │
+│  (5 bytes) │ (1 byte) │   (1 byte)   │  (variable length)  │
+└────────────┴──────────┴──────────────┴─────────────────────┘
+```
 
+**Signature**: `0x7a 0x72 0x61 0x66 0x74` ("zraft")  
+**Version**: `0x01`  
+**Discriminators**:
+
+**ClientMessage** (client → server):
+- `0x01`: CreateSession
+- `0x02`: ContinueSession
+- `0x03`: KeepAlive
+- `0x04`: ClientRequest
+- `0x05`: ServerRequestAck
+- `0x06`: CloseSession
+- `0x07`: ConnectionClosed
+- `0x08`: Query
+
+**ServerMessage** (server → client):
+- `0x01`: SessionCreated
+- `0x02`: SessionContinued
+- `0x03`: SessionRejected
+- `0x04`: SessionClosed
+- `0x05`: KeepAliveResponse
+- `0x06`: ClientResponse
+- `0x07`: ServerRequest
+- `0x08`: RequestError
+- `0x09`: QueryResponse
+
+**Codec Implementation Pattern**:
 ```typescript
-async function* unifiedEventStream(): AsyncIterator<StreamEvent> {
-  const actionQueue = new AsyncQueue<ClientAction>();
-  const zmqMessages = zmqTransport.incomingMessages();
-  const keepAliveTicker = setInterval(() => ..., keepAliveInterval);
-  const timeoutChecker = setInterval(() => ..., 100);
+// Encoding
+function encodeClientMessage(msg: ClientMessage): Buffer {
+  const buffer = Buffer.allocUnsafe(1024); // Pre-allocate
+  let offset = 0;
   
-  // Merge all sources using async generator
-  while (true) {
-    yield await Promise.race([
-      actionQueue.take().then(action => ({ type: 'Action', action })),
-      zmqMessages.next().then(msg => ({ type: 'ServerMsg', message: msg })),
-      // ... other sources
-    ]);
-  }
-}
-```
-
-### 4.2 Event Processing Loop
-
-```typescript
-async function run() {
-  let state: ClientState = { state: 'Disconnected', config };
+  // Write header
+  offset = buffer.write('zraft', offset, 'latin1');
+  buffer.writeUInt8(0x01, offset++); // Protocol version
   
-  for await (const event of unifiedEventStream()) {
-    try {
-      const newState = await state.handle(event, transport, dependencies);
-      if (newState.state !== state.state) {
-        emit('stateChange', { oldState: state.state, newState: newState.state });
-      }
-      state = newState;
-    } catch (error) {
-      // Error handling...
-    }
-  }
-}
-```
-
----
-
-## 5. Request/Response Correlation
-
-### 5.1 Command Flow (Client → Server → Client)
-
-```
-Application                Client              Transport             Server
-     │                        │                    │                    │
-     │ submitCommand()        │                    │                    │
-     ├───────────────────────>│                    │                    │
-     │                        │ Allocate RequestId │                    │
-     │                        │ Add to pending     │                    │
-     │                        │ map with Promise   │                    │
-     │                        │                    │                    │
-     │                        │ ClientRequest      │                    │
-     │                        ├───────────────────>│ ClientRequest      │
-     │                        │                    ├───────────────────>│
-     │                        │                    │                    │
-     │                        │                    │ ClientResponse     │
-     │                        │ ClientResponse     │<───────────────────┤
-     │                        │<───────────────────┤                    │
-     │                        │ Lookup RequestId   │                    │
-     │                        │ Resolve Promise    │                    │
-     │<───────────────────────┤                    │                    │
-     │  result: Buffer        │                    │                    │
-```
-
-### 5.2 Query Flow (Similar but uses CorrelationId)
-
-Queries use UUID-based correlation IDs instead of sequential request IDs, allowing them to bypass the session state machine's command sequencing.
-
----
-
-## 6. Reconnection Strategy
-
-### 6.1 Leader Discovery
-
-```
-1. Initial connection: Try first member from cluster config
-2. If SessionRejected with NotLeader:
-   - If leaderId hint provided: connect to that member
-   - Otherwise: try next member in round-robin
-3. If SessionClosed with NotLeaderAnymore:
-   - Same as above
-4. On network failure:
-   - Try next member
-5. Continue until successful or all members exhausted
-```
-
-### 6.2 Pending Request Handling
-
-**During Reconnection (Not Expired)**:
-- Keep pending requests in memory
-- After successful reconnection (SessionContinued):
-  - Resend all pending requests with updated lowestPendingRequestId
-  - Update lastSentAt timestamps
-  - Continue waiting for responses
-
-**On Session Expiry**:
-- Reject all pending request promises with error
-- Reject all pending query promises with error
-- Emit 'sessionExpired' event
-- Terminate client (no automatic recovery)
-
----
-
-## 7. Binary Protocol Implementation
-
-### 7.1 Encoding Strategy
-
-Each message codec follows this pattern:
-```typescript
-function encodeClientMessage(message: ClientMessage): Buffer {
-  const parts: Buffer[] = [];
-  
-  // 1. Protocol header
-  parts.push(PROTOCOL_SIGNATURE);                    // 5 bytes
-  parts.push(Buffer.from([PROTOCOL_VERSION]));       // 1 byte
-  
-  // 2. Message type discriminator
-  parts.push(Buffer.from([getMessageType(message)])); // 1 byte
-  
-  // 3. Message-specific data
-  switch (message.type) {
+  // Write discriminator + payload based on message type
+  switch (msg.type) {
     case 'CreateSession':
-      parts.push(encodeCapabilities(message.capabilities));
-      parts.push(encodeNonce(message.nonce));
+      buffer.writeUInt8(0x01, offset++);
+      offset = encodeCapabilities(msg.capabilities, buffer, offset);
+      offset = encodeNonce(msg.nonce, buffer, offset);
       break;
-    // ... other cases
+    case 'ClientRequest':
+      buffer.writeUInt8(0x04, offset++);
+      offset = encodeRequestId(msg.requestId, buffer, offset);
+      offset = encodeRequestId(msg.lowestPendingRequestId, buffer, offset);
+      offset = encodePayload(msg.payload, buffer, offset);
+      offset = encodeTimestamp(msg.createdAt, buffer, offset);
+      break;
+    // ... other message types
   }
   
-  return Buffer.concat(parts);
+  return buffer.subarray(0, offset);
 }
-```
 
-### 7.2 Decoding Strategy
-
-```typescript
+// Decoding
 function decodeServerMessage(buffer: Buffer): ServerMessage {
   let offset = 0;
   
-  // 1. Verify protocol header
-  const signature = buffer.slice(offset, offset + 5);
-  if (!signature.equals(PROTOCOL_SIGNATURE)) {
-    throw new Error('Invalid protocol signature');
-  }
+  // Validate header
+  const signature = buffer.toString('latin1', offset, offset + 5);
+  if (signature !== 'zraft') throw new ProtocolError('Invalid signature');
   offset += 5;
   
-  const version = buffer.readUInt8(offset);
-  if (version !== PROTOCOL_VERSION) {
-    throw new Error(`Unsupported protocol version: ${version}`);
-  }
-  offset += 1;
+  const version = buffer.readUInt8(offset++);
+  if (version !== 0x01) throw new ProtocolError(`Unsupported version: ${version}`);
   
-  // 2. Read message type
-  const messageType = buffer.readUInt8(offset);
-  offset += 1;
+  // Read discriminator
+  const discriminator = buffer.readUInt8(offset++);
   
-  // 3. Decode message-specific data
-  switch (messageType) {
-    case ServerMessageType.SessionCreated:
-      return decodeSessionCreated(buffer, offset);
-    // ... other cases
+  // Decode payload based on discriminator
+  switch (discriminator) {
+    case 0x01: // SessionCreated
+      return {
+        type: 'SessionCreated',
+        sessionId: decodeSessionId(buffer, offset),
+        nonce: decodeNonce(buffer, offset + 36)
+      };
+    case 0x06: // ClientResponse
+      const [requestId, nextOffset] = decodeRequestId(buffer, offset);
+      const [payload, finalOffset] = decodePayload(buffer, nextOffset);
+      return {
+        type: 'ClientResponse',
+        requestId,
+        result: payload
+      };
+    // ... other message types
+    default:
+      throw new ProtocolError(`Unknown discriminator: ${discriminator}`);
   }
 }
 ```
 
-### 7.3 Variable-Length Encoding
-
-```typescript
-// String encoding: [length: uint16][utf8 bytes]
-function encodeString(str: string): Buffer {
-  const utf8 = Buffer.from(str, 'utf8');
-  const length = Buffer.allocUnsafe(2);
-  length.writeUInt16BE(utf8.length);
-  return Buffer.concat([length, utf8]);
-}
-
-// ByteVector encoding: [length: int32][raw bytes]
-function encodePayload(payload: Buffer): Buffer {
-  const length = Buffer.allocUnsafe(4);
-  length.writeInt32BE(payload.length);
-  return Buffer.concat([length, payload]);
-}
-
-// Map encoding: [count: uint16]([key][value])*
-function encodeMap(map: Map<string, string>): Buffer {
-  const parts: Buffer[] = [];
-  const count = Buffer.allocUnsafe(2);
-  count.writeUInt16BE(map.size);
-  parts.push(count);
-  
-  for (const [key, value] of map) {
-    parts.push(encodeString(key));
-    parts.push(encodeString(value));
-  }
-  
-  return Buffer.concat(parts);
-}
-```
+**Field Encoding**:
+- **String**: Length-prefixed varint + UTF-8 bytes
+- **BigInt (RequestId/Nonce)**: 8 bytes little-endian uint64
+- **UUID (SessionId/CorrelationId)**: 16 bytes raw binary (no dashes)
+- **Timestamp (Date)**: ISO 8601 string, length-prefixed
+- **Payload (Uint8Array)**: Length-prefixed varint + raw bytes
+- **Map<String, String>**: varint count + (key, value) pairs
 
 ---
 
-## 8. ZeroMQ Transport
+### 4. Transport Layer (ZeroMQ)
 
-### 8.1 Socket Configuration
+**Responsibility**: ZMQ socket management, connection/disconnection, message send/receive
 
+**ZMQ Pattern**: DEALER (client) ↔ ROUTER (server)
+
+**ClientTransport Interface**:
+```typescript
+interface ClientTransport {
+  connect(endpoint: string): Promise<void>;
+  disconnect(): Promise<void>;
+  sendMessage(msg: ClientMessage): Promise<void>;
+  incomingMessages: AsyncIterable<ServerMessage>;
+  onDisconnect(handler: () => void): void;
+}
+```
+
+**Implementation**:
 ```typescript
 class ZmqTransport implements ClientTransport {
   private socket: zmq.Dealer;
-  private currentAddress: string | null = null;
+  private currentEndpoint: string | null = null;
   
-  constructor(config: ClientConfig) {
+  async connect(endpoint: string): Promise<void> {
     this.socket = new zmq.Dealer();
-    
-    // Configure socket options (matching Scala client)
-    this.socket.linger = 0;                    // Immediate close
-    this.socket.heartbeatInterval = 1000;      // 1 second
-    this.socket.heartbeatTtl = 10000;          // 10 seconds
-    this.socket.heartbeatTimeout = 30000;      // 30 seconds
-    this.socket.sendHighWaterMark = 200000;
-    this.socket.receiveHighWaterMark = 200000;
-  }
-  
-  async connect(address: string): Promise<void> {
-    if (this.currentAddress) {
-      await this.disconnect();
-    }
-    this.socket.connect(address);
-    this.currentAddress = address;
+    this.socket.connect(endpoint);
+    this.currentEndpoint = endpoint;
   }
   
   async disconnect(): Promise<void> {
-    if (this.currentAddress) {
-      this.socket.disconnect(this.currentAddress);
-      this.currentAddress = null;
+    if (this.socket) {
+      this.socket.disconnect(this.currentEndpoint!);
+      await this.socket.close();
+      this.currentEndpoint = null;
     }
   }
   
-  async send(message: ClientMessage): Promise<void> {
-    const encoded = encodeClientMessage(message);
+  async sendMessage(msg: ClientMessage): Promise<void> {
+    const encoded = encodeClientMessage(msg);
     await this.socket.send(encoded);
   }
   
-  async *receive(): AsyncIterator<ServerMessage> {
+  async *incomingMessages(): AsyncIterable<ServerMessage> {
     for await (const [buffer] of this.socket) {
-      yield decodeServerMessage(buffer as Buffer);
+      try {
+        yield decodeServerMessage(buffer as Buffer);
+      } catch (err) {
+        // Log protocol error but don't crash
+        console.error('Protocol decode error:', err);
+      }
     }
+  }
+}
+```
+
+**ZMQ Routing Identity**:
+- Server derives session ID from ZMQ routing identity
+- Client doesn't explicitly manage routing identity (ZMQ handles automatically)
+- Session persistence relies on ZMQ connection identity
+
+**Reconnection**:
+- On disconnect: close old socket, create new socket
+- Connect to next cluster member (round-robin)
+- ZMQ provides automatic reconnection for existing connections
+- Client handles explicit reconnection for leadership changes
+
+---
+
+### 5. Request Management
+
+**PendingRequests**:
+```typescript
+class PendingRequests {
+  private map = new Map<bigint, PendingCommand>();
+  
+  add(requestId: bigint, payload: Uint8Array, promise: Promise<Uint8Array>): void {
+    this.map.set(requestId, { requestId, payload, promise, createdAt: new Date() });
+  }
+  
+  complete(requestId: bigint, result: Uint8Array): void {
+    const pending = this.map.get(requestId);
+    if (pending) {
+      pending.resolve(result);
+      this.map.delete(requestId);
+    }
+  }
+  
+  timeout(requestId: bigint): void {
+    const pending = this.map.get(requestId);
+    if (pending) {
+      pending.reject(new TimeoutError('Request timeout', requestId));
+      this.map.delete(requestId);
+    }
+  }
+  
+  checkTimeouts(now: Date, timeoutMs: number): bigint[] {
+    const timedOut: bigint[] = [];
+    for (const [id, req] of this.map) {
+      if (now.getTime() - req.createdAt.getTime() > timeoutMs) {
+        timedOut.push(id);
+      }
+    }
+    return timedOut;
+  }
+  
+  lowestPendingRequestId(): bigint | undefined {
+    let lowest: bigint | undefined;
+    for (const [id] of this.map) {
+      if (lowest === undefined || id < lowest) lowest = id;
+    }
+    return lowest;
+  }
+}
+```
+
+**PendingQueries**: Similar structure but keyed by CorrelationId (UUID string)
+
+**RequestIdRef** (Atomic Counter):
+```typescript
+class RequestIdRef {
+  private current: bigint = 0n;
+  
+  next(): bigint {
+    return ++this.current;
+  }
+  
+  current(): bigint {
+    return this.current;
   }
 }
 ```
 
 ---
 
-## 9. Performance Optimizations
+### 6. Server Request Handling
 
-### 9.1 Request Batching
+**Flow**:
+1. Server sends ServerRequest(requestId, payload)
+2. Client receives, checks ServerRequestTracker
+3. If new request (consecutive ID): deliver to handler, send ack
+4. If old request: send ack, don't deliver
+5. If out-of-order: log warning, don't ack (wait for missing requests)
 
-For high throughput, batch multiple requests:
-
+**ServerRequestTracker**:
 ```typescript
-class RequestBatcher {
-  private batch: ClientRequest[] = [];
-  private timer: NodeJS.Timeout | null = null;
+class ServerRequestTracker {
+  private lastAcknowledged: bigint = 0n;
   
-  async add(request: ClientRequest): Promise<void> {
-    this.batch.push(request);
-    
-    // Send batch if size threshold reached
-    if (this.batch.length >= 100) {
-      await this.flush();
-    }
-    
-    // Or send after time window (10ms)
-    if (!this.timer) {
-      this.timer = setTimeout(() => this.flush(), 10);
+  check(requestId: bigint): 'Process' | 'OldRequest' | 'OutOfOrder' {
+    if (requestId === this.lastAcknowledged + 1n) {
+      return 'Process'; // Expected next
+    } else if (requestId <= this.lastAcknowledged) {
+      return 'OldRequest'; // Already processed
+    } else {
+      return 'OutOfOrder'; // Gap detected
     }
   }
   
-  private async flush(): Promise<void> {
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
-    
-    const toSend = this.batch;
-    this.batch = [];
-    
-    // Send all as separate messages (ZMQ handles efficiently)
-    for (const request of toSend) {
-      await transport.send(request);
-    }
-  }
-}
-```
-
-### 9.2 Buffer Pooling
-
-Reuse buffers for encoding:
-```typescript
-class BufferPool {
-  private pool: Buffer[] = [];
-  private maxSize = 100;
-  
-  acquire(size: number): Buffer {
-    const buffer = this.pool.pop();
-    if (buffer && buffer.length >= size) {
-      return buffer.slice(0, size);
-    }
-    return Buffer.allocUnsafe(size);
-  }
-  
-  release(buffer: Buffer): void {
-    if (this.pool.length < this.maxSize) {
-      this.pool.push(buffer);
-    }
+  acknowledge(requestId: bigint): void {
+    this.lastAcknowledged = requestId;
   }
 }
 ```
 
 ---
 
-## 10. Error Handling
+## Sequence Diagrams
 
-### 10.1 Error Categories
+### Scenario 1: Successful Command Submission
 
-```typescript
-// Validation errors (thrown synchronously)
-class ValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ValidationError';
-  }
-}
+```
+App             Client          StateMachine    Transport       Server
+ │                │                  │              │              │
+ │  submitCommand │                  │              │              │
+ ├───────────────►│                  │              │              │
+ │                │  Enqueue Action  │              │              │
+ │                ├─────────────────►│              │              │
+ │                │                  │  SendMessage │              │
+ │                │                  ├─────────────►│  ClientRequest
+ │                │                  │              ├─────────────►│
+ │                │                  │              │              │
+ │   (Promise     │                  │              │ ClientResponse
+ │    pending)    │                  │              │◄─────────────┤
+ │                │                  │  Incoming    │              │
+ │                │                  │◄─────────────┤              │
+ │                │  Resolve Promise │              │              │
+ │◄───────────────┼──────────────────┤              │              │
+ │  Uint8Array    │                  │              │              │
+```
 
-// Network errors (async rejection)
-class NetworkError extends Error {
-  constructor(message: string, public readonly memberId?: MemberId) {
-    super(message);
-    this.name = 'NetworkError';
-  }
-}
+### Scenario 2: Reconnection with Session Resumption
 
-// Session errors (async rejection)
-class SessionError extends Error {
-  constructor(
-    message: string,
-    public readonly reason: RejectionReason | SessionCloseReason
-  ) {
-    super(message);
-    this.name = 'SessionError';
-  }
-}
+```
+Client          StateMachine    Transport       Server
+  │                  │              │              │
+  │   (Connected)    │              │              │
+  │                  │              │   Network    │
+  │                  │              │   Failure    │
+  │                  │              │◄─────────────┤
+  │  Emit            │              │              │
+  │  'disconnected'  │              │              │
+  ◄─────────────────┤              │              │
+  │                  │              │              │
+  │   Transition to  │              │              │
+  │   Connecting     │              │              │
+  │   ExistingSession│              │              │
+  │                  │  Connect new │              │
+  │                  ├─────────────►│              │
+  │                  │  endpoint    │              │
+  │                  │              │              │
+  │                  │  Send        │ContinueSession
+  │                  ├─────────────►│─────────────►│
+  │                  │              │              │
+  │                  │              │SessionContinued
+  │                  │              │◄─────────────┤
+  │  Emit            │              │              │
+  │  'connected'     │              │              │
+  ◄─────────────────┤              │              │
+  │                  │              │              │
+  │   Resend Pending │              │              │
+  │   Requests       ├─────────────►│─────────────►│
+```
 
-// Timeout errors (async rejection)
-class TimeoutError extends Error {
-  constructor(message: string, public readonly requestId?: RequestId) {
-    super(message);
-    this.name = 'TimeoutError';
+### Scenario 3: Session Expiry (Terminal)
+
+```
+Client          StateMachine    Transport       Server
+  │                  │              │              │
+  │   (Connected)    │              │              │
+  │                  │              │              │
+  │   (Missed        │              │              │
+  │    KeepAlives)   │              │              │
+  │                  │              │SessionClosed │
+  │                  │              │(SessionExpired)
+  │                  │              │◄─────────────┤
+  │  Emit            │              │              │
+  │  'sessionExpired'│              │              │
+  ◄─────────────────┤              │              │
+  │                  │              │              │
+  │  Fail all        │              │              │
+  │  pending         │              │              │
+  │  requests        │              │              │
+  │                  │              │              │
+  │  Terminate       │              │              │
+  │  event loop      │              │              │
+  │                  X              X              │
+```
+
+---
+
+## Project Structure
+
+### New Files (TypeScript Client)
+
+```
+typescript-client/
+├── src/
+│   ├── index.ts                     # Public API exports
+│   ├── client.ts                    # RaftClient class
+│   ├── config.ts                    # ClientConfig interface + validation
+│   ├── types.ts                     # Common types (SessionId, RequestId, etc.)
+│   ├── errors.ts                    # Error class hierarchy
+│   │
+│   ├── state/
+│   │   ├── clientState.ts           # State machine definitions
+│   │   ├── disconnected.ts          # DisconnectedState handler
+│   │   ├── connectingNew.ts         # ConnectingNewSessionState handler
+│   │   ├── connectingExisting.ts    # ConnectingExistingSessionState handler
+│   │   ├── connected.ts             # ConnectedState handler
+│   │   ├── pendingRequests.ts       # PendingRequests manager
+│   │   ├── pendingQueries.ts        # PendingQueries manager
+│   │   └── serverRequestTracker.ts  # ServerRequestTracker
+│   │
+│   ├── protocol/
+│   │   ├── constants.ts             # Protocol signature, version, discriminators
+│   │   ├── messages.ts              # Message type definitions
+│   │   ├── codecs.ts                # Binary encoding/decoding functions
+│   │   └── fields.ts                # Field-level encoders/decoders
+│   │
+│   ├── transport/
+│   │   ├── transport.ts             # ClientTransport interface
+│   │   ├── zmqTransport.ts          # ZeroMQ implementation
+│   │   └── mockTransport.ts         # Mock for unit tests
+│   │
+│   ├── utils/
+│   │   ├── asyncQueue.ts            # Async queue implementation
+│   │   ├── requestIdRef.ts          # Atomic counter for request IDs
+│   │   └── streamMerger.ts          # Utility to merge async iterables
+│   │
+│   └── events/
+│       ├── eventTypes.ts            # ConnectionEvent type definitions
+│       └── eventEmitter.ts          # Typed EventEmitter wrapper
+│
+├── tests/
+│   ├── unit/
+│   │   ├── protocol/
+│   │   │   ├── codecs.test.ts       # Codec round-trip tests
+│   │   │   └── fields.test.ts       # Field encoding tests
+│   │   ├── state/
+│   │   │   ├── disconnected.test.ts # State handler tests
+│   │   │   ├── connected.test.ts
+│   │   │   ├── pendingRequests.test.ts
+│   │   │   └── serverRequestTracker.test.ts
+│   │   └── utils/
+│   │       └── asyncQueue.test.ts
+│   │
+│   └── integration/
+│       ├── lifecycle.test.ts        # Full connect/request/disconnect cycle
+│       ├── reconnection.test.ts     # Reconnection scenarios
+│       ├── sessionExpiry.test.ts    # Session expiry handling
+│       └── compatibility.test.ts    # Wire protocol compatibility with Scala
+│
+├── package.json
+├── tsconfig.json
+└── vitest.config.ts
+```
+
+### No Changes to Existing Scala Projects
+
+- `client-server-protocol/`: No changes (TypeScript client implements same protocol)
+- `client-server-client/`: No changes (Scala client remains independent)
+- `raft/`: No changes (server implementation unchanged)
+- Other modules: No changes
+
+---
+
+## Dependencies
+
+### Production Dependencies
+
+```json
+{
+  "dependencies": {
+    "zeromq": "^6.0.0"
   }
 }
 ```
 
-### 10.2 Error Recovery
+### Development Dependencies
 
-- **ValidationError**: Fix client code, no recovery
-- **NetworkError**: Try next cluster member
-- **SessionError (NotLeader)**: Redirect to leader
-- **SessionError (SessionExpired)**: Terminal, reject all pending
-- **TimeoutError**: Automatically retry request
-
----
-
-## 11. Testing Strategy
-
-### 11.1 Unit Tests
-
-- Protocol codecs: Roundtrip encoding/decoding
-- State machine: State transitions for each event
-- Pending request tracking: Add, complete, timeout, retry
-- RequestId counter: Monotonic increment, overflow handling
-
-### 11.2 Integration Tests
-
-- Connect to mock/real Raft cluster
-- Submit commands and verify responses
-- Test reconnection scenarios (network failure, leader change)
-- Test session expiry handling
-- Verify high throughput (1K+ req/sec)
-
-### 11.3 Protocol Compatibility Tests
-
-- Generate test messages with Scala server
-- Verify TypeScript client can decode
-- Generate messages with TypeScript client
-- Verify Scala server can decode
-- Use golden files for regression testing
-
----
-
-## 12. Public API
-
-```typescript
-export class RaftClient {
-  constructor(config: ClientConfig);
-  
-  // Lifecycle
-  connect(): Promise<void>;
-  disconnect(): Promise<void>;
-  
-  // Operations
-  submitCommand(payload: Buffer): Promise<Buffer>;
-  query(payload: Buffer): Promise<Buffer>;
-  
-  // Server-initiated requests
-  serverRequests(): AsyncIterator<ServerRequest>;
-  acknowledgeServerRequest(requestId: RequestId): Promise<void>;
-  
-  // Observability
-  on(event: 'stateChange', handler: (e: StateChangeEvent) => void): this;
-  on(event: 'connectionAttempt', handler: (e: ConnectionAttemptEvent) => void): this;
-  on(event: 'connectionSuccess', handler: (e: ConnectionSuccessEvent) => void): this;
-  on(event: 'connectionFailure', handler: (e: ConnectionFailureEvent) => void): this;
-  on(event: 'sessionExpired', handler: (e: SessionExpiredEvent) => void): this;
-  // ... other events
-  
-  off(event: string, handler: Function): this;
-}
-
-export interface ClientConfig {
-  clusterMembers: Map<MemberId, string>;
-  capabilities: Map<string, string>;
-  connectionTimeout?: number;
-  keepAliveInterval?: number;
-  requestTimeout?: number;
+```json
+{
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0",
+    "@types/node": "^18.0.0",
+    "eslint": "^8.56.0",
+    "@typescript-eslint/eslint-plugin": "^6.18.0",
+    "@typescript-eslint/parser": "^6.18.0",
+    "prettier": "^3.1.0"
+  }
 }
 ```
+
+**Note**: Jest currently in package.json but plan recommends migrating to Vitest for better TypeScript support.
+
+---
+
+## Areas Affected & Testing Strategy
+
+### Areas Affected
+
+1. **New TypeScript project**: `typescript-client/` (no impact on existing Scala code)
+2. **Documentation**: README for TypeScript client
+3. **CI/CD**: Add TypeScript client tests to CI pipeline (separate from Scala tests)
+
+### Testing Requirements
+
+#### Unit Tests
+
+1. **Protocol Codecs**:
+   - Test: Round-trip encoding/decoding for all message types
+   - Test: Byte-for-byte compatibility with Scala reference
+   - Test: Protocol header validation (signature + version)
+   - Test: Error handling for invalid messages
+
+2. **State Machine**:
+   - Test: All state transitions with mock transport
+   - Test: Event handling in each state
+   - Test: Edge cases (reconnection, session expiry)
+
+3. **Request Management**:
+   - Test: Pending request add/complete/timeout
+   - Test: Request ID generation (sequential, no gaps)
+   - Test: Timeout detection logic
+
+4. **Server Request Tracking**:
+   - Test: Consecutive ID detection
+   - Test: Duplicate detection (old request)
+   - Test: Out-of-order detection (gap)
+
+#### Integration Tests
+
+1. **Full Lifecycle**:
+   - Test: Constructor → connect() → submitCommand() → disconnect()
+   - Test: Promise resolution with actual response
+   - Test: Event emission (connected, disconnected)
+
+2. **Reconnection**:
+   - Test: Network disconnect → automatic reconnection
+   - Test: Session resumption (ContinueSession)
+   - Test: Pending requests preserved and resent
+
+3. **Session Expiry**:
+   - Test: SessionExpired rejection handling
+   - Test: All pending requests fail
+   - Test: 'sessionExpired' event emitted
+
+4. **Performance**:
+   - Test: 1K-10K requests/second throughput
+   - Test: Low latency overhead (<10ms client-side)
+
+5. **Compatibility**:
+   - Test: TypeScript client against real Scala server
+   - Test: Wire protocol byte-for-byte match
+   - Test: Interoperability with Scala client (same cluster)
+
+---
+
+## Protocol Changes
+
+**No protocol changes required.**
+
+- TypeScript client implements existing client-server-protocol (version 0x01)
+- All message types already defined in Scala protocol
+- Byte-level compatibility maintained
+
+---
+
+## Performance Considerations
+
+### Optimization Strategies
+
+1. **Buffer Pooling**:
+   - Pre-allocate buffers for common message sizes
+   - Reuse buffers across requests to reduce GC pressure
+
+2. **Zero-Copy**:
+   - Use `Buffer.subarray()` instead of `Buffer.slice()` where possible
+   - Avoid intermediate buffer allocations in codec layer
+
+3. **Fast Path for Common Messages**:
+   - Optimize ClientRequest/ClientResponse encoding (hot path)
+   - Cache protocol header bytes
+
+4. **Minimal Allocations**:
+   - Reuse Maps for pending requests (don't recreate)
+   - Avoid unnecessary object spreading in state transitions
+
+5. **Batch-Friendly API**:
+   - Allow Promise.all() pattern for concurrent requests
+   - No internal buffering (send immediately for low latency)
+
+### Benchmarking
+
+Planned benchmarks:
+- Single request latency (round-trip time)
+- Throughput (requests/second at various concurrency levels)
+- Memory usage under sustained load
+- Protocol encoding/decoding overhead
+
+---
+
+## Security Considerations
+
+1. **Input Validation**:
+   - Validate all config inputs in constructor
+   - Validate payload types (Uint8Array) before encoding
+   - Bounds checking in codec layer
+
+2. **Protocol Validation**:
+   - Verify signature and version on all incoming messages
+   - Reject malformed messages gracefully (don't crash)
+   - Limit message sizes to prevent memory exhaustion
+
+3. **No Built-in Authentication**:
+   - Capabilities can include auth tokens (application-level)
+   - ZMQ transport doesn't provide encryption (use ZMQ CurveZMQ if needed)
+
+4. **Error Information**:
+   - Don't leak internal state in error messages
+   - Sanitize endpoint strings in logs (no credentials)
+
+---
+
+## Future Enhancements (Out of Scope)
+
+1. **Browser Support**: Requires WebSocket transport (ZMQ not available in browsers)
+2. **Compression**: Payload compression for large payloads
+3. **Metrics**: Built-in Prometheus metrics (currently requires application-level via events)
+4. **Connection Pooling**: Multiple sessions per client instance
+5. **Batching API**: Explicit batch API for multi-command transactions
 
 ---
 
 ## Summary
 
-This design provides:
+This design provides a production-ready, idiomatic TypeScript client library for ZIO Raft clusters. Key design decisions:
 
-1. **Protocol Compatibility**: Exact binary encoding matching Scala implementation
-2. **State Safety**: Type-safe state machine with discriminated unions
-3. **High Performance**: Batching, buffer pooling, async event processing
-4. **Resilience**: Automatic reconnection, leader discovery, request retry
-5. **Observability**: Rich event system for monitoring without built-in logging
-6. **Type Safety**: Strong TypeScript types throughout
-7. **Testability**: Clear module boundaries, mockable dependencies
+1. **Functional state machine** with discriminated unions for type safety
+2. **Promise-based async API** matching modern Node.js patterns
+3. **Byte-for-byte protocol compatibility** with Scala client
+4. **Minimal event system** (4 events: connected, disconnected, reconnecting, sessionExpired)
+5. **Zero built-in logging** - applications observe events for diagnostics
+6. **High performance** - 1K-10K+ req/sec with minimal overhead
+7. **Comprehensive testing** - unit + integration + compatibility tests
 
-The architecture directly mirrors the proven Scala client while adapting to TypeScript/Node.js idioms and ecosystem.
+The design maintains clear separation of concerns (client → state machine → protocol → transport) while ensuring idiomatic TypeScript throughout. No changes to existing Scala codebase required.
+
+---
+
+## Next Steps
+
+1. Generate tests.md - Extract test scenarios from acceptance criteria
+2. Generate quickstart.md - End-to-end validation guide
+3. Update agent context file - Add TypeScript client to agent knowledge
+4. Re-evaluate Constitution Check - Verify design compliance
+5. Document Phase 2 task generation approach

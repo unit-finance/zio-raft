@@ -1,7 +1,8 @@
+
 # Implementation Plan: TypeScript Client Library
 
-**Branch**: `006-we-want-to` | **Date**: 2025-12-28 (Updated) | **Spec**: [spec.md](./spec.md)
-**Input**: Feature specification from `/specs/006-we-want-to/spec.md`
+**Branch**: `006-we-want-to` | **Date**: 2025-12-29 | **Spec**: [spec.md](./spec.md)
+**Input**: Feature specification from `/Users/keisar/Desktop/Projects/Unit/zio-raft/specs/006-we-want-to/spec.md`
 
 ## Execution Flow (/plan command scope)
 ```
@@ -25,212 +26,240 @@
 9. STOP - Ready for /tasks command
 ```
 
-**IMPORTANT**: The /plan command STOPS at step 8. Phases 2-4 are executed by other commands:
+**IMPORTANT**: The /plan command STOPS at step 7. Phases 2-4 are executed by other commands:
 - Phase 2: /tasks command creates tasks.md
 - Phase 3-4: Implementation execution (manual or via tools)
 
-**UPDATE NOTE (2025-12-28)**: Plan regenerated after `/clarify` added CRITICAL architectural constraint requiring idiomatic TypeScript patterns everywhere (not just public API). See research.md Section 13 for detailed guidance.
-
 ## Summary
-Create a TypeScript client library for Node.js that implements the ZIO Raft client-server protocol, matching the functionality of the existing Scala client. The library will use ZeroMQ for transport, support high-throughput request processing (1K-10K+ req/sec), and provide an event-based architecture for state observation without built-in logging. **CRITICAL**: While wire protocol must match Scala byte-for-byte, ALL implementation patterns must be idiomatic TypeScript/Node.js (see Constitution Check below).
+Build a professional, idiomatic TypeScript/Node.js client library that implements the ZIO Raft client-server wire protocol for JavaScript/TypeScript applications. The client will provide a clean, modern API following Node.js ecosystem patterns (EventEmitter, Promises, classes) while maintaining byte-for-byte wire protocol compatibility with the Scala client. Key features include lazy initialization with explicit connect(), automatic reconnection with session resumption, request queueing with configurable timeouts, minimal event-based observability, and high-throughput support (1K-10K+ req/sec). The library should feel natural to TypeScript developers, similar to popular database clients like ioredis, pg, or mongodb.
 
 ## Technical Context
-**Language/Version**: TypeScript 5.0+, Node.js 18+ LTS  
-**Primary Dependencies**: zeromq (Node.js ZMQ bindings), Buffer API for binary framing  
+**Language/Version**: TypeScript 5.x (ES2022 target), Node.js 18+ runtime  
+**Primary Dependencies**: zeromq (Node.js ZMQ bindings), @msgpack/msgpack (binary framing/serialization)  
 **Storage**: N/A (stateless client library)  
-**Testing**: Jest or Vitest for unit tests, integration tests against mock/real Raft cluster  
-**Target Platform**: Node.js 18+ (server-side runtime)
-**Project Type**: Single TypeScript library package  
-**Performance Goals**: 1,000-10,000+ requests per second throughput with batching optimization  
-**Constraints**: No built-in logging, event-loop based architecture, single session per client instance, **IDIOMATIC TYPESCRIPT EVERYWHERE**  
-**Scale/Scope**: Client library with ~10-15 core modules (transport, protocol, state machine, pending requests/queries, framing)
+**Testing**: Vitest (unit/integration tests), TypeScript type checking  
+**Target Platform**: Node.js 18+ on Linux/macOS/Windows  
+**Project Type**: Library (single TypeScript package published to npm)  
+**Performance Goals**: 1,000-10,000+ requests/second throughput, <10ms client-side latency overhead  
+**Constraints**: Wire protocol byte-for-byte compatible with Scala client-server-protocol; idiomatic TypeScript/Node.js patterns required (no Scala ports); zero built-in logging (application-level observability only); single session per client instance  
+**Scale/Scope**: ~15-20 TypeScript source files, comprehensive type definitions, protocol message encoding/decoding, connection state machine, request queue management, minimal event system
 
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-**NOTE**: This feature implements a TypeScript client library for Node.js, not Scala/ZIO code. The ZIO Raft Constitution principles apply to the **server-side Scala implementation** that this client will communicate with, but NOT to this TypeScript client library itself.
+**IMPORTANT**: This is a TypeScript/Node.js library, not Scala/ZIO code. Constitution principles are interpreted for TypeScript context.
 
-### TypeScript-Specific Quality Standards (Adapted from Constitution)
-Since the constitution is Scala/ZIO-specific, we adapt the spirit of its principles to TypeScript:
+### I. Functional Purity & Type Safety (TypeScript Interpretation)
+- [x] All new code uses TypeScript with strict mode enabled (`strict: true`)
+- [x] No `any` types used; proper type safety throughout with explicit types for public APIs
+- [x] Type safety preserved throughout implementation with comprehensive type definitions
+- **Note**: TypeScript does not enforce functional purity like ZIO; classes with private mutable state are acceptable and idiomatic
 
-**Type Safety & Code Quality** (adapted from Constitution I):
-- [x] Use TypeScript strict mode for maximum type safety
-- [x] Prefer immutable data patterns (readonly, const) for message types and public interfaces
-- [x] Use mutable private state where appropriate (not forced immutability everywhere)
-- [x] Discriminated unions for type-safe message handling
+### II. Explicit Error Handling (TypeScript Interpretation)
+- [x] All external interactions (ZMQ transport, network) have explicit error handling via Promise rejection
+- [x] Custom error types defined for different failure modes (TimeoutError, ValidationError, ConnectionError, SessionExpiredError)
+- [x] Timeout and resource failures properly modeled as rejected Promises with typed errors
+- **Note**: TypeScript uses exceptions and Promise rejection patterns, not ZIO.fail or Either types
 
-**Explicit Error Handling** (adapted from Constitution II):
-- [x] Synchronous exceptions for validation errors (per clarifications)
-- [x] Promise rejection for async operation errors
-- [x] Document all error conditions in type signatures and JSDoc
+### III. Existing Code Preservation (NON-NEGOTIABLE)
+- [x] Core server interfaces (StateMachine, RPC, LogStore) NOT modified - client is separate library
+- [x] Wire protocol backward compatibility maintained - byte-for-byte compatible with Scala client
+- [x] No server performance degradation - client is independent TypeScript package
+- **Note**: This is a new client library; existing Scala client and server remain unchanged
 
-**Protocol Compatibility** (adapted from Constitution III):
-- [x] MUST maintain wire protocol compatibility with Scala client-server implementation
-- [x] No breaking changes to protocol message formats
-- [x] Follow same session lifecycle and reconnection semantics as Scala client
+### IV. ZIO Ecosystem Consistency (NOT APPLICABLE)
+- [N/A] TypeScript client uses Node.js ecosystem patterns, not ZIO primitives
+- [N/A] EventEmitter for events (not ZStream), Promises for async (not ZIO effects)
+- [N/A] Standard Node.js resource patterns (cleanup in disconnect/destroy methods)
+- **Note**: Wire protocol must match Scala byte-for-byte, but implementation is idiomatic TypeScript as per spec requirements
 
-**Ecosystem Consistency** (adapted from Constitution IV):
-- [x] Use Node.js native patterns (EventEmitter for observability, not ZStream)
-- [x] Use Buffer API for binary data handling
-- [x] Use zeromq library for ZMQ transport
-- [x] Use Promises/async-await (not ZIO effects)
-- [x] Use classes with private state (not Ref objects)
-- [x] Library should feel like ioredis, pg, or mongodb
-
-**Test Coverage** (adapted from Constitution V):
-- [x] Unit tests for all protocol message encoding/decoding
-- [x] Integration tests for session lifecycle and reconnection scenarios
-- [x] Performance tests to validate 1K-10K+ req/sec throughput target
-
-### CRITICAL: Idiomatic TypeScript Requirement (Session 2025-12-28)
-- [x] **ALL implementation patterns must be idiomatic TypeScript/Node.js**
-- [x] Wire protocol layer: Match Scala byte-for-byte (codecs)
-- [x] Everything else: Standard TypeScript patterns (see research.md Section 13)
-- [x] No Scala pattern ports (ZRef → private fields, ZStream → EventEmitter, ZIO → Promise)
-- [x] Classes with encapsulated mutable state where appropriate
-- [x] Simple, clear APIs that TypeScript developers expect
+### V. Test-Driven Maintenance (TypeScript Interpretation)
+- [x] All new features include Vitest unit/integration tests
+- [x] Wire protocol compatibility verified with tests against Scala server
+- [x] Performance characteristics validated with throughput tests
+- [x] Edge cases from spec (reconnection, session expiry, queueing) covered by tests
 
 ## Project Structure
 
 ### Documentation (this feature)
 ```
-specs/006-we-want-to/
-├── spec.md             # Feature specification (complete)
-├── plan.md             # This file (/plan command output - UPDATED 2025-12-28)
-├── research.md         # Phase 0 output (/plan command - UPDATED with Section 13)
-├── data-model.md       # Phase 1 output (/plan command)
-├── tests.md            # Phase 1 output (/plan command)
-├── design.md           # Phase 1 output (/plan command)
-├── quickstart.md       # Phase 1 output (/plan command)
-└── tasks.md            # Phase 2 output (/tasks command - WILL BE REGENERATED)
-```
-
-### TypeScript Library Structure (to be created/updated)
-```
-typescript-client/
-├── package.json
-├── tsconfig.json
-├── src/
-│   ├── index.ts                    # Public API exports
-│   ├── client.ts                   # Main RaftClient class (EventEmitter-based)
-│   ├── transport.ts                # ZMQ transport layer
-│   ├── protocol/
-│   │   ├── messages.ts             # Protocol message types
-│   │   ├── codecs.ts               # Binary encoding/decoding (MUST match Scala)
-│   │   └── frame.ts                # Binary framing utilities
-│   ├── state/
-│   │   ├── clientState.ts          # State machine for client
-│   │   ├── pendingRequests.ts     # Pending command tracking
-│   │   └── pendingQueries.ts      # Pending query tracking
-│   ├── config.ts                   # Client configuration
-│   └── types.ts                    # Shared type definitions
-└── tests/
-    ├── unit/                       # Unit tests
-    └── integration/                # Integration tests
+specs/[###-feature]/
+├── plan.md              # This file (/plan command output)
+├── research.md          # Phase 0 output (/plan command)
+├── data-model.md        # Phase 1 output (/plan command)
+├── tests.md             # Phase 1 output (/plan command)
+├── design.md            # Phase 1 output (/plan command)
+├── quickstart.md        # Phase 1 output (/plan command)
+└── tasks.md             # Phase 2 output (/tasks command - NOT created by /plan)
 ```
 
 ## Phase 0: Outline & Research
-**Status**: ✅ COMPLETE (research.md exists)
-- All technical decisions documented in research.md
-- **UPDATED 2025-12-28**: Added Section 13 with idiomatic TypeScript guidelines
-- Wire protocol compatibility strategy defined
-- TypeScript idiom patterns documented (DO/DON'T examples)
-- Implementation review checklist provided
+1. **Extract unknowns from Technical Context** above:
+   - For each NEEDS CLARIFICATION → research task
+   - For each dependency → best practices task
+   - For each integration → patterns task
 
-**Output**: research.md with all technical decisions and TypeScript idiom guidance
+2. **Generate and dispatch research agents**:
+   ```
+   For each unknown in Technical Context:
+     Task: "Research {unknown} for {feature context}"
+   For each technology choice:
+     Task: "Find best practices for {tech} in {domain}"
+   ```
+
+3. **Consolidate findings** in `research.md` using format:
+   - Decision: [what was chosen]
+   - Rationale: [why chosen]
+   - Alternatives considered: [what else evaluated]
+
+**Output**: research.md with all NEEDS CLARIFICATION resolved
 
 ## Phase 1: Design
-**Status**: ✅ COMPLETE (data-model.md, quickstart.md, design.md exist)
-- Data model defined with branded types and protocol messages
-- Quickstart guide shows idiomatic TypeScript usage
-- Design documents outline architecture
+*Prerequisites: research.md complete*
 
-**Note**: Design documents were created before the idiomatic TypeScript clarification. Implementation should follow research.md Section 13 guidelines, which supersede earlier Scala-influenced patterns.
+1. **Extract entities from feature spec** → `data-model.md`:
+   - Entity name, fields, relationships
+   - Validation rules from requirements
+   - State transitions if applicable
+
+2. **Update plan with high-level design and architecture** → `design.md`
+   - Design high-level solution, based on the `research.md`, `data-model.md`, `plan.md`, and `spec.md`. 
+   - Read the relevant chapter from the Raft Paper, you can find it over in memory folder.
+   - What new projects are you going to add?
+   - What are the new dependencies?
+   - What files are going to be changed?
+   - What new entities or classes you need to add?
+   - What areas are affected? Where do we need to add more tests to cover the new functionality?
+   - What procotol changes are required, if any?
+   - Do we need a new version of a codec for the protocol change?
+   - Do we need a new protocol?
+   - In general, give high-level overview of the solution in plain english and drawing as well.
+
+3. **Extract test scenarios from user stories** → `tests.md`:
+   - Each story → integration test scenario
+   - For each functional requirement, evaluate if a test case is required → test case
+   - Each new entity that requires codec → codec test case
+   - For each edge case, prompt the user if a test is required → test case
+   - Based on the `design.md`, what additional test cases we need to add?
+   - Collect the different test cases in the `tests.md` in plain english
+   - We are NOT doing Test Driven Development. Only collect the tests to the `tests.md` file.
+   - Quickstart test = story validation steps
+
+4. **Update agent file incrementally** (O(1) operation):
+   - Run `.specify/scripts/bash/update-agent-context.sh cursor`
+     **IMPORTANT**: Execute it exactly as specified above. Do not add or remove any arguments.
+   - If exists: Add only NEW tech from current plan
+   - Preserve manual additions between markers
+   - Update recent changes (keep last 3)
+   - Keep under 150 lines for token efficiency
+   - Output to repository root
 
 **Output**: data-model.md, tests.md, design.md, quickstart.md, agent-specific file
 
 ## Phase 2: Task Planning Approach
-**Status**: ⏳ NEEDS REGENERATION via `/tasks` command
+*This section describes what the /tasks command will do - DO NOT execute during /plan*
 
-The `/tasks` command will regenerate tasks.md incorporating the idiomatic TypeScript constraint:
-
-**Task Generation Strategy** (Updated for Idiomatic TypeScript):
-
-### Core Principles for Task Generation:
-1. **Wire Protocol Tasks** (T009-T013): Keep as-is - must match Scala exactly
-2. **State Management Tasks** (T017-T020): Update to emphasize idiomatic patterns:
-   - RequestIdRef should be integrated into RaftClient (not standalone utility)
-   - ServerRequestTracker should use mutable private state (not immutable updates)
-3. **State Machine Tasks** (T021-T025): Implement with classes and private state
-4. **Event System Tasks** (T026-T027): Use EventEmitter pattern
-5. **Client API Tasks** (T028-T033): Focus on idiomatic Promise-based API
-
-### Refactoring Tasks to Add:
-- **T061**: Refactor RequestIdRef into RaftClient private field
-- **T062**: Refactor ServerRequestTracker to use mutable private state
-- **T063**: Review and simplify branded type helper objects in types.ts
-
-### Module Creation Tasks (Already Complete, May Need Refactoring):
-1. **Project Setup** (T001-T005): ✅ Complete - No changes needed
-2. **Type Definitions** (T006-T008): ✅ Complete - Branded types are idiomatic, helpers OK
-3. **Protocol Codecs** (T009-T013): ✅ Complete - Wire protocol layer is fine
-4. **Transport Layer** (T014-T016): ✅ Complete - Already idiomatic (classes, async/await)
-5. **State Management** (T017-T020): ⚠️ Needs refactoring (RequestIdRef, ServerRequestTracker)
-
-### Remaining Tasks (Apply Idiomatic Patterns):
-6. **State Machine** (T021-T025): Use classes with private state, not functional state updates
-7. **Event System** (T026-T027): Use EventEmitter, not custom observables
-8. **Client API** (T028-T033): Promise-based, simple class interface
-9-13. **Testing, Optimization, Documentation** (T034-T060): Continue as planned
+**Task Generation Strategy**:
+- Load `.specify/templates/tasks-template.md` as base
+- Generate tasks from Phase 1 design docs (data-model.md, design.md, tests.md, quickstart.md)
+- Task categories:
+  1. **Project Setup**: package.json, tsconfig.json, build configuration
+  2. **Type Definitions**: Core types (SessionId, RequestId, etc.) in types.ts
+  3. **Protocol Layer**: Codec implementation (message encoding/decoding)
+  4. **Transport Layer**: ZMQ transport wrapper
+  5. **State Machine**: All state implementations (Disconnected, ConnectingNew, ConnectingExisting, Connected)
+  6. **Request Management**: PendingRequests, PendingQueries, ServerRequestTracker
+  7. **Client API**: Main RaftClient class with public API
+  8. **Event System**: TypedEventEmitter wrapper
+  9. **Utilities**: AsyncQueue, RequestIdRef, stream merger
+  10. **Error Types**: Custom error class hierarchy
+  11. **Unit Tests**: Protocol, state machine, request management tests
+  12. **Integration Tests**: Full lifecycle, reconnection, compatibility tests
+  13. **Documentation**: README, API docs, examples
 
 **Ordering Strategy**:
-- Implementation-first approach (not TDD for this TypeScript library)
-- Refactoring tasks after Client API implementation
-- Mark [P] for parallel execution (independent files)
+- **No TDD**: Implementation tasks before test tasks
+- **Dependency order**: 
+  - Types → Protocol → Transport → State Machine → Client API
+  - Utilities built in parallel with main implementation [P]
+  - Tests after corresponding implementation complete
+- **Parallel execution** marked with [P] for independent files/modules
 
-**Estimated Output**: 60-65 tasks including refactoring tasks
+**Estimated Output**: 35-40 numbered, ordered tasks in tasks.md
 
-**IMPORTANT**: This phase is executed by the `/tasks` command, NOT by /plan
+**Key Task Breakdown**:
+1. Project setup (package.json, tsconfig, build scripts) [P]
+2. Core type definitions (types.ts, errors.ts) [P]
+3. Protocol constants and message types [P]
+4. Field-level codecs (encode/decode primitives)
+5. Message-level codecs (ClientMessage, ServerMessage)
+6. ZMQ transport implementation
+7. Mock transport for testing [P]
+8. State machine base types (ClientState discriminated union)
+9. DisconnectedState handler
+10. ConnectingNewSessionState handler
+11. ConnectingExistingSessionState handler
+12. ConnectedState handler
+13. PendingRequests manager
+14. PendingQueries manager
+15. ServerRequestTracker
+16. AsyncQueue utility [P]
+17. RequestIdRef counter [P]
+18. Stream merger utility [P]
+19. TypedEventEmitter wrapper [P]
+20. RaftClient main class (constructor, lifecycle methods)
+21. RaftClient command/query submission methods
+22. RaftClient event loop implementation
+23-30. Unit tests (protocol codecs, state handlers, request management)
+31-35. Integration tests (lifecycle, reconnection, compatibility)
+36. README documentation
+37. API documentation generation
+38. Example applications
+39-40. Performance benchmarks
+
+**IMPORTANT**: This phase is executed by the /tasks command, NOT by /plan
 
 ## Phase 3+: Future Implementation
 *These phases are beyond the scope of the /plan command*
 
 **Phase 3**: Task execution (/tasks command creates tasks.md)  
-**Phase 4**: Implementation (execute tasks.md following TypeScript idiomatic principles)  
+**Phase 4**: Implementation (execute tasks.md following constitutional principles)  
 **Phase 5**: Validation (run tests, execute quickstart.md, performance validation)
 
 ## Complexity Tracking
 *Fill ONLY if Constitution Check has violations that must be justified*
 
-**No violations**: The TypeScript client follows adapted constitutional principles appropriate for TypeScript/Node.js development. The wire protocol compatibility requirement is satisfied without violating idiomatic TypeScript patterns.
+| Violation | Why Needed | Simpler Alternative Rejected Because |
+|-----------|------------|-------------------------------------|
+| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
+| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
+
 
 ## Progress Tracking
 *This checklist is updated during execution flow*
 
 **Phase Status**:
-- [x] Phase 0: Research complete (/plan command) - **UPDATED 2025-12-28 with Section 13**
+- [x] Phase 0: Research complete (/plan command)
 - [x] Phase 1: Design complete (/plan command)
 - [x] Phase 2: Task planning complete (/plan command - describe approach only)
-- [ ] Phase 3: Tasks generated (/tasks command) - **NEEDS REGENERATION**
-- [ ] Phase 4: Implementation complete - **IN PROGRESS (5/13 phases done)**
+- [x] Phase 3: Tasks generated (/tasks command)
+- [ ] Phase 4: Implementation complete
 - [ ] Phase 5: Validation passed
 
 **Gate Status**:
-- [x] Initial Constitution Check: PASS (adapted for TypeScript context)
-- [x] Post-Design Constitution Check: PASS (design follows adapted principles)  
-- [x] All NEEDS CLARIFICATION resolved (via /clarify command, Sessions 2025-12-24 and 2025-12-28)
-- [x] Complexity deviations documented (N/A - straightforward client library)
-- [x] **Idiomatic TypeScript constraint added** (2025-12-28)
+- [x] Initial Constitution Check: PASS (TypeScript interpretation applied)
+- [x] Post-Design Constitution Check: PASS (no new violations)
+- [x] All NEEDS CLARIFICATION resolved (via /clarify command sessions)
+- [x] Complexity deviations documented (none - straightforward TypeScript library)
 
-**Implementation Status** (as of 2025-12-28):
-- ✅ Phase 3.1: Project Setup (5 tasks)
-- ✅ Phase 3.2: Core Type Definitions (3 tasks)
-- ✅ Phase 3.3: Binary Protocol Codecs (5 tasks)
-- ✅ Phase 3.4: Transport Layer (3 tasks)
-- ✅ Phase 3.5: State Management Structures (4 tasks) - ⚠️ Needs refactoring for idioms
-- ⏳ Phase 3.6-3.13: Remaining phases (35 tasks) - Will apply idiomatic patterns
-
-**Next Action**: Run `/tasks` to regenerate tasks.md with refactoring tasks and idiomatic pattern guidance
+**Artifacts Generated**:
+- [x] research.md - All technical decisions documented
+- [x] data-model.md - Complete entity and type definitions
+- [x] design.md - High-level architecture with diagrams
+- [x] tests.md - 95 test scenarios cataloged
+- [x] quickstart.md - End-to-end validation guide
+- [x] Agent context updated - TypeScript client added to Cursor rules
+- [x] tasks.md - 50 ordered implementation tasks generated
 
 ---
-*Based on Constitution v1.0.0 (adapted for TypeScript) - See `.specify/memory/constitution.md` and research.md Section 13*
+*Based on Constitution v1.0.0 - See `.specify/memory/constitution.md`*

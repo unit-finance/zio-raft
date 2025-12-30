@@ -167,7 +167,7 @@ describe('Protocol Codecs', () => {
     it('TC-PROTO-012: should reject invalid protocol signature', () => {
       const invalidBuffer = Buffer.from('wrong signature');
       
-      expect(() => decodeServerMessage(invalidBuffer)).toThrow('Invalid signature');
+      expect(() => decodeServerMessage(invalidBuffer)).toThrow('Invalid protocol signature');
     });
 
     it('TC-PROTO-013: should reject unsupported protocol version', () => {
@@ -176,7 +176,7 @@ describe('Protocol Codecs', () => {
       buffer.writeUInt8(0xFF, 5); // Invalid version
       buffer.writeUInt8(0x01, 6);
       
-      expect(() => decodeServerMessage(buffer)).toThrow('Unsupported version');
+      expect(() => decodeServerMessage(buffer)).toThrow('Unsupported protocol version');
     });
   });
 

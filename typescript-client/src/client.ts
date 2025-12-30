@@ -8,9 +8,8 @@ import { ZmqTransport } from './transport/zmqTransport';
 import { ClientState, StateManager, StateTransitionResult } from './state/clientState';
 import { AsyncQueue } from './utils/asyncQueue';
 import { mergeStreams } from './utils/streamMerger';
-import { ValidationError, SessionExpiredError } from './errors';
+import { ValidationError } from './errors';
 import { ServerRequest } from './protocol/messages';
-import { MemberId } from './types';
 
 // ============================================================================
 // Event Types
@@ -45,7 +44,7 @@ export interface SessionExpiredEvent {
 type StreamEvent = ServerMessageEvent | KeepAliveTickEvent | TimeoutCheckEvent | ActionEvent;
 
 interface ServerMessageEvent {
-  readonly type: 'ServerMessage';
+  readonly type: 'ServerMsg';
   readonly message: import('./protocol/messages').ServerMessage;
 }
 
@@ -76,15 +75,15 @@ interface ConnectAction {
 
 interface SubmitCommandAction {
   readonly type: 'SubmitCommand';
-  readonly payload: Uint8Array;
-  readonly resolve: (result: Uint8Array) => void;
+  readonly payload: Buffer;
+  readonly resolve: (result: Buffer) => void;
   readonly reject: (err: Error) => void;
 }
 
 interface SubmitQueryAction {
   readonly type: 'SubmitQuery';
-  readonly payload: Uint8Array;
-  readonly resolve: (result: Uint8Array) => void;
+  readonly payload: Buffer;
+  readonly resolve: (result: Buffer) => void;
   readonly reject: (err: Error) => void;
 }
 
@@ -261,11 +260,11 @@ export class RaftClient extends EventEmitter {
           handler(request);
         } catch (err) {
           // Swallow errors in user handler to prevent crash
-          this.emit('error', err);
+          this.emit('error', err instanceof Error ? err : new Error(String(err)));
         }
       }
     })().catch((err) => {
-      this.emit('error', err);
+      this.emit('error', err instanceof Error ? err : new Error(String(err)));
     });
   }
 
@@ -305,7 +304,7 @@ export class RaftClient extends EventEmitter {
         }
       }
     } catch (err) {
-      this.emit('error', err);
+      this.emit('error', err instanceof Error ? err : new Error(String(err)));
     } finally {
       await this.cleanup();
     }
@@ -338,7 +337,7 @@ export class RaftClient extends EventEmitter {
         }
       }
     } catch (err) {
-      this.emit('error', err);
+      this.emit('error', err instanceof Error ? err : new Error(String(err)));
     }
   }
 
@@ -391,7 +390,7 @@ export class RaftClient extends EventEmitter {
 
   private async *createServerMessageStream(): AsyncIterable<StreamEvent> {
     for await (const message of this.transport.incomingMessages) {
-      yield { type: 'ServerMessage', message };
+      yield { type: 'ServerMsg', message };
     }
   }
 

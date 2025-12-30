@@ -120,7 +120,7 @@ export class PendingRequests {
    * Fail all pending requests (used on session termination)
    */
   dieAll(error: Error): void {
-    for (const [requestId, data] of this.requests) {
+    for (const [_requestId, data] of this.requests) {
       data.reject(error);
     }
     this.requests.clear();

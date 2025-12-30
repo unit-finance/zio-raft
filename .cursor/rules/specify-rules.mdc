@@ -14,6 +14,7 @@ Auto-generated from all feature plans. Last updated: 2025-09-24
 - N/A (read-only Query, no persistence change) (005-client-server-libraries)
 - TypeScript 5.0+, Node.js 18+ LTS + zeromq (Node.js ZMQ bindings), Buffer API for binary framing (006-we-want-to)
 - N/A (stateless client library) (006-we-want-to)
+- TypeScript 5.x (ES2022 target), Node.js 18+ runtime + zeromq (Node.js ZMQ bindings), @msgpack/msgpack (binary framing/serialization) (006-we-want-to)
 
 ## Project Structure
 ```
@@ -45,9 +46,9 @@ All code changes must adhere to ZIO Raft Constitution v1.0.0:
 - Functional programming patterns (no var, mutable collections)
 
 ## Recent Changes
+- 006-we-want-to: Added TypeScript 5.x (ES2022 target), Node.js 18+ runtime + zeromq (Node.js ZMQ bindings), @msgpack/msgpack (binary framing/serialization)
 - 006-we-want-to: Added TypeScript 5.0+, Node.js 18+ LTS + zeromq (Node.js ZMQ bindings), Buffer API for binary framing
 - 005-client-server-libraries: Added Scala 3 + ZIO 2, existing zio-raft client/server libraries
-- 002-composable-raft-state: Added Scala 3.3+ + ZIO 2.1+, scodec (for serialization), existing client-server-server library
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

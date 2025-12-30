@@ -103,7 +103,7 @@ export class PendingQueries {
    * Fail all pending queries (used on session termination)
    */
   dieAll(error: Error): void {
-    for (const [correlationId, data] of this.queries) {
+    for (const [_correlationId, data] of this.queries) {
       data.reject(error);
     }
     this.queries.clear();

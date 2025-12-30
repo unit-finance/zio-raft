@@ -2,8 +2,8 @@
 // Tests complete client lifecycle with mock server
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { RaftClient } from '../../../src/client';
-import { MemberId } from '../../../src/types';
+import { RaftClient } from '../../src/client';
+import { MemberId } from '../../src/types';
 
 describe('Client Lifecycle Integration', () => {
   let client: RaftClient;

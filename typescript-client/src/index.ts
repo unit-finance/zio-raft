@@ -38,7 +38,6 @@ export type {
   Nonce,
   CorrelationId,
 } from './types';
-export { SessionId, RequestId, MemberId, Nonce, CorrelationId } from './types';
 
 // Protocol message types (for advanced usage / testing)
 export type {

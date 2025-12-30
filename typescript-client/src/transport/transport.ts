@@ -21,12 +21,11 @@ export interface ClientTransport {
    * Send a client message
    * @param message - The message to send
    */
-  send(message: ClientMessage): Promise<void>;
+  sendMessage(message: ClientMessage): Promise<void>;
 
   /**
-   * Receive server messages as an async iterator
-   * @returns AsyncIterator yielding decoded server messages
+   * Receive server messages as an async iterable
    */
-  receive(): AsyncIterator<ServerMessage>;
+  incomingMessages: AsyncIterable<ServerMessage>;
 }
 

@@ -58,7 +58,7 @@ export class ZmqTransport implements ClientTransport {
   /**
    * Send a client message
    */
-  async send(message: ClientMessage): Promise<void> {
+  async sendMessage(message: ClientMessage): Promise<void> {
     if (this.currentAddress === null) {
       throw new Error('Not connected. Call connect() first.');
     }
@@ -72,17 +72,28 @@ export class ZmqTransport implements ClientTransport {
   }
 
   /**
-   * Receive server messages as an async iterator
+   * Receive server messages as an async iterable
    */
-  async *receive(): AsyncIterator<ServerMessage> {
+  get incomingMessages(): AsyncIterable<ServerMessage> {
+    const self = this;
+    return {
+      [Symbol.asyncIterator]() {
+        return self.createMessageStream();
+      }
+    };
+  }
+
+  private async *createMessageStream(): AsyncIterator<ServerMessage> {
     if (this.currentAddress === null) {
       throw new Error('Not connected. Call connect() first.');
     }
 
     try {
       for await (const [buffer] of this.socket) {
+        if (!buffer) continue;
+        
         try {
-          const message = decodeServerMessage(buffer);
+          const message = decodeServerMessage(buffer as Buffer);
           yield message;
         } catch (error) {
           // Log decode error but continue receiving

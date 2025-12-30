@@ -254,7 +254,8 @@ export function decodeProtocolHeader(buffer: Buffer, offset: number): number {
 // Reason Codecs
 // ============================================================================
 
-function encodeRejectionReason(reason: RejectionReason): Buffer {
+// Encode rejection reason (used internally, exported for testing)
+export function encodeRejectionReason(reason: RejectionReason): Buffer {
   const buffer = Buffer.allocUnsafe(1);
   switch (reason) {
     case 'NotLeader':
@@ -295,7 +296,8 @@ function decodeRejectionReason(buffer: Buffer, offset: number): DecodeResult<Rej
   return { value, newOffset: offset + 1 };
 }
 
-function encodeSessionCloseReason(reason: SessionCloseReason): Buffer {
+// Encode session close reason (used internally, exported for testing)
+export function encodeSessionCloseReason(reason: SessionCloseReason): Buffer {
   const buffer = Buffer.allocUnsafe(1);
   switch (reason) {
     case 'Shutdown':
@@ -342,13 +344,15 @@ function decodeSessionCloseReason(buffer: Buffer, offset: number): DecodeResult<
   return { value, newOffset: offset + 1 };
 }
 
-function encodeCloseReason(reason: CloseReason): Buffer {
+// Encode close reason (used internally, exported for testing)
+export function encodeCloseReason(_reason: CloseReason): Buffer {
   const buffer = Buffer.allocUnsafe(1);
   buffer.writeUInt8(CloseReasonCode.ClientShutdown, 0);
   return buffer;
 }
 
-function encodeRequestErrorReason(reason: RequestErrorReason): Buffer {
+// Encode request error reason (used internally, exported for testing)
+export function encodeRequestErrorReason(_reason: RequestErrorReason): Buffer {
   const buffer = Buffer.allocUnsafe(1);
   buffer.writeUInt8(RequestErrorReasonCode.ResponseEvicted, 0);
   return buffer;

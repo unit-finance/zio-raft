@@ -63,7 +63,7 @@ describe('State Machine', () => {
         type: 'Action',
         action: {
           type: 'SubmitCommand',
-          payload: new Uint8Array([1, 2, 3]),
+          payload: Buffer.from([1, 2, 3]),
           resolve: () => {},
           reject: () => {
             rejected = true;

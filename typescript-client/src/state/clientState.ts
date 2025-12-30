@@ -150,8 +150,8 @@ export interface DisconnectAction {
  */
 export interface SubmitCommandAction {
   readonly type: 'SubmitCommand';
-  readonly payload: Uint8Array;
-  readonly resolve: (result: Uint8Array) => void;
+  readonly payload: Buffer;
+  readonly resolve: (result: Buffer) => void;
   readonly reject: (error: Error) => void;
 }
 
@@ -160,8 +160,8 @@ export interface SubmitCommandAction {
  */
 export interface SubmitQueryAction {
   readonly type: 'SubmitQuery';
-  readonly payload: Uint8Array;
-  readonly resolve: (result: Uint8Array) => void;
+  readonly payload: Buffer;
+  readonly resolve: (result: Buffer) => void;
   readonly reject: (error: Error) => void;
 }
 

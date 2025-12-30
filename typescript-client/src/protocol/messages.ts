@@ -53,7 +53,7 @@ export interface ClientRequest {
   readonly type: 'ClientRequest';
   readonly requestId: RequestId;
   readonly lowestPendingRequestId: RequestId;
-  readonly payload: Uint8Array;
+  readonly payload: Buffer;
   readonly createdAt: Date;
 }
 
@@ -63,7 +63,7 @@ export interface ClientRequest {
 export interface Query {
   readonly type: 'Query';
   readonly correlationId: CorrelationId;
-  readonly payload: Uint8Array;
+  readonly payload: Buffer;
   readonly createdAt: Date;
 }
 
@@ -163,7 +163,7 @@ export interface KeepAliveResponse {
 export interface ClientResponse {
   readonly type: 'ClientResponse';
   readonly requestId: RequestId;
-  readonly result: Uint8Array;
+  readonly result: Buffer;
 }
 
 /**
@@ -172,7 +172,7 @@ export interface ClientResponse {
 export interface QueryResponse {
   readonly type: 'QueryResponse';
   readonly correlationId: CorrelationId;
-  readonly result: Uint8Array;
+  readonly result: Buffer;
 }
 
 /**
@@ -181,7 +181,7 @@ export interface QueryResponse {
 export interface ServerRequest {
   readonly type: 'ServerRequest';
   readonly requestId: RequestId;
-  readonly payload: Uint8Array;
+  readonly payload: Buffer;
   readonly createdAt: Date;
 }
 

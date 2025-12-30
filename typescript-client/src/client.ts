@@ -182,18 +182,18 @@ export class RaftClient extends EventEmitter {
    * Submit a write command
    * Returns when response received or timeout
    */
-  async submitCommand(payload: Uint8Array): Promise<Uint8Array> {
+  async submitCommand(payload: Buffer): Promise<Buffer> {
     // Validate payload
-    if (!payload || payload.length === 0) {
+    if (!Buffer.isBuffer(payload)) {
+      throw new ValidationError('Command payload must be Buffer');
+    }
+    
+    if (payload.length === 0) {
       throw new ValidationError('Command payload cannot be empty');
     }
     
-    if (!(payload instanceof Uint8Array)) {
-      throw new ValidationError('Command payload must be Uint8Array');
-    }
-    
     // Enqueue action and return promise
-    return new Promise<Uint8Array>((resolve, reject) => {
+    return new Promise<Buffer>((resolve, reject) => {
       this.actionQueue.offer({
         type: 'SubmitCommand',
         payload,
@@ -207,18 +207,18 @@ export class RaftClient extends EventEmitter {
    * Submit a read-only query
    * Returns when response received or timeout
    */
-  async submitQuery(payload: Uint8Array): Promise<Uint8Array> {
+  async submitQuery(payload: Buffer): Promise<Buffer> {
     // Validate payload
-    if (!payload || payload.length === 0) {
+    if (!Buffer.isBuffer(payload)) {
+      throw new ValidationError('Query payload must be Buffer');
+    }
+    
+    if (payload.length === 0) {
       throw new ValidationError('Query payload cannot be empty');
     }
     
-    if (!(payload instanceof Uint8Array)) {
-      throw new ValidationError('Query payload must be Uint8Array');
-    }
-    
     // Enqueue action and return promise
-    return new Promise<Uint8Array>((resolve, reject) => {
+    return new Promise<Buffer>((resolve, reject) => {
       this.actionQueue.offer({
         type: 'SubmitQuery',
         payload,

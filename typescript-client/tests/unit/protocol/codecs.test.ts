@@ -110,7 +110,7 @@ describe('Protocol Codecs', () => {
         type: 'ClientRequest',
         requestId: RequestId.fromBigInt(42n),
         lowestPendingRequestId: RequestId.fromBigInt(40n),
-        payload: new Uint8Array([1, 2, 3]),
+        payload: Buffer.from([1, 2, 3]),
         createdAt: new Date(),
       };
 
@@ -127,7 +127,7 @@ describe('Protocol Codecs', () => {
       const message: Query = {
         type: 'Query',
         correlationId: CorrelationId.fromString('550e8400-e29b-41d4-a716-446655440000'),
-        payload: new Uint8Array([4, 5, 6]),
+        payload: Buffer.from([4, 5, 6]),
         createdAt: new Date(),
       };
 

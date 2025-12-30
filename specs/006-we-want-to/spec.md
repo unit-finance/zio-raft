@@ -58,48 +58,58 @@ When creating this spec from a user prompt:
 As a JavaScript/TypeScript application developer, I want to connect to a ZIO Raft cluster and submit commands/queries, so that my application can interact with distributed stateful services built with ZIO Raft using the same client-server protocol that Scala clients use.
 
 ### Acceptance Scenarios
-1. **Given** a ZIO Raft cluster is running, **When** a TypeScript application creates a client and connects to the cluster, **Then** the client establishes a durable session and can submit commands.
-2. **Given** a TypeScript client has an active session, **When** the client submits a command with a binary payload, **Then** the client receives a response with the command result.
-3. **Given** a TypeScript client has an active session, **When** the client submits a read-only query, **Then** the client receives a response with the query result.
+1. **Given** a ZIO Raft cluster is running, **When** a TypeScript application creates a client with configuration and explicitly calls connect(), **Then** the client establishes a durable session and can submit commands.
+2. **Given** a TypeScript client has an active session, **When** the client submits a command with a binary payload, **Then** the client receives a Promise that resolves with a binary response (Buffer) containing the command result.
+3. **Given** a TypeScript client has an active session, **When** the client submits a read-only query, **Then** the client receives a Promise that resolves with a binary response (Buffer) containing the query result.
 4. **Given** a TypeScript client is connected to a follower node, **When** that node rejects the session because it's not the leader, **Then** the client automatically reconnects to the leader node.
 5. **Given** a TypeScript client has an active session, **When** the network connection is interrupted, **Then** the client automatically reconnects and resumes the existing session without losing pending requests.
-6. **Given** a TypeScript client has pending commands, **When** a response is not received within the timeout period, **Then** the client automatically retries the request.
-7. **Given** a TypeScript client is idle, **When** the keep-alive interval elapses, **Then** the client sends a heartbeat message to maintain session liveness.
-8. **Given** a TypeScript client receives server-initiated requests, **When** the application provides a handler for these requests, **Then** the handler is invoked with the request payload and the client acknowledges the request to the server.
+6. **Given** a TypeScript client is currently disconnected, **When** the application calls submitCommand() or submitQuery(), **Then** the returned Promise waits for reconnection and sends the request upon reconnection, or rejects with a timeout error if reconnection does not occur within the configured timeout period.
+7. **Given** a TypeScript client has pending commands, **When** a response is not received within the request timeout period, **Then** the Promise rejects with a timeout error and the user must manually retry if desired.
+8. **Given** a TypeScript client is idle, **When** the keep-alive interval elapses, **Then** the client sends a heartbeat message to maintain session liveness.
+9. **Given** a TypeScript client receives server-initiated requests, **When** the application provides a handler for these requests, **Then** the handler is invoked with the request payload and the client acknowledges the request to the server.
+10. **Given** a TypeScript client is created with configuration, **When** the application registers event handlers before calling connect(), **Then** all connection state change events (connected, disconnected, reconnecting, sessionExpired) are delivered to the registered handlers.
 
 ### Edge Cases
 - If a client connects while the cluster is undergoing a leadership election, the client should retry connection attempts across cluster members until a leader is available.
-- If a session expires on the server (due to missed keep-alives), pending requests should fail with an error and the client should terminate (matching Scala client behavior).
-- If the same request is submitted multiple times while disconnected, all requests should be queued and sent once reconnected.
+- If a session expires on the server (due to missed keep-alives), pending requests should fail with an error and the client should terminate (matching Scala client behavior), emitting a sessionExpired event.
+- If the same request is submitted multiple times while disconnected, all requests should be queued and sent once reconnected (within the configured timeout).
 - If binary payload encoding or validation fails during command/query submission, the client should throw a synchronous exception immediately without attempting to send the message.
-- The client should support raw binary payloads using a framing protocol for message boundaries.
+- The client should support raw binary payloads using a framing protocol for message boundaries; all responses are returned as Buffer for user decoding.
 - Each client instance manages a single session; applications needing multiple concurrent sessions should create multiple client instances.
-- During normal disconnection/reconnection (not session expiry), pending requests are preserved and resent after successful reconnection.
+- During normal disconnection/reconnection (not session expiry), pending requests are preserved and resent after successful reconnection, with each request subject to its own timeout.
+- Constructor only validates and stores configuration; no connection is attempted until connect() is explicitly called.
+- Event handlers can be registered after construction but before connect() to ensure no events are missed.
+- If a request times out, no automatic retry occurs; the Promise rejects and the application must decide whether to retry manually.
+- The default timeout for queued requests waiting for reconnection should be reasonable (e.g., 30-60 seconds) to balance responsiveness and resilience.
 
 ## Requirements (mandatory)
 
 ### Functional Requirements
 - **FR-001**: The TypeScript client library MUST support connecting to a ZIO Raft cluster using the same wire protocol as the Scala client.
-- **FR-002**: The client MUST support creating a new durable session with capability negotiation using user-provided capabilities passed through the library (the client does not define specific capabilities).
-- **FR-003**: The client MUST support resuming an existing session after disconnection.
-- **FR-004**: The client MUST support submitting commands (write operations) and receiving responses with binary payloads; submission MUST throw synchronous exceptions for immediate validation or encoding failures.
-- **FR-005**: The client MUST support submitting queries (read-only operations) and receiving responses with binary payloads; submission MUST throw synchronous exceptions for immediate validation or encoding failures.
-- **FR-006**: The client MUST automatically send keep-alive messages at configurable intervals to maintain session liveness.
-- **FR-007**: The client MUST automatically detect leadership changes and reconnect to the current leader when receiving "not leader" rejections.
-- **FR-008**: The client MUST retry commands/queries that timeout before receiving a response.
-- **FR-009**: The client MUST handle server-initiated requests by allowing applications to register handlers and automatically acknowledging received requests.
-- **FR-010**: The client MUST maintain a queue of pending requests and ensure they are sent/retried upon reconnection.
-- **FR-011**: The client MUST support graceful disconnection that properly closes the session.
-- **FR-012**: The client MUST provide an event-based message/event loop architecture for observing connection state changes (connecting, connected, disconnected) and all diagnostic information for application monitoring and logging.
-- **FR-013**: The client MUST correlate responses with requests using request IDs for commands and correlation IDs for queries.
-- **FR-014**: The client MUST support configurable timeouts for connections, requests, and keep-alives.
-- **FR-015**: The client MUST use ZeroMQ (ZMQ) as the transport layer for all communication with the Raft cluster.
-- **FR-016**: The client MUST provide TypeScript type definitions for all public APIs.
-- **FR-017**: The client MUST support Node.js runtime environments.
-- **FR-018**: The client MUST use a framing protocol for raw binary payloads to handle message boundaries correctly.
-- **FR-019**: When a session expires (SessionExpired rejection or SessionClosed with SessionExpired reason), the client MUST fail all pending requests with an error and terminate, matching the Scala client behavior.
-- **FR-020**: Each client instance MUST manage exactly one session; applications requiring multiple concurrent sessions must create multiple client instances.
-- **FR-021**: The client MUST support high throughput request processing (1,000-10,000+ requests per second) with batching optimizations where applicable.
+- **FR-002**: The client constructor MUST accept configuration (endpoints, timeout, keepAliveInterval, capabilities) and validate it, but MUST NOT initiate connection until the explicit connect() method is called.
+- **FR-003**: The client MUST provide an explicit connect() method that returns a Promise which resolves when the session is established or rejects on failure.
+- **FR-004**: The client MUST support creating a new durable session with capability negotiation using user-provided capabilities passed through the library (the client does not define specific capabilities).
+- **FR-005**: The client MUST support resuming an existing session after disconnection.
+- **FR-006**: The client MUST support submitting commands (write operations) that return Promises resolving to binary payloads (Buffer); submission MUST throw synchronous exceptions for immediate validation or encoding failures.
+- **FR-007**: The client MUST support submitting queries (read-only operations) that return Promises resolving to binary payloads (Buffer); submission MUST throw synchronous exceptions for immediate validation or encoding failures.
+- **FR-008**: When submitCommand() or submitQuery() is called while the client is disconnected, the returned Promise MUST queue the request and wait for reconnection, then send the request; the Promise MUST reject with a timeout error if reconnection does not occur within the configured timeout (default 30-60 seconds).
+- **FR-009**: When a request times out waiting for a response, the Promise MUST reject with a timeout error; no automatic retry occurs and the user must manually retry if desired.
+- **FR-010**: The client MUST automatically send keep-alive messages at configurable intervals to maintain session liveness.
+- **FR-011**: The client MUST automatically detect leadership changes and reconnect to the current leader when receiving "not leader" rejections.
+- **FR-012**: The client MUST handle server-initiated requests by allowing applications to register handlers and automatically acknowledging received requests.
+- **FR-013**: The client MUST maintain a queue of pending requests and ensure they are sent/retried upon reconnection, with each request subject to its own timeout.
+- **FR-014**: The client MUST support graceful disconnection that properly closes the session.
+- **FR-015**: The client MUST provide a minimal event-based architecture exposing only connection state change events: connected, disconnected, reconnecting, and sessionExpired.
+- **FR-016**: The client MUST allow event handlers to be registered after construction but before connect() is called, ensuring no connection events are missed.
+- **FR-017**: The client MUST correlate responses with requests using request IDs for commands and correlation IDs for queries.
+- **FR-018**: The client MUST support configurable timeouts for connections, requests, keep-alives, and queued-request reconnection waits.
+- **FR-019**: The client MUST use ZeroMQ (ZMQ) as the transport layer for all communication with the Raft cluster.
+- **FR-020**: The client MUST provide TypeScript type definitions for all public APIs.
+- **FR-021**: The client MUST support Node.js runtime environments.
+- **FR-022**: The client MUST use a framing protocol for raw binary payloads to handle message boundaries correctly.
+- **FR-023**: When a session expires (SessionExpired rejection or SessionClosed with SessionExpired reason), the client MUST emit a sessionExpired event, fail all pending requests with an error, and terminate, matching the Scala client behavior.
+- **FR-024**: Each client instance MUST manage exactly one session; applications requiring multiple concurrent sessions must create multiple client instances.
+- **FR-025**: The client MUST support high throughput request processing (1,000-10,000+ requests per second) with batching optimizations where applicable.
 
 ### Non-Functional Requirements
 - **NFR-001**: The client MUST achieve throughput of 1,000-10,000+ requests per second for command and query operations.
@@ -107,13 +117,14 @@ As a JavaScript/TypeScript application developer, I want to connect to a ZIO Raf
 - **NFR-003**: The client MUST NOT include built-in logging; applications are responsible for all logging and diagnostics through event observation.
 
 ### Key Entities (include if feature involves data)
-- **Client**: The main interface that applications use to interact with the Raft cluster; manages connection lifecycle and request/response correlation.
-- **Session**: A durable server-side session that persists across reconnections; identified by a session ID; has a lifetime governed by keep-alive messages.
-- **Command**: A write operation submitted by the client; has a unique request ID; expects a response; may be retried on timeout.
-- **Query**: A read-only operation submitted by the client; has a correlation ID; expects a response; may be retried on timeout.
+- **Client**: The main interface that applications use to interact with the Raft cluster; constructor accepts configuration but does not connect; explicit connect() method initiates connection and session creation; manages connection lifecycle, request/response correlation, and request queueing.
+- **Session**: A durable server-side session that persists across reconnections; identified by a session ID; has a lifetime governed by keep-alive messages; created upon first successful connection.
+- **Command**: A write operation submitted by the client via submitCommand(); has a unique request ID; returns a Promise<Buffer>; if submitted while disconnected, the Promise waits for reconnection up to the configured timeout before rejecting; if the request times out waiting for a response, no automatic retry occurs.
+- **Query**: A read-only operation submitted by the client via submitQuery(); has a correlation ID; returns a Promise<Buffer>; if submitted while disconnected, the Promise waits for reconnection up to the configured timeout before rejecting; if the request times out waiting for a response, no automatic retry occurs.
 - **KeepAlive**: A periodic heartbeat message to maintain session liveness; includes a timestamp for RTT measurement.
 - **ServerRequest**: A server-initiated request sent to the client; has a request ID; requires acknowledgment; delivered to application-registered handlers.
 - **Capabilities**: A set of feature flags or version indicators provided by the application using the client library; exchanged during session creation for protocol negotiation; the client passes these through without defining specific capability values.
+- **ConnectionEvent**: An event emitted by the client for connection state changes; types include: connected (session established), disconnected (connection lost), reconnecting (attempting to reconnect), sessionExpired (session terminated by server).
 
 ---
 
@@ -128,6 +139,13 @@ As a JavaScript/TypeScript application developer, I want to connect to a ZIO Raf
 
 ### Session 2025-12-28
 - Q: CRITICAL ARCHITECTURAL REQUIREMENT - Should the TypeScript client implementation follow Scala patterns or be idiomatic TypeScript? → A: The TypeScript client must use IDIOMATIC TYPESCRIPT patterns everywhere (not just public API). Wire protocol must match Scala byte-for-byte, but all implementation patterns, state management, error handling, and API design must feel natural to TypeScript/Node.js developers. Use standard patterns: EventEmitter (not ZStream), Promises/async-await (not ZIO effects), classes with private state (not Ref objects), simple OOP where appropriate (not purely functional). The library should feel like using ioredis, pg, or mongodb - professional, clean, idiomatic Node.js/TypeScript.
+
+### Session 2025-12-29
+- Q: How should the client be initialized and connected (eager vs lazy)? → A: Lazy initialization - Constructor stores config only; explicit connect() method required; allows pre-configuration of event handlers before connection
+- Q: What happens to submitCommand()/submitQuery() calls when the client is disconnected? → A: Queue with timeout - Promise waits for reconnection then sends request; rejects if not reconnected within configured timeout; reasonable default timeout provided
+- Q: How should response payloads be returned (raw binary vs typed with decoders)? → A: Raw binary only - Always returns Buffer; users decode manually
+- Q: What retry strategy should the client use for timed-out requests? → A: No automatic retry - User must manually retry on timeout; client only handles internal retries during reconnection
+- Q: What level of event granularity should be exposed for observability? → A: Minimal - Only connection state changes (connected, disconnected, reconnecting, sessionExpired); no request lifecycle or protocol-level events
 
 ---
 

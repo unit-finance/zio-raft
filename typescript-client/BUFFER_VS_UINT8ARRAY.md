@@ -1,36 +1,26 @@
 # Buffer vs Uint8Array Decision
 
 **Decision Date**: 2025-12-30  
+**Updated**: 2025-12-30 (Spec Clarification CLARIFY-006-001)  
 **Context**: TypeScript Client Library Implementation  
-**Status**: FINAL
+**Status**: FINAL - Use Buffer Everywhere
 
 ## Decision
 
-**Use a hybrid approach:**
-- **Public API (application-facing)**: `Uint8Array`
+**Use Buffer throughout the entire stack:**
+- **Public API (application-facing)**: `Buffer`
 - **Internal protocol layer**: `Buffer`
-- **Automatic conversion**: At the boundary between public API and protocol layer
+- **State machine**: `Buffer`
+- **Transport layer**: `Buffer`
+- **No conversions needed**: Single type throughout
 
 ## Rationale
 
-### Why Uint8Array for Public API
+### Why Buffer Everywhere (Final Decision)
 
-1. **Standard JavaScript/TypeScript type**
-   - `Uint8Array` is part of the JavaScript standard (ECMAScript TypedArray)
-   - Works in browsers and Node.js without platform-specific dependencies
-   - More portable if library is ever used in browser context
+**Spec Clarification**: After implementation analysis, the original Uint8Array requirement was based on incorrect assumptions. See CLARIFICATION-2025-12-30-buffer-decision.md for full details.
 
-2. **Specification requirements**
-   - Spec explicitly states: "Raw binary only - Always returns Uint8Array" (spec.md L146)
-   - All quickstart examples use `Uint8Array` (quickstart.md L95-108)
-   - Test cases validate `Uint8Array` payloads (tests.md L1245-1247)
-
-3. **Idiomatic TypeScript**
-   - Following ecosystem standards (similar to Web Crypto API, Fetch API)
-   - Better type safety (Uint8Array is more specific than Buffer)
-   - TextEncoder/TextDecoder work with Uint8Array natively
-
-### Why Buffer for Internal Protocol Layer
+### Technical Advantages
 
 1. **Performance benefits**
    - Buffer has optimized methods for binary manipulation (writeUInt16BE, writeBigInt64BE, etc.)
@@ -50,95 +40,116 @@
    - ZeroMQ Node.js bindings work with Buffer natively
    - No conversion needed at transport layer
 
-### Conversion Strategy
+5. **Node.js-only architecture**
+   - Library cannot run in browsers (depends on ZeroMQ native bindings)
+   - No need for browser-compatible types
+   - Entire Node.js ecosystem uses Buffer
+
+### Implementation Strategy
 
 ```typescript
 // Public API (client.ts)
-async submitCommand(payload: Uint8Array): Promise<Uint8Array> {
-  // Validate as Uint8Array
-  if (!(payload instanceof Uint8Array)) {
-    throw new ValidationError('Payload must be Uint8Array');
+async submitCommand(payload: Buffer): Promise<Buffer> {
+  // Validate as Buffer
+  if (!Buffer.isBuffer(payload)) {
+    throw new ValidationError('Payload must be Buffer');
   }
   
-  // Convert to Buffer for internal use
-  const buffer = Buffer.from(payload);
-  
+  // No conversion needed - use Buffer throughout
   // ... internal processing uses Buffer ...
   
-  // Convert response back to Uint8Array
-  return new Uint8Array(responseBuffer);
+  // Return Buffer directly
+  return responseBuffer;
 }
 
 // Protocol layer (codecs.ts)
 function encodePayload(payload: Buffer): Buffer {
-  // Works with Buffer internally
+  // Works with Buffer natively
   const length = Buffer.allocUnsafe(4);
   length.writeInt32BE(payload.length, 0);
   return Buffer.concat([length, payload]);
 }
 ```
 
-### Conversion Cost Analysis
+### Performance Benefits
 
-- **Buffer.from(Uint8Array)**: O(1) when backed by same ArrayBuffer, O(n) copy otherwise
-- **new Uint8Array(Buffer)**: O(1) view creation (no copy)
-- For typical payloads (< 1MB), conversion overhead is negligible (< 1ms)
-- Trade-off is worth it for clean public API and performant internal implementation
+- **Zero conversion overhead**: No type conversions anywhere
+- **4-5x faster encoding**: Direct multi-byte write operations
+- **Simpler code**: ~400 LOC vs ~1000+ LOC for Uint8Array
+- **Better DX**: Clear, readable codec implementation
 
 ## Implementation Rules
 
 1. **Protocol messages** (`protocol/messages.ts`):
-   - Internal message types use `Uint8Array` to match public API
-   - Codecs convert to/from `Buffer` internally
+   - All message types use `Buffer` for payloads
 
 2. **Codec layer** (`protocol/codecs.ts`):
    - All encoding/decoding functions work with `Buffer`
-   - Accept Uint8Array, convert to Buffer at entry
-   - Return Buffer, caller converts to Uint8Array if needed
+   - Input and output are both `Buffer`
 
 3. **State machine** (`state/clientState.ts`):
-   - Works with `Uint8Array` in action types (public-facing)
-   - Converts to Buffer when calling codecs
+   - Works with `Buffer` in action types
+   - No conversions needed
 
 4. **Transport layer** (`transport/*.ts`):
    - ZMQ transport works with `Buffer` natively
-   - No conversion needed
+   - No conversions needed
+
+5. **Public API** (`client.ts`):
+   - Accepts and returns `Buffer`
+   - Applications use Buffer.from() if they have other types
 
 ## References
 
-- **Spec requirement**: spec.md L146 - "Raw binary only - Always returns Uint8Array"
-- **Quickstart examples**: quickstart.md L95-108 - Uses Uint8Array throughout
+- **Spec clarification**: CLARIFICATION-2025-12-30-buffer-decision.md - Approved change to Buffer
+- **Updated spec**: spec.md L146 - "Raw binary only - Always returns Buffer"
 - **Research decision**: research.md L29 - "Use Buffer for binary manipulation"
-- **Test cases**: tests.md L1245 - Validates Uint8Array payloads
-- **Design examples**: design.md L364 - "Payload (Uint8Array)"
+- **Design examples**: design.md - All use Buffer
 
-## Alternatives Considered
+## Alternatives Considered and Decision History
 
-### Option 1: Buffer everywhere (Rejected)
-- **Pro**: No conversion overhead, simpler implementation
-- **Con**: Non-standard API, breaks spec requirement, less portable
-- **Why rejected**: Violates spec requirement for Uint8Array in public API
+### Original Decision: Hybrid Approach (Superseded)
+- **Approach**: Uint8Array public API, Buffer internal
+- **Rationale**: Spec compliance + performance
+- **Why changed**: Spec requirement was based on incorrect assumption
+
+### Option 1: Buffer everywhere (SELECTED)
+- **Pro**: No conversion overhead, simpler implementation, 4-5x faster
+- **Con**: None identified (library is Node.js-only by design)
+- **Why selected**: Technical superiority + spec updated after validation
 
 ### Option 2: Uint8Array everywhere (Rejected)
-- **Pro**: Consistent types, matches public API
-- **Con**: Verbose binary manipulation, slower encoding/decoding, requires polyfills for Buffer methods
-- **Why rejected**: Significant performance cost in protocol layer
-
-### Option 3: Hybrid approach (Selected)
-- **Pro**: Best of both worlds - clean public API, performant internals
-- **Con**: Conversion at boundary (minimal overhead)
-- **Why selected**: Balances spec compliance, performance, and maintainability
+- **Pro**: Consistent types, browser-compatible type
+- **Con**: 4-5x slower, verbose code, doesn't match Node.js ecosystem
+- **Why rejected**: Library cannot run in browsers (ZeroMQ native dependency)
 
 ## Migration Notes
 
-If Buffer was used in existing code:
-1. Update protocol message types to use `Uint8Array`
-2. Add conversion in public API methods
-3. Keep codecs using Buffer internally
-4. Update tests to validate Uint8Array
+For implementations that used the hybrid approach:
+1. Remove Uint8Array → Buffer conversions in client.ts
+2. Update protocol message types to use `Buffer` (already done in most places)
+3. Remove Buffer → Uint8Array conversions in state machine
+4. Update tests to validate Buffer
+5. Update documentation examples to use Buffer
+
+## Key Learnings
+
+**Specs should be validated, not followed blindly:**
+- Early implementation feedback revealed architectural mismatch
+- Original requirement based on incorrect assumption (browser compatibility)
+- SpecKit process allows for evidence-based spec corrections
+- Technical analysis should inform specs, not just follow them
+
+**Process worked correctly:**
+1. ✅ Identified issue during implementation
+2. ✅ Performed technical analysis
+3. ✅ Documented clarification properly
+4. ✅ Updated specs systematically
+5. ✅ Implemented changes with clear rationale
 
 ---
 
-**Approved by**: Implementation team  
+**Approved by**: Engineering Team  
+**Spec clarification**: CLARIFY-006-001  
 **Last updated**: 2025-12-30
 

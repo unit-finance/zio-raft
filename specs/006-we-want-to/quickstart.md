@@ -1,446 +1,770 @@
 # Quickstart Guide: TypeScript Client Library
 
-**Date**: 2025-12-24  
-**Feature**: TypeScript Client for ZIO Raft
+**Feature**: TypeScript Client Library  
+**Date**: 2025-12-29  
+**Status**: Complete
 
-## Overview
-This quickstart guide demonstrates how to use the TypeScript client library to connect to a ZIO Raft cluster and perform basic operations.
+## Purpose
+
+This quickstart guide provides an end-to-end validation workflow for the TypeScript Raft client library. It demonstrates the complete client lifecycle from installation to production usage patterns.
 
 ---
 
 ## Prerequisites
 
-1. **Node.js 18+** installed
-2. **ZIO Raft cluster** running (e.g., kvstore example from the Scala project)
-3. **TypeScript client library** installed:
-   ```bash
-   npm install @zio-raft/typescript-client
-   ```
+- **Node.js**: >= 18.0.0
+- **npm**: >= 9.0.0
+- **ZIO Raft Server**: Running cluster (for integration testing)
+- **TypeScript**: >= 5.0.0 (dev dependency)
 
 ---
 
-## Quick Example
+## Installation
 
-### 1. Basic Setup
+### Step 1: Install Package
 
-```typescript
-import { RaftClient, MemberId, ClientConfig } from '@zio-raft/typescript-client';
-
-// Define cluster members
-const clusterMembers = new Map<MemberId, string>([
-  [MemberId.fromString('node1'), 'tcp://localhost:5555'],
-  [MemberId.fromString('node2'), 'tcp://localhost:5556'],
-  [MemberId.fromString('node3'), 'tcp://localhost:5557']
-]);
-
-// Define client capabilities (application-specific)
-const capabilities = new Map<string, string>([
-  ['client-type', 'typescript'],
-  ['version', '1.0.0']
-]);
-
-// Create client configuration
-const config: ClientConfig = {
-  clusterMembers,
-  capabilities,
-  connectionTimeout: 5000,      // 5 seconds
-  keepAliveInterval: 30000,     // 30 seconds
-  requestTimeout: 10000         // 10 seconds
-};
-
-// Create client instance
-const client = new RaftClient(config);
+```bash
+npm install @zio-raft/typescript-client
 ```
 
-### 2. Connect to Cluster
+### Step 2: Verify Installation
+
+```bash
+node -e "console.log(require('@zio-raft/typescript-client'))"
+# Should output: { RaftClient, [other exports] }
+```
+
+---
+
+## Basic Usage
+
+### Example 1: Simple Command Submission
 
 ```typescript
-async function main() {
-  try {
-    // Connect to cluster
-    await client.connect();
-    console.log('Connected to Raft cluster');
-    
-    // Submit a command (write operation)
-    const commandPayload = Buffer.from(JSON.stringify({
-      op: 'set',
-      key: 'user:123',
-      value: { name: 'Alice', age: 30 }
-    }));
-    
-    const commandResult = await client.submitCommand(commandPayload);
-    console.log('Command result:', commandResult.toString());
-    
-    // Submit a query (read operation)
-    const queryPayload = Buffer.from(JSON.stringify({
-      op: 'get',
-      key: 'user:123'
-    }));
-    
-    const queryResult = await client.query(queryPayload);
-    console.log('Query result:', queryResult.toString());
-    
-  } catch (error) {
-    console.error('Error:', error);
-  } finally {
-    // Clean disconnect
-    await client.disconnect();
-    console.log('Disconnected from Raft cluster');
+import { RaftClient } from '@zio-raft/typescript-client';
+
+// Create client (lazy initialization)
+const client = new RaftClient({
+  endpoints: ['tcp://localhost:5555', 'tcp://localhost:5556', 'tcp://localhost:5557'],
+  capabilities: {
+    version: '1.0.0',
+    clientType: 'typescript-quickstart'
   }
-}
-
-main().catch(console.error);
-```
-
----
-
-## Observing Client Events
-
-The client emits events for observability without built-in logging:
-
-```typescript
-// State changes
-client.on('stateChange', (event) => {
-  console.log(`State changed: ${event.oldState} → ${event.newState}`);
 });
 
-// Connection attempts and results
-client.on('connectionAttempt', (event) => {
-  console.log(`Attempting connection to ${event.memberId} at ${event.address}`);
+// Register event handlers BEFORE connecting
+client.on('connected', (evt) => {
+  console.log(`Connected! Session ID: ${evt.sessionId}`);
 });
 
-client.on('connectionSuccess', (event) => {
-  console.log(`Connected to ${event.memberId}`);
+client.on('disconnected', (evt) => {
+  console.warn(`Disconnected: ${evt.reason}`);
 });
 
-client.on('connectionFailure', (event) => {
-  console.error(`Connection to ${event.memberId} failed:`, event.error);
-});
-
-// Session expiry (terminal event)
-client.on('sessionExpired', () => {
-  console.error('Session expired - client will terminate');
+client.on('sessionExpired', (evt) => {
+  console.error(`Session expired: ${evt.sessionId}`);
   process.exit(1);
 });
 
-// Message events (verbose logging)
-client.on('messageSent', (event) => {
-  console.debug('Sent:', event.message.type);
-});
-
-client.on('messageReceived', (event) => {
-  console.debug('Received:', event.message.type);
-});
-```
-
----
-
-## Handling Server-Initiated Requests
-
-The server can send work to the client:
-
-```typescript
-// Start processing server requests
-(async () => {
-  for await (const serverRequest of client.serverRequests()) {
-    console.log('Received server request:', serverRequest.requestId);
+async function main() {
+  try {
+    // Explicitly connect
+    await client.connect();
+    console.log('Client connected successfully');
     
-    // Process the request payload
-    const payload = serverRequest.payload;
-    console.log('Payload:', payload.toString());
+    // Submit a command (example: KV store SET operation)
+    const commandPayload = encodeSetCommand('user:123', { name: 'Alice', age: 30 });
+    const result = await client.submitCommand(commandPayload);
+    console.log('Command result:', decodeResponse(result));
     
-    // Client automatically acknowledges the request
-    // No manual ack needed - handled internally
-  }
-})();
-
-// Alternative: event-based approach
-client.on('serverRequestReceived', (event) => {
-  const { request } = event;
-  console.log('Server request:', request.requestId);
-  
-  // Process request...
-  const payload = request.payload;
-  console.log('Processing:', payload.toString());
-  
-  // Ack is automatic
-});
-```
-
----
-
-## Error Handling
-
-### Synchronous Validation Errors
-
-```typescript
-try {
-  // Invalid config: empty capabilities
-  const invalidConfig = {
-    clusterMembers: new Map([[MemberId.fromString('node1'), 'tcp://localhost:5555']]),
-    capabilities: new Map()  // ❌ Empty!
-  };
-  
-  const client = new RaftClient(invalidConfig);
-} catch (error) {
-  // Throws synchronously during construction
-  console.error('Validation error:', error.message);
-}
-```
-
-### Asynchronous Operation Errors
-
-```typescript
-try {
-  const result = await client.submitCommand(payload);
-} catch (error) {
-  if (error instanceof NetworkError) {
-    console.error('Network failure:', error.message);
-  } else if (error instanceof SessionError) {
-    console.error('Session error:', error.reason);
-  } else if (error instanceof TimeoutError) {
-    console.error('Request timeout:', error.requestId);
-  } else {
-    console.error('Unknown error:', error);
+    // Submit a query (example: KV store GET operation)
+    const queryPayload = encodeGetQuery('user:123');
+    const queryResult = await client.submitQuery(queryPayload);
+    console.log('Query result:', decodeResponse(queryResult));
+    
+    // Graceful shutdown
+    await client.disconnect();
+    console.log('Client disconnected');
+  } catch (err) {
+    console.error('Error:', err);
+    process.exit(1);
   }
 }
+
+// Application-specific encoding functions
+function encodeSetCommand(key: string, value: any): Buffer {
+  const json = JSON.stringify({ type: 'SET', key, value });
+  return Buffer.from(json, 'utf8');
+}
+
+function encodeGetQuery(key: string): Buffer {
+  const json = JSON.stringify({ type: 'GET', key });
+  return Buffer.from(json, 'utf8');
+}
+
+function decodeResponse(bytes: Buffer): any {
+  const json = bytes.toString('utf8');
+  return JSON.parse(json);
+}
+
+main();
 ```
+
+**Expected Output**:
+```
+Connected! Session ID: 550e8400-e29b-41d4-a716-446655440000
+Client connected successfully
+Command result: { success: true }
+Query result: { key: 'user:123', value: { name: 'Alice', age: 30 } }
+Client disconnected
+```
+
+**Validation**:
+- ✅ Client connects to cluster
+- ✅ Session created with unique ID
+- ✅ Command submitted and response received
+- ✅ Query submitted and response received
+- ✅ Graceful disconnection
 
 ---
 
-## Advanced: Multiple Concurrent Operations
+### Example 2: High-Throughput Concurrent Requests
 
 ```typescript
-async function parallelOperations() {
+import { RaftClient } from '@zio-raft/typescript-client';
+
+async function highThroughputExample() {
+  const client = new RaftClient({
+    endpoints: ['tcp://localhost:5555'],
+    capabilities: { version: '1.0.0' },
+    requestTimeout: 30000 // 30 seconds
+  });
+  
   await client.connect();
   
-  // Submit 100 commands concurrently
-  const commandPromises = Array.from({ length: 100 }, (_, i) => {
-    const payload = Buffer.from(JSON.stringify({
-      op: 'set',
-      key: `user:${i}`,
-      value: { id: i }
-    }));
-    return client.submitCommand(payload);
-  });
+  // Submit 1,000 commands concurrently
+  const start = Date.now();
+  const promises = [];
   
-  // Wait for all commands to complete
-  const results = await Promise.all(commandPromises);
-  console.log(`Completed ${results.length} commands`);
+  for (let i = 0; i < 1000; i++) {
+    const payload = encodeSetCommand(`key:${i}`, { index: i });
+    promises.push(client.submitCommand(payload));
+  }
   
-  // Submit 100 queries concurrently
-  const queryPromises = Array.from({ length: 100 }, (_, i) => {
-    const payload = Buffer.from(JSON.stringify({
-      op: 'get',
-      key: `user:${i}`
-    }));
-    return client.query(payload);
-  });
+  const results = await Promise.all(promises);
+  const elapsed = Date.now() - start;
   
-  const queryResults = await Promise.all(queryPromises);
-  console.log(`Completed ${queryResults.length} queries`);
+  console.log(`Completed ${results.length} commands in ${elapsed}ms`);
+  console.log(`Throughput: ${(results.length / elapsed * 1000).toFixed(0)} req/s`);
   
   await client.disconnect();
 }
+
+highThroughputExample();
 ```
+
+**Expected Output**:
+```
+Completed 1000 commands in 987ms
+Throughput: 1013 req/s
+```
+
+**Validation**:
+- ✅ High concurrency (1,000+ concurrent requests)
+- ✅ All promises resolve successfully
+- ✅ Throughput meets target (>= 1,000 req/s)
+- ✅ No memory leaks or crashes
+
+---
+
+### Example 3: Automatic Reconnection
+
+```typescript
+import { RaftClient } from '@zio-raft/typescript-client';
+
+async function reconnectionExample() {
+  const client = new RaftClient({
+    endpoints: ['tcp://localhost:5555', 'tcp://localhost:5556'],
+    capabilities: { version: '1.0.0' }
+  });
+  
+  // Track connection events
+  let reconnectCount = 0;
+  
+  client.on('disconnected', (evt) => {
+    console.log(`Disconnected: ${evt.reason}`);
+  });
+  
+  client.on('reconnecting', (evt) => {
+    reconnectCount++;
+    console.log(`Reconnecting (attempt ${evt.attempt}) to ${evt.endpoint}`);
+  });
+  
+  client.on('connected', (evt) => {
+    console.log(`Connected to ${evt.endpoint}, session: ${evt.sessionId}`);
+  });
+  
+  await client.connect();
+  
+  // Submit command 1 (before disconnection)
+  const result1 = await client.submitCommand(encodeSetCommand('key1', 'value1'));
+  console.log('Command 1 completed:', decodeResponse(result1));
+  
+  // Simulate network failure (kill server connection externally)
+  console.log('Simulating network failure (stop server now)...');
+  await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5s
+  
+  // Submit command 2 (during disconnection - will queue and retry)
+  console.log('Submitting command 2 (while disconnected)...');
+  const promise2 = client.submitCommand(encodeSetCommand('key2', 'value2'));
+  
+  // Restart server (allow reconnection)
+  console.log('Waiting for reconnection (start server now)...');
+  const result2 = await promise2;
+  console.log('Command 2 completed after reconnection:', decodeResponse(result2));
+  
+  console.log(`Total reconnection attempts: ${reconnectCount}`);
+  
+  await client.disconnect();
+}
+
+reconnectionExample();
+```
+
+**Expected Output**:
+```
+Connected to tcp://localhost:5555, session: 550e8400-...
+Command 1 completed: { success: true }
+Simulating network failure (stop server now)...
+Submitting command 2 (while disconnected)...
+Disconnected: network
+Reconnecting (attempt 1) to tcp://localhost:5555
+Reconnecting (attempt 2) to tcp://localhost:5556
+Waiting for reconnection (start server now)...
+Connected to tcp://localhost:5555, session: 550e8400-...
+Command 2 completed after reconnection: { success: true }
+Total reconnection attempts: 2
+```
+
+**Validation**:
+- ✅ Disconnection detected automatically
+- ✅ Client attempts reconnection across all endpoints
+- ✅ Pending requests queued during disconnection
+- ✅ Session resumed after reconnection (same sessionId)
+- ✅ Queued requests completed after reconnection
+
+---
+
+### Example 4: Server-Initiated Requests
+
+```typescript
+import { RaftClient } from '@zio-raft/typescript-client';
+
+async function serverRequestExample() {
+  const client = new RaftClient({
+    endpoints: ['tcp://localhost:5555'],
+    capabilities: { version: '1.0.0', subscriptions: 'enabled' }
+  });
+  
+  // Register handler for server-initiated requests
+  client.onServerRequest((request) => {
+    console.log(`Server request received (ID: ${request.requestId})`);
+    const payload = decodeResponse(request.payload);
+    console.log(`Server payload:`, payload);
+    
+    // Application logic to handle server request
+    if (payload.type === 'NOTIFICATION') {
+      console.log(`Notification: ${payload.message}`);
+    }
+    
+    // Acknowledgment sent automatically
+  });
+  
+  await client.connect();
+  
+  // Wait for server requests (server pushes notifications)
+  console.log('Listening for server requests... (press Ctrl+C to exit)');
+  await new Promise(() => {}); // Wait indefinitely
+}
+
+serverRequestExample();
+```
+
+**Expected Output**:
+```
+Connected to tcp://localhost:5555, session: 550e8400-...
+Listening for server requests... (press Ctrl+C to exit)
+Server request received (ID: 1)
+Server payload: { type: 'NOTIFICATION', message: 'Cluster status: healthy' }
+Notification: Cluster status: healthy
+Server request received (ID: 2)
+Server payload: { type: 'NOTIFICATION', message: 'New leader elected' }
+Notification: New leader elected
+```
+
+**Validation**:
+- ✅ Handler registered successfully
+- ✅ Server requests delivered to handler
+- ✅ Consecutive request IDs (no gaps)
+- ✅ Automatic acknowledgment sent
+- ✅ No duplicate deliveries
+
+---
+
+### Example 5: Error Handling
+
+```typescript
+import { RaftClient, ValidationError, TimeoutError, SessionExpiredError } from '@zio-raft/typescript-client';
+
+async function errorHandlingExample() {
+  const client = new RaftClient({
+    endpoints: ['tcp://localhost:5555'],
+    capabilities: { version: '1.0.0' },
+    requestTimeout: 5000 // 5 seconds
+  });
+  
+  await client.connect();
+  
+  // Scenario 1: Validation error (synchronous throw)
+  try {
+    await client.submitCommand(null as any); // Invalid payload
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      console.log('✅ Validation error caught:', err.message);
+    }
+  }
+  
+  // Scenario 2: Request timeout (Promise rejection)
+  try {
+    // Submit command to slow endpoint (simulated timeout)
+    const slowPayload = encodeSetCommand('slow-key', { delay: 10000 });
+    await client.submitCommand(slowPayload);
+  } catch (err) {
+    if (err instanceof TimeoutError) {
+      console.log('✅ Timeout error caught:', err.message);
+      console.log(`   Request ID: ${err.requestId}`);
+      
+      // Manual retry
+      console.log('Retrying manually...');
+      const retryPayload = encodeSetCommand('slow-key', { delay: 0 });
+      const result = await client.submitCommand(retryPayload);
+      console.log('✅ Retry successful:', decodeResponse(result));
+    }
+  }
+  
+  // Scenario 3: Session expiry (terminal event)
+  client.on('sessionExpired', (evt) => {
+    console.log('❌ Session expired:', evt.sessionId);
+    console.log('   Application should terminate or reconnect with new session');
+    process.exit(1);
+  });
+  
+  await client.disconnect();
+}
+
+errorHandlingExample();
+```
+
+**Expected Output**:
+```
+✅ Validation error caught: Invalid payload: expected Buffer
+✅ Timeout error caught: Request timeout after 5000ms
+   Request ID: 42
+Retrying manually...
+✅ Retry successful: { success: true }
+```
+
+**Validation**:
+- ✅ Validation errors thrown synchronously
+- ✅ Timeout errors reject promises with TimeoutError
+- ✅ Manual retry works after timeout
+- ✅ Session expiry emits event (not shown in output)
 
 ---
 
 ## Configuration Options
 
-### Default Values
+### Full Configuration Example
 
 ```typescript
-const defaultConfig: ClientConfig = {
-  clusterMembers: new Map([...]),      // Required, no default
-  capabilities: new Map([...]),        // Required, no default
-  connectionTimeout: 5000,             // 5 seconds
-  keepAliveInterval: 30000,            // 30 seconds
-  requestTimeout: 10000                // 10 seconds
-};
+const client = new RaftClient({
+  // Required
+  endpoints: [
+    'tcp://raft-node-1:5555',
+    'tcp://raft-node-2:5555',
+    'tcp://raft-node-3:5555'
+  ],
+  capabilities: {
+    version: '1.0.0',
+    clientType: 'my-app',
+    features: 'compression,encryption'
+  },
+  
+  // Optional (with defaults)
+  connectionTimeout: 5000,         // 5s - timeout for initial connection
+  requestTimeout: 30000,           // 30s - timeout for individual requests
+  keepAliveInterval: 30000,        // 30s - heartbeat interval
+  queuedRequestTimeout: 60000,     // 60s - timeout for queued requests during disconnection
+  maxReconnectAttempts: Infinity,  // Infinite retries
+  reconnectInterval: 1000          // 1s - delay between reconnection attempts
+});
 ```
 
-### Tuning for High Throughput
+**Configuration Validation**:
+- Endpoints: Non-empty array of valid ZMQ endpoint strings
+- Capabilities: Non-empty object with string key-value pairs
+- Timeouts: Positive integers (milliseconds)
+- Max reconnect attempts: Positive integer or Infinity
 
-```typescript
-const highThroughputConfig: ClientConfig = {
-  clusterMembers: clusterMembers,
-  capabilities: capabilities,
-  connectionTimeout: 3000,       // Faster failover
-  keepAliveInterval: 60000,      // Less frequent heartbeats
-  requestTimeout: 30000          // Longer timeout for high load
-};
+---
 
-const client = new RaftClient(highThroughputConfig);
+## Integration Testing
+
+### Step 1: Start ZIO Raft Test Cluster
+
+```bash
+# Start 3-node cluster locally
+sbt "raft/runMain zio.raft.examples.KVStoreApp --port 5555 --id node1" &
+sbt "raft/runMain zio.raft.examples.KVStoreApp --port 5556 --id node2" &
+sbt "raft/runMain zio.raft.examples.KVStoreApp --port 5557 --id node3" &
 ```
 
-### Tuning for Low Latency
+### Step 2: Run TypeScript Client Test
 
-```typescript
-const lowLatencyConfig: ClientConfig = {
-  clusterMembers: clusterMembers,
-  capabilities: capabilities,
-  connectionTimeout: 2000,       // Quick connection
-  keepAliveInterval: 15000,      // Frequent heartbeats
-  requestTimeout: 5000           // Short timeout
-};
+```bash
+cd typescript-client
+npm test
+```
 
-const client = new RaftClient(lowLatencyConfig);
+**Expected Test Output**:
+```
+✓ TC-INT-001: Full Connect → Command → Disconnect Cycle (123ms)
+✓ TC-INT-002: Multiple Commands Sequentially (234ms)
+✓ TC-INT-003: Multiple Commands Concurrently (456ms)
+✓ TC-COMPAT-001: TypeScript Client → Scala Server CreateSession (78ms)
+✓ TC-COMPAT-002: TypeScript Client → Scala Server ClientRequest (91ms)
+...
+
+Test Suites: 15 passed, 15 total
+Tests:       95 passed, 95 total
+Time:        12.345s
+```
+
+### Step 3: Verify Wire Protocol Compatibility
+
+```bash
+# Capture network traffic during test
+tcpdump -i lo0 -w raft-client.pcap port 5555 &
+
+# Run client test
+npm test
+
+# Analyze captured traffic
+# Verify protocol signature: 0x7a 0x72 0x61 0x66 0x74 ("zraft")
+# Verify protocol version: 0x01
+# Compare byte-for-byte with Scala client
 ```
 
 ---
 
-## Running Against kvstore Example
+## Production Usage Patterns
 
-If you have the ZIO Raft kvstore example running:
+### Pattern 1: Singleton Client (Shared Session)
 
 ```typescript
-import { RaftClient, MemberId } from '@zio-raft/typescript-client';
+// client.ts (singleton module)
+import { RaftClient } from '@zio-raft/typescript-client';
 
-async function kvstoreExample() {
-  // KVStore cluster configuration
-  const clusterMembers = new Map([
-    [MemberId.fromString('node1'), 'tcp://localhost:5555'],
-    [MemberId.fromString('node2'), 'tcp://localhost:5556'],
-    [MemberId.fromString('node3'), 'tcp://localhost:5557']
-  ]);
+let _client: RaftClient | null = null;
+
+export function getClient(): RaftClient {
+  if (!_client) {
+    _client = new RaftClient({
+      endpoints: process.env.RAFT_ENDPOINTS!.split(','),
+      capabilities: { version: '1.0.0', app: 'my-app' }
+    });
+    
+    // Global error handling
+    _client.on('sessionExpired', () => {
+      console.error('Raft session expired - restarting application');
+      process.exit(1);
+    });
+  }
   
-  const capabilities = new Map([
-    ['client-type', 'kvstore-ts-client'],
-    ['protocol-version', '1']
-  ]);
-  
-  const client = new RaftClient({ clusterMembers, capabilities });
-  
-  await client.connect();
-  console.log('Connected to kvstore cluster');
-  
-  // Set a key
-  const setPayload = Buffer.from(JSON.stringify({
-    type: 'Set',
-    key: 'greeting',
-    value: 'Hello from TypeScript!'
-  }));
-  
-  await client.submitCommand(setPayload);
-  console.log('Key set successfully');
-  
-  // Get the key
-  const getPayload = Buffer.from(JSON.stringify({
-    type: 'Get',
-    key: 'greeting'
-  }));
-  
-  const result = await client.query(getPayload);
-  const value = JSON.parse(result.toString());
-  console.log('Retrieved value:', value);
-  
-  await client.disconnect();
+  return _client;
 }
 
-kvstoreExample().catch(console.error);
+export async function connectClient(): Promise<void> {
+  const client = getClient();
+  await client.connect();
+}
+```
+
+**Usage**:
+```typescript
+import { getClient, connectClient } from './client';
+
+await connectClient(); // At app startup
+
+// Use throughout application
+const client = getClient();
+await client.submitCommand(payload);
 ```
 
 ---
 
-## Validation Steps
+### Pattern 2: Multiple Sessions (Worker Pool)
 
-To verify the quickstart works correctly:
+```typescript
+// Create multiple client instances for parallel sessions
+const workers = [];
 
-1. **Start ZIO Raft cluster** (e.g., kvstore example):
-   ```bash
-   sbt "kvstore/run node1"  # Terminal 1
-   sbt "kvstore/run node2"  # Terminal 2
-   sbt "kvstore/run node3"  # Terminal 3
-   ```
+for (let i = 0; i < 4; i++) {
+  const client = new RaftClient({
+    endpoints: ['tcp://localhost:5555'],
+    capabilities: { version: '1.0.0', workerId: `worker-${i}` }
+  });
+  
+  await client.connect();
+  workers.push(client);
+}
 
-2. **Run TypeScript client**:
-   ```bash
-   ts-node quickstart.ts
-   ```
+// Distribute work across workers (round-robin)
+let nextWorker = 0;
 
-3. **Expected output**:
-   ```
-   State changed: Disconnected → ConnectingNewSession
-   Attempting connection to node1 at tcp://localhost:5555
-   Connected to node1
-   State changed: ConnectingNewSession → Connected
-   Connected to Raft cluster
-   Command result: {"status":"ok"}
-   Query result: {"value":{"name":"Alice","age":30}}
-   Disconnected from Raft cluster
-   ```
+async function submitWork(payload: Buffer): Promise<Buffer> {
+  const worker = workers[nextWorker];
+  nextWorker = (nextWorker + 1) % workers.length;
+  return await worker.submitCommand(payload);
+}
+```
 
-4. **Verify in Scala server logs**:
-   - Session created message
-   - ClientRequest received
-   - Query received
-   - Session closed message
+---
+
+### Pattern 3: Graceful Shutdown
+
+```typescript
+import { RaftClient } from '@zio-raft/typescript-client';
+
+const client = new RaftClient({ /* config */ });
+await client.connect();
+
+// Handle shutdown signals
+process.on('SIGTERM', async () => {
+  console.log('Received SIGTERM, shutting down gracefully...');
+  
+  try {
+    await client.disconnect();
+    console.log('Client disconnected successfully');
+    process.exit(0);
+  } catch (err) {
+    console.error('Error during shutdown:', err);
+    process.exit(1);
+  }
+});
+
+process.on('SIGINT', async () => {
+  console.log('Received SIGINT, shutting down gracefully...');
+  await client.disconnect();
+  process.exit(0);
+});
+```
 
 ---
 
 ## Troubleshooting
 
-### "Connection timeout" error
+### Issue 1: Connection Timeout
 
-**Problem**: Client cannot connect to cluster.
+**Symptom**:
+```
+Error: Connection timeout after 5000ms
+```
 
-**Solution**:
-- Verify cluster is running
-- Check addresses are correct
-- Ensure firewall allows connections
-- Try increasing `connectionTimeout`
-
-### "Session expired" event
-
-**Problem**: Client received SessionExpired, all requests failed.
+**Diagnosis**:
+- Server not running or unreachable
+- Incorrect endpoint URLs
+- Firewall blocking ZMQ traffic
 
 **Solution**:
-- This is terminal - client cannot recover
-- Reduce `keepAliveInterval` if sessions expire too quickly
-- Investigate network issues causing missed heartbeats
+```bash
+# Verify server is running
+netstat -an | grep 5555
 
-### "Not connected" error
+# Test ZMQ connectivity
+telnet localhost 5555
 
-**Problem**: Tried to submit command/query before connecting.
+# Check firewall rules
+# Increase connection timeout in config
+```
+
+---
+
+### Issue 2: Session Expired
+
+**Symptom**:
+```
+SessionExpiredError: Session expired: 550e8400-...
+```
+
+**Diagnosis**:
+- Keep-alive interval too long
+- Network latency causing missed heartbeats
+- Server session timeout too short
 
 **Solution**:
-- Call `await client.connect()` first
-- Ensure connection successful before operations
+```typescript
+// Reduce keep-alive interval
+const client = new RaftClient({
+  keepAliveInterval: 15000, // 15s instead of 30s
+  // ...
+});
+```
 
-### High latency
+---
 
-**Problem**: Operations taking longer than expected.
+### Issue 3: Request Timeout
+
+**Symptom**:
+```
+TimeoutError: Request timeout after 30000ms
+```
+
+**Diagnosis**:
+- Slow Raft consensus (large cluster, high latency)
+- Server overloaded
+- Request payload too large
 
 **Solution**:
-- Check network latency to cluster
-- Reduce `requestTimeout` to retry faster
-- Ensure cluster is not overloaded
-- Consider batching if submitting many operations
+```typescript
+// Increase request timeout
+const client = new RaftClient({
+  requestTimeout: 60000, // 60s instead of 30s
+  // ...
+});
+
+// Or manually retry
+try {
+  await client.submitCommand(payload);
+} catch (err) {
+  if (err instanceof TimeoutError) {
+    // Retry with same or modified payload
+    await client.submitCommand(payload);
+  }
+}
+```
+
+---
+
+### Issue 4: High Memory Usage
+
+**Symptom**: Memory usage grows continuously over time
+
+**Diagnosis**:
+- Event listener leak (handlers not removed)
+- Pending request accumulation (timeout too long)
+- Large payloads not garbage collected
+
+**Solution**:
+```typescript
+// Remove event listeners when done
+const handler = (evt) => { /* ... */ };
+client.on('connected', handler);
+// Later:
+client.off('connected', handler);
+
+// Monitor pending request count
+// Reduce request timeout to fail faster
+// Profile with Node.js heap snapshots
+```
+
+---
+
+## Performance Tuning
+
+### Tip 1: Batch Requests for Throughput
+
+```typescript
+// Instead of sequential:
+for (const item of items) {
+  await client.submitCommand(encodeItem(item)); // Slow, one at a time
+}
+
+// Use concurrent batch:
+const promises = items.map(item => client.submitCommand(encodeItem(item)));
+const results = await Promise.all(promises); // Fast, all at once
+```
+
+---
+
+### Tip 2: Reuse Buffers for Encoding
+
+```typescript
+// Avoid repeated allocations
+function encodeCommand(data: any): Buffer {
+  const json = JSON.stringify(data);
+  return Buffer.from(json, 'utf8');
+}
+}
+```
+
+---
+
+### Tip 3: Monitor Event Loop Lag
+
+```typescript
+import { performance } from 'perf_hooks';
+
+setInterval(() => {
+  const start = performance.now();
+  setImmediate(() => {
+    const lag = performance.now() - start;
+    if (lag > 50) {
+      console.warn(`Event loop lag: ${lag.toFixed(2)}ms`);
+    }
+  });
+}, 1000);
+```
+
+---
+
+## Success Criteria
+
+This quickstart is considered successful when:
+
+✅ **Installation**: Package installs without errors  
+✅ **Basic Usage**: Example 1 runs and completes successfully  
+✅ **High Throughput**: Example 2 achieves >= 1,000 req/s  
+✅ **Reconnection**: Example 3 demonstrates automatic reconnection  
+✅ **Server Requests**: Example 4 receives and handles server requests  
+✅ **Error Handling**: Example 5 demonstrates all error scenarios  
+✅ **Integration Tests**: All 95 tests pass  
+✅ **Wire Compatibility**: Protocol validation passes against Scala server  
+✅ **Production Patterns**: All 3 patterns demonstrated successfully
 
 ---
 
 ## Next Steps
 
-1. **Read the API documentation** for advanced features
-2. **Implement application-specific payload encoding** (JSON, Protocol Buffers, etc.)
-3. **Add structured logging** by observing client events
-4. **Implement error recovery** strategies for your use case
-5. **Performance test** with your expected workload
+After completing this quickstart:
+
+1. **Review Documentation**: Read full API documentation
+2. **Explore Examples**: Check `examples/` directory for more use cases
+3. **Run Benchmarks**: Execute performance tests to validate NFRs
+4. **Integration**: Integrate client into your application
+5. **Monitoring**: Set up observability via event handlers
+6. **Production Deployment**: Deploy with proper configuration and monitoring
 
 ---
 
-## Summary
+## Resources
 
-This quickstart demonstrated:
-- ✅ Creating and configuring a RaftClient
-- ✅ Connecting to a Raft cluster
-- ✅ Submitting commands (write operations)
-- ✅ Submitting queries (read operations)
-- ✅ Observing client events for logging
-- ✅ Handling server-initiated requests
-- ✅ Error handling patterns
-- ✅ Advanced concurrent operations
-- ✅ Configuration tuning
+- **GitHub Repository**: https://github.com/zio/zio-raft (monorepo)
+- **TypeScript Client**: `/typescript-client` subdirectory
+- **API Documentation**: Generated TypeDoc in `/typescript-client/docs`
+- **Scala Server**: `/raft`, `/client-server-protocol` modules
+- **Examples**: `/typescript-client/examples`
 
-The TypeScript client provides a type-safe, high-performance way to interact with ZIO Raft clusters from Node.js applications.
+---
+
+**Quickstart Complete**: All examples demonstrate core functionality and validate acceptance scenarios.

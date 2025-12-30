@@ -1,556 +1,1361 @@
-# Test Plan: TypeScript Client Library
+# Test Scenarios: TypeScript Client Library
 
-**Date**: 2025-12-24  
-**Feature**: TypeScript Client for ZIO Raft
+**Feature**: TypeScript Client Library  
+**Date**: 2025-12-29  
+**Status**: Complete
 
 ## Overview
-This document defines all test cases for the TypeScript client library, organized by category. Tests verify protocol compatibility, behavioral correctness, and performance requirements.
+
+This document catalogs all test scenarios for the TypeScript Raft client library. Tests are derived from acceptance scenarios, functional requirements, edge cases, and design considerations. We follow a **No TDD** approach - implementation comes before test execution.
 
 ---
 
-## 1. Protocol Codec Tests
+## Test Categories
 
-### 1.1 Client Message Encoding
-
-**TC-CODEC-001: CreateSession encoding**
-- **Given**: CreateSession message with capabilities and nonce
-- **When**: Encode to binary
-- **Then**: Protocol header + type discriminator (1) + encoded capabilities + encoded nonce
-
-**TC-CODEC-002: ContinueSession encoding**
-- **Given**: ContinueSession message with sessionId and nonce
-- **When**: Encode to binary
-- **Then**: Protocol header + type discriminator (2) + encoded sessionId + encoded nonce
-
-**TC-CODEC-003: KeepAlive encoding**
-- **Given**: KeepAlive message with timestamp
-- **When**: Encode to binary
-- **Then**: Protocol header + type discriminator (3) + encoded timestamp (int64 epoch millis)
-
-**TC-CODEC-004: ClientRequest encoding**
-- **Given**: ClientRequest with requestId, lowestPendingRequestId, payload, createdAt
-- **When**: Encode to binary
-- **Then**: Protocol header + type discriminator (4) + two int64 IDs + int32-prefixed payload + timestamp
-
-**TC-CODEC-005: Query encoding**
-- **Given**: Query with correlationId, payload, createdAt
-- **When**: Encode to binary
-- **Then**: Protocol header + type discriminator (8) + uint16-prefixed correlationId + int32-prefixed payload + timestamp
-
-**TC-CODEC-006: ServerRequestAck encoding**
-- **Given**: ServerRequestAck with requestId
-- **When**: Encode to binary
-- **Then**: Protocol header + type discriminator (5) + int64 requestId
-
-**TC-CODEC-007: CloseSession encoding**
-- **Given**: CloseSession with ClientShutdown reason
-- **When**: Encode to binary
-- **Then**: Protocol header + type discriminator (6) + uint8 reason code (1)
-
-**TC-CODEC-008: ConnectionClosed encoding**
-- **Given**: ConnectionClosed (singleton)
-- **When**: Encode to binary
-- **Then**: Protocol header + type discriminator (7), no additional data
-
-### 1.2 Server Message Decoding
-
-**TC-CODEC-101: SessionCreated decoding**
-- **Given**: Binary data with SessionCreated message
-- **When**: Decode from binary
-- **Then**: SessionCreated object with correct sessionId and nonce
-
-**TC-CODEC-102: SessionContinued decoding**
-- **Given**: Binary data with SessionContinued message
-- **When**: Decode from binary
-- **Then**: SessionContinued object with correct nonce
-
-**TC-CODEC-103: SessionRejected decoding**
-- **Given**: Binary data with SessionRejected message
-- **When**: Decode from binary
-- **Then**: SessionRejected object with reason, nonce, and optional leaderId
-
-**TC-CODEC-104: SessionClosed decoding**
-- **Given**: Binary data with SessionClosed message
-- **When**: Decode from binary
-- **Then**: SessionClosed object with reason and optional leaderId
-
-**TC-CODEC-105: KeepAliveResponse decoding**
-- **Given**: Binary data with KeepAliveResponse message
-- **When**: Decode from binary
-- **Then**: KeepAliveResponse object with correct timestamp
-
-**TC-CODEC-106: ClientResponse decoding**
-- **Given**: Binary data with ClientResponse message
-- **When**: Decode from binary
-- **Then**: ClientResponse object with requestId and result payload
-
-**TC-CODEC-107: QueryResponse decoding**
-- **Given**: Binary data with QueryResponse message
-- **When**: Decode from binary
-- **Then**: QueryResponse object with correlationId and result payload
-
-**TC-CODEC-108: ServerRequest decoding**
-- **Given**: Binary data with ServerRequest message
-- **When**: Decode from binary
-- **Then**: ServerRequest object with requestId, payload, createdAt
-
-**TC-CODEC-109: RequestError decoding**
-- **Given**: Binary data with RequestError message
-- **When**: Decode from binary
-- **Then**: RequestError object with requestId and ResponseEvicted reason
-
-### 1.3 Roundtrip Tests
-
-**TC-CODEC-201: All client messages roundtrip**
-- **Given**: Each client message type
-- **When**: Encode then decode
-- **Then**: Decoded message equals original
-
-**TC-CODEC-202: All server messages roundtrip**
-- **Given**: Each server message type
-- **When**: Encode then decode
-- **Then**: Decoded message equals original
-
-### 1.4 Edge Cases
-
-**TC-CODEC-301: Empty capabilities map**
-- **Given**: CreateSession with empty capabilities
-- **When**: Validate before encoding
-- **Then**: Throw ValidationError
-
-**TC-CODEC-302: Large payload (10MB)**
-- **Given**: ClientRequest with 10MB payload
-- **When**: Encode and decode
-- **Then**: Successful roundtrip, payload intact
-
-**TC-CODEC-303: Invalid protocol signature**
-- **Given**: Binary data with wrong signature
-- **When**: Decode
-- **Then**: Throw Error "Invalid protocol signature"
-
-**TC-CODEC-304: Unsupported protocol version**
-- **Given**: Binary data with version != 1
-- **When**: Decode
-- **Then**: Throw Error "Unsupported protocol version"
+1. **Unit Tests**: Individual component testing with mocks
+2. **Integration Tests**: Full client lifecycle with real transport
+3. **Compatibility Tests**: Wire protocol validation against Scala server
+4. **Performance Tests**: Throughput and latency validation
 
 ---
 
-## 2. State Machine Tests
+## Unit Tests
 
-### 2.1 Disconnected State
+### Protocol Layer Tests
 
-**TC-STATE-001: Connect action from Disconnected**
-- **Given**: Disconnected state
-- **When**: Receive Connect action
-- **Then**: Transition to ConnectingNewSession, send CreateSession
+#### TC-PROTO-001: Encode CreateSession Message
+**Objective**: Verify CreateSession message encodes correctly
 
-**TC-STATE-002: SubmitCommand while Disconnected**
-- **Given**: Disconnected state
-- **When**: Receive SubmitCommand action
-- **Then**: Reject promise with "Not connected" error
+**Setup**:
+```typescript
+const capabilities = { version: '1.0.0', client: 'typescript' };
+const nonce = 12345n;
+const message: CreateSession = { type: 'CreateSession', capabilities, nonce };
+```
 
-**TC-STATE-003: Server message while Disconnected**
-- **Given**: Disconnected state
-- **When**: Receive server message
-- **Then**: Log warning, remain in Disconnected
+**Test Steps**:
+1. Call `encodeClientMessage(message)`
+2. Verify buffer starts with protocol signature: `0x7a 0x72 0x61 0x66 0x74`
+3. Verify protocol version byte: `0x01`
+4. Verify discriminator byte: `0x01` (CreateSession)
+5. Verify capabilities encoding (map size + key/value pairs)
+6. Verify nonce encoding (8 bytes little-endian)
 
-### 2.2 ConnectingNewSession State
-
-**TC-STATE-101: SessionCreated in ConnectingNewSession**
-- **Given**: ConnectingNewSession state with pending requests
-- **When**: Receive SessionCreated with matching nonce
-- **Then**: Transition to Connected, resend pending requests
-
-**TC-STATE-102: SessionRejected NotLeader**
-- **Given**: ConnectingNewSession state
-- **When**: Receive SessionRejected(NotLeader) with leaderId
-- **Then**: Disconnect, connect to leader, send CreateSession
-
-**TC-STATE-103: SessionRejected InvalidCapabilities**
-- **Given**: ConnectingNewSession state with pending requests
-- **When**: Receive SessionRejected(InvalidCapabilities)
-- **Then**: Fail all pending requests, terminate
-
-**TC-STATE-104: Connection timeout**
-- **Given**: ConnectingNewSession state, no SessionCreated received
-- **When**: Timeout elapsed
-- **Then**: Try next member
-
-**TC-STATE-105: SubmitCommand while connecting**
-- **Given**: ConnectingNewSession state
-- **When**: Receive SubmitCommand action
-- **Then**: Queue request, do not send yet
-
-### 2.3 ConnectingExistingSession State
-
-**TC-STATE-201: SessionContinued in ConnectingExistingSession**
-- **Given**: ConnectingExistingSession state with pending requests
-- **When**: Receive SessionContinued with matching nonce
-- **Then**: Transition to Connected, resend pending requests
-
-**TC-STATE-202: SessionRejected SessionExpired**
-- **Given**: ConnectingExistingSession state with pending requests
-- **When**: Receive SessionRejected(SessionExpired)
-- **Then**: Fail all pending requests, terminate
-
-**TC-STATE-203: SessionRejected NotLeader during resume**
-- **Given**: ConnectingExistingSession state
-- **When**: Receive SessionRejected(NotLeader) with leaderId
-- **Then**: Disconnect, connect to leader, send ContinueSession
-
-### 2.4 Connected State
-
-**TC-STATE-301: SubmitCommand in Connected**
-- **Given**: Connected state
-- **When**: Receive SubmitCommand action
-- **Then**: Allocate RequestId, send ClientRequest, track pending
-
-**TC-STATE-302: SubmitQuery in Connected**
-- **Given**: Connected state
-- **When**: Receive SubmitQuery action
-- **Then**: Generate CorrelationId, send Query, track pending
-
-**TC-STATE-303: ClientResponse received**
-- **Given**: Connected state with pending request
-- **When**: Receive ClientResponse with matching requestId
-- **Then**: Resolve promise, remove from pending
-
-**TC-STATE-304: QueryResponse received**
-- **Given**: Connected state with pending query
-- **When**: Receive QueryResponse with matching correlationId
-- **Then**: Resolve promise, remove from pending
-
-**TC-STATE-305: SessionClosed NotLeaderAnymore**
-- **Given**: Connected state with pending requests
-- **When**: Receive SessionClosed(NotLeaderAnymore) with leaderId
-- **Then**: Transition to ConnectingExistingSession, connect to leader
-
-**TC-STATE-306: SessionClosed SessionExpired**
-- **Given**: Connected state with pending requests
-- **When**: Receive SessionClosed(SessionExpired)
-- **Then**: Fail all pending requests, emit sessionExpired event, terminate
-
-**TC-STATE-307: KeepAlive tick**
-- **Given**: Connected state
-- **When**: KeepAlive timer fires
-- **Then**: Send KeepAlive message
-
-**TC-STATE-308: Request timeout and retry**
-- **Given**: Connected state with pending request, no response after timeout
-- **When**: Timeout check fires
-- **Then**: Resend ClientRequest, update lastSentAt
-
-**TC-STATE-309: Disconnect action**
-- **Given**: Connected state
-- **When**: Receive Disconnect action
-- **Then**: Send CloseSession, disconnect transport, transition to Disconnected
-
-**TC-STATE-310: ServerRequest received**
-- **Given**: Connected state
-- **When**: Receive ServerRequest
-- **Then**: Emit serverRequestReceived event, send ServerRequestAck
-
-**TC-STATE-311: Duplicate ServerRequest (already processed)**
-- **Given**: Connected state, already processed requestId
-- **When**: Receive same ServerRequest again
-- **Then**: Re-send ServerRequestAck, do not re-emit event
-
-**TC-STATE-312: Out-of-order ServerRequest**
-- **Given**: Connected state, expecting requestId N
-- **When**: Receive ServerRequest with requestId N+2
-- **Then**: Drop request, log warning
-
-### 2.5 State Persistence Across Reconnection
-
-**TC-STATE-401: Pending requests preserved during reconnection**
-- **Given**: Connected state with 10 pending requests
-- **When**: Network failure, reconnect successful
-- **Then**: All 10 requests resent, responses eventually received
+**Expected Result**: Byte-for-byte match with Scala codec output for equivalent message
 
 ---
 
-## 3. Transport Tests
+#### TC-PROTO-002: Decode SessionCreated Message
+**Objective**: Verify SessionCreated message decodes correctly
 
-### 3.1 ZMQ Transport
+**Setup**:
+```typescript
+// Create buffer with:
+// - Protocol header (signature + version)
+// - Discriminator 0x01 (SessionCreated)
+// - SessionId (16 bytes UUID)
+// - Nonce (8 bytes)
+```
 
-**TC-TRANSPORT-001: Connect to single address**
-- **Given**: ZmqTransport
-- **When**: connect("tcp://localhost:5555")
-- **Then**: ZMQ socket connects successfully
+**Test Steps**:
+1. Call `decodeServerMessage(buffer)`
+2. Verify returns SessionCreated object
+3. Verify sessionId is valid UUID string
+4. Verify nonce matches expected value
 
-**TC-TRANSPORT-002: Disconnect from address**
-- **Given**: Connected ZmqTransport
-- **When**: disconnect()
-- **Then**: ZMQ socket disconnects cleanly
-
-**TC-TRANSPORT-003: Send message**
-- **Given**: Connected ZmqTransport
-- **When**: send(CreateSession message)
-- **Then**: Message sent to ZMQ socket
-
-**TC-TRANSPORT-004: Receive message**
-- **Given**: Connected ZmqTransport with incoming message
-- **When**: Iterate receive()
-- **Then**: Decoded ServerMessage yielded
-
-**TC-TRANSPORT-005: Reconnect to different address**
-- **Given**: Connected to address A
-- **When**: disconnect(), connect(address B)
-- **Then**: Successfully connected to B
-
-**TC-TRANSPORT-006: Send high volume (1K messages/sec)**
-- **Given**: Connected ZmqTransport
-- **When**: Send 1000 messages in 1 second
-- **Then**: All messages sent without error
+**Expected Result**: Correct SessionCreated object with all fields populated
 
 ---
 
-## 4. Pending Request Tests
+#### TC-PROTO-003: Encode ClientRequest Message
+**Objective**: Verify ClientRequest message encodes with all fields
 
-### 4.1 Request Tracking
+**Setup**:
+```typescript
+const message: ClientRequest = {
+  type: 'ClientRequest',
+  requestId: 42n,
+  lowestPendingRequestId: 40n,
+  payload: Buffer.from([1, 2, 3, 4]),
+  createdAt: new Date('2025-12-29T10:00:00Z')
+};
+```
 
-**TC-PENDING-001: Add pending request**
-- **Given**: PendingRequests
-- **When**: add(requestId, payload, resolve, reject, timestamp)
-- **Then**: Request tracked in map
+**Test Steps**:
+1. Call `encodeClientMessage(message)`
+2. Verify protocol header
+3. Verify discriminator: `0x04` (ClientRequest)
+4. Verify requestId encoding (8 bytes, value 42)
+5. Verify lowestPendingRequestId encoding (8 bytes, value 40)
+6. Verify payload length-prefix + bytes
+7. Verify timestamp ISO 8601 string encoding
 
-**TC-PENDING-002: Complete pending request**
-- **Given**: PendingRequests with requestId=123
-- **When**: complete(123, result)
-- **Then**: Promise resolved with result, request removed
-
-**TC-PENDING-003: Timeout expired request**
-- **Given**: PendingRequests with request sent 11 seconds ago
-- **When**: resendExpired(transport, now, 10s timeout)
-- **Then**: Request resent, lastSentAt updated
-
-**TC-PENDING-004: Resend all pending**
-- **Given**: PendingRequests with 5 pending requests
-- **When**: resendAll(transport)
-- **Then**: All 5 requests resent
-
-**TC-PENDING-005: Lowest pending requestId**
-- **Given**: PendingRequests with requestIds [5, 10, 15]
-- **When**: lowestPendingRequestIdOr(default)
-- **Then**: Returns RequestId(5)
-
-**TC-PENDING-006: Die all pending on session expiry**
-- **Given**: PendingRequests with 3 pending requests
-- **When**: dieAll(new Error("Session expired"))
-- **Then**: All 3 promises rejected with error
-
-### 4.2 Query Tracking
-
-**TC-PENDING-101: Add pending query**
-- **Given**: PendingQueries
-- **When**: add(correlationId, payload, resolve, reject, timestamp)
-- **Then**: Query tracked in map
-
-**TC-PENDING-102: Complete pending query**
-- **Given**: PendingQueries with correlationId="abc"
-- **When**: complete("abc", result)
-- **Then**: Promise resolved with result, query removed
-
-**TC-PENDING-103: Timeout expired query**
-- **Given**: PendingQueries with query sent 11 seconds ago
-- **When**: resendExpired(transport, now, 10s timeout)
-- **Then**: Query resent, lastSentAt updated
+**Expected Result**: Buffer matches Scala codec output for same message
 
 ---
 
-## 5. Integration Tests
+#### TC-PROTO-004: Decode ClientResponse Message
+**Objective**: Verify ClientResponse message decodes correctly
 
-### 5.1 Basic Operations
+**Setup**: Buffer with ClientResponse encoding
 
-**TC-INTEGRATION-001: Connect and disconnect**
-- **Given**: RaftClient with cluster config
-- **When**: connect() then disconnect()
-- **Then**: Session created and closed cleanly
+**Test Steps**:
+1. Call `decodeServerMessage(buffer)`
+2. Verify returns ClientResponse object
+3. Verify requestId is bigint
+4. Verify result payload is Buffer with correct bytes
 
-**TC-INTEGRATION-002: Submit command and receive response**
-- **Given**: Connected RaftClient
-- **When**: submitCommand(Buffer.from("test"))
-- **Then**: Response received, promise resolved
-
-**TC-INTEGRATION-003: Submit query and receive response**
-- **Given**: Connected RaftClient
-- **When**: query(Buffer.from("get:key"))
-- **Then**: Response received, promise resolved
-
-**TC-INTEGRATION-004: Multiple commands in sequence**
-- **Given**: Connected RaftClient
-- **When**: Submit 10 commands sequentially
-- **Then**: All 10 responses received in order
-
-**TC-INTEGRATION-005: Multiple queries in parallel**
-- **Given**: Connected RaftClient
-- **When**: Submit 10 queries concurrently
-- **Then**: All 10 responses received (order not guaranteed)
-
-### 5.2 Reconnection Scenarios
-
-**TC-INTEGRATION-101: Reconnect after network failure**
-- **Given**: Connected RaftClient, network drops
-- **When**: Network restored
-- **Then**: Client reconnects, pending requests complete
-
-**TC-INTEGRATION-102: Leader change during operation**
-- **Given**: Connected to follower node
-- **When**: Server sends SessionClosed(NotLeaderAnymore) with leader hint
-- **Then**: Client reconnects to leader, operations continue
-
-**TC-INTEGRATION-103: Cluster election in progress**
-- **Given**: All cluster members return NotLeader
-- **When**: Client tries to connect
-- **Then**: Client retries across members until leader elected
-
-### 5.3 Error Scenarios
-
-**TC-INTEGRATION-201: Session expiry**
-- **Given**: Connected RaftClient, stop sending keep-alives
-- **When**: Server times out session
-- **Then**: Client receives SessionExpired, terminates, pending requests rejected
-
-**TC-INTEGRATION-202: Invalid capabilities**
-- **Given**: RaftClient with unsupported capabilities
-- **When**: connect()
-- **Then**: SessionRejected(InvalidCapabilities), connection fails
-
-**TC-INTEGRATION-203: Request timeout and retry**
-- **Given**: Connected RaftClient
-- **When**: Submit command, server delays response beyond timeout
-- **Then**: Client retries request, eventually receives response
-
-### 5.4 Server-Initiated Requests
-
-**TC-INTEGRATION-301: Receive and acknowledge server request**
-- **Given**: Connected RaftClient
-- **When**: Server sends ServerRequest
-- **Then**: Client emits serverRequestReceived event, sends ack
-
-**TC-INTEGRATION-302: Duplicate server request**
-- **Given**: Connected RaftClient, already processed server request
-- **When**: Server resends same ServerRequest
-- **Then**: Client re-acks, does not re-emit event
+**Expected Result**: Correct ClientResponse object
 
 ---
 
-## 6. Performance Tests
+#### TC-PROTO-005: Encode Query Message
+**Objective**: Verify Query message encodes with correlation ID
 
-### 6.1 Throughput
+**Setup**:
+```typescript
+const message: Query = {
+  type: 'Query',
+  correlationId: '550e8400-e29b-41d4-a716-446655440000',
+  payload: Buffer.from([5, 6, 7, 8]),
+  createdAt: new Date()
+};
+```
 
-**TC-PERF-001: 1000 req/sec sustained**
-- **Given**: Connected RaftClient
-- **When**: Submit 10,000 commands over 10 seconds
-- **Then**: All commands complete, average throughput >= 1000 req/sec
+**Test Steps**:
+1. Call `encodeClientMessage(message)`
+2. Verify protocol header
+3. Verify discriminator: `0x08` (Query)
+4. Verify correlationId encoding (16 bytes UUID binary)
+5. Verify payload encoding
 
-**TC-PERF-002: 10,000 req/sec burst**
-- **Given**: Connected RaftClient
-- **When**: Submit 10,000 commands as fast as possible
-- **Then**: Client handles burst without crashing, throughput >= 10K req/sec
-
-**TC-PERF-003: Memory usage under load**
-- **Given**: Connected RaftClient
-- **When**: Submit 100,000 commands over 10 seconds
-- **Then**: Memory usage remains stable, no leaks
-
-### 6.2 Latency
-
-**TC-PERF-101: P50 latency < 10ms**
-- **Given**: Connected RaftClient
-- **When**: Submit 1000 commands
-- **Then**: 50th percentile latency < 10ms
-
-**TC-PERF-102: P99 latency < 100ms**
-- **Given**: Connected RaftClient
-- **When**: Submit 1000 commands
-- **Then**: 99th percentile latency < 100ms
+**Expected Result**: Correct Query encoding
 
 ---
 
-## 7. Protocol Compatibility Tests
+#### TC-PROTO-006: Decode QueryResponse Message
+**Objective**: Verify QueryResponse message decodes correctly
 
-### 7.1 Interoperability with Scala Server
+**Setup**: Buffer with QueryResponse encoding
 
-**TC-COMPAT-001: TypeScript client connects to Scala server**
-- **Given**: Scala RaftServer running
-- **When**: TypeScript RaftClient connects
-- **Then**: Session created successfully
+**Test Steps**:
+1. Call `decodeServerMessage(buffer)`
+2. Verify returns QueryResponse object
+3. Verify correlationId is UUID string
+4. Verify result payload is Buffer
 
-**TC-COMPAT-002: Submit command to Scala server**
-- **Given**: TypeScript client connected to Scala server
-- **When**: submitCommand(payload)
-- **Then**: Response received and decoded correctly
-
-**TC-COMPAT-003: Receive server request from Scala server**
-- **Given**: TypeScript client connected to Scala server
-- **When**: Scala server sends ServerRequest
-- **Then**: TypeScript client decodes and acknowledges correctly
-
-### 7.2 Golden File Tests
-
-**TC-COMPAT-101: Decode Scala-encoded messages**
-- **Given**: Golden files with Scala-encoded messages
-- **When**: TypeScript client decodes
-- **Then**: All messages decoded correctly
-
-**TC-COMPAT-102: Encode messages matching Scala encoding**
-- **Given**: Test messages
-- **When**: TypeScript client encodes
-- **Then**: Output matches Scala-encoded golden files (byte-for-byte)
+**Expected Result**: Correct QueryResponse object
 
 ---
 
-## 8. Edge Case Tests
+#### TC-PROTO-007: Encode KeepAlive Message
+**Objective**: Verify KeepAlive message encodes timestamp correctly
 
-### 8.1 Boundary Values
+**Setup**:
+```typescript
+const message: KeepAlive = {
+  type: 'KeepAlive',
+  timestamp: new Date('2025-12-29T10:00:00.123Z')
+};
+```
 
-**TC-EDGE-001: RequestId overflow (near MAX_SAFE_INTEGER)**
-- **Given**: RequestId at Number.MAX_SAFE_INTEGER - 10
-- **When**: Allocate 20 more request IDs
-- **Then**: Handle gracefully (use bigint, no overflow)
+**Test Steps**:
+1. Call `encodeClientMessage(message)`
+2. Verify protocol header
+3. Verify discriminator: `0x03` (KeepAlive)
+4. Verify timestamp encoding (ISO 8601 string with milliseconds)
 
-**TC-EDGE-002: Empty payload**
-- **Given**: ClientRequest with 0-byte payload
-- **When**: Encode and decode
-- **Then**: Successful roundtrip
-
-**TC-EDGE-003: Maximum capabilities (1000 entries)**
-- **Given**: CreateSession with 1000 capability entries
-- **When**: Encode and send
-- **Then**: Successful encoding, no truncation
-
-### 8.2 Concurrent Operations
-
-**TC-EDGE-101: Disconnect while requests pending**
-- **Given**: Connected with 10 pending requests
-- **When**: disconnect()
-- **Then**: All pending requests rejected with "Disconnected" error
-
-**TC-EDGE-102: Multiple concurrent submitCommand calls**
-- **Given**: Connected RaftClient
-- **When**: 100 concurrent submitCommand() calls
-- **Then**: All assigned unique RequestIds, all complete correctly
+**Expected Result**: Correct KeepAlive encoding
 
 ---
 
-## Summary
+#### TC-PROTO-008: Decode KeepAliveResponse Message
+**Objective**: Verify KeepAliveResponse decodes both timestamps
 
-Total test cases: **100+**
+**Setup**: Buffer with KeepAliveResponse encoding
 
-Test categories:
-- **Protocol Codecs**: 30 tests (encoding, decoding, roundtrip, edge cases)
-- **State Machine**: 25 tests (state transitions, event handling)
-- **Transport**: 6 tests (ZMQ socket operations)
-- **Pending Tracking**: 9 tests (request/query lifecycle)
-- **Integration**: 15 tests (end-to-end scenarios)
-- **Performance**: 5 tests (throughput, latency)
-- **Compatibility**: 5 tests (interop with Scala server)
-- **Edge Cases**: 5 tests (boundary values, concurrency)
+**Test Steps**:
+1. Call `decodeServerMessage(buffer)`
+2. Verify returns KeepAliveResponse object
+3. Verify clientTimestamp is Date object
+4. Verify serverTimestamp is Date object
 
-All tests aim to verify:
-1. Protocol compatibility with Scala implementation
-2. Correct state machine behavior
-3. Performance requirements (1K-10K req/sec)
-4. Resilience (reconnection, retry, error handling)
-5. Type safety and API correctness
+**Expected Result**: Correct KeepAliveResponse with both timestamps
+
+---
+
+#### TC-PROTO-009: Protocol Version Validation
+**Objective**: Verify unsupported protocol version is rejected
+
+**Setup**: Buffer with protocol version `0x02` (unsupported)
+
+**Test Steps**:
+1. Call `decodeServerMessage(buffer)`
+2. Expect ProtocolError thrown
+3. Verify error message includes version mismatch details
+
+**Expected Result**: ProtocolError thrown, does not crash
+
+---
+
+#### TC-PROTO-010: Invalid Signature Rejection
+**Objective**: Verify invalid signature is rejected
+
+**Setup**: Buffer with signature `0x00 0x00 0x00 0x00 0x00` (invalid)
+
+**Test Steps**:
+1. Call `decodeServerMessage(buffer)`
+2. Expect ProtocolError thrown
+3. Verify error message mentions invalid signature
+
+**Expected Result**: ProtocolError thrown
+
+---
+
+#### TC-PROTO-011: Round-Trip Encoding All Client Messages
+**Objective**: Verify all ClientMessage types round-trip correctly
+
+**Setup**: Create one instance of each ClientMessage type
+
+**Test Steps**:
+For each ClientMessage type:
+1. Encode message to buffer
+2. Verify Scala codec produces identical buffer
+3. Decode buffer back to message object
+4. Verify decoded equals original (deep equality)
+
+**Expected Result**: All messages round-trip successfully
+
+---
+
+### State Machine Tests
+
+#### TC-STATE-001: Disconnected Handles Connect Action
+**Objective**: Verify Disconnected state transitions to ConnectingNewSession
+
+**Setup**: DisconnectedState with mock transport
+
+**Test Steps**:
+1. Create Connect action event
+2. Call `state.handle(event, transport, queue)`
+3. Verify transport.connect() called with first endpoint
+4. Verify transport.sendMessage() called with CreateSession
+5. Verify returns ConnectingNewSessionState
+
+**Expected Result**: Transition to ConnectingNewSession, CreateSession sent
+
+---
+
+#### TC-STATE-002: Disconnected Rejects SubmitCommand
+**Objective**: Verify SubmitCommand fails in Disconnected state (before connect)
+
+**Setup**: DisconnectedState with mock transport
+
+**Test Steps**:
+1. Create SubmitCommand action with promise
+2. Call `state.handle(event, transport, queue)`
+3. Verify promise rejected with error "Not connected"
+4. Verify state remains Disconnected
+
+**Expected Result**: Promise rejected, no state transition
+
+---
+
+#### TC-STATE-003: ConnectingNewSession Handles SessionCreated
+**Objective**: Verify session establishment transitions to Connected
+
+**Setup**: ConnectingNewSessionState with mock transport
+
+**Test Steps**:
+1. Create SessionCreated event with sessionId
+2. Call `state.handle(event, transport, queue)`
+3. Verify returns ConnectedState with sessionId
+4. Verify 'connected' event emitted
+
+**Expected Result**: Transition to Connected, event emitted
+
+---
+
+#### TC-STATE-004: ConnectingNewSession Handles SessionRejected
+**Objective**: Verify rejection retries with next cluster member
+
+**Setup**: ConnectingNewSessionState with 2 cluster members
+
+**Test Steps**:
+1. Create SessionRejected event with NotLeader reason
+2. Call `state.handle(event, transport, queue)`
+3. Verify transport disconnects from first member
+4. Verify transport connects to second member
+5. Verify CreateSession sent again
+6. Verify returns ConnectingNewSessionState (still connecting)
+
+**Expected Result**: Retry with next member, stay in connecting state
+
+---
+
+#### TC-STATE-005: Connected Handles SubmitCommand
+**Objective**: Verify command submission in Connected state
+
+**Setup**: ConnectedState with mock transport, empty pending requests
+
+**Test Steps**:
+1. Create SubmitCommand action with payload and promise
+2. Call `state.handle(event, transport, queue)`
+3. Verify request added to pendingRequests
+4. Verify transport.sendMessage() called with ClientRequest
+5. Verify requestId is sequential (starting from 1)
+6. Verify state remains Connected
+
+**Expected Result**: Request queued and sent, promise pending
+
+---
+
+#### TC-STATE-006: Connected Handles ClientResponse
+**Objective**: Verify response completes pending command
+
+**Setup**: ConnectedState with pending request (ID 42)
+
+**Test Steps**:
+1. Create ClientResponse event with requestId 42 and result payload
+2. Call `state.handle(event, transport, queue)`
+3. Verify pending request removed from map
+4. Verify promise resolved with result payload
+5. Verify state remains Connected
+
+**Expected Result**: Promise resolved, request removed
+
+---
+
+#### TC-STATE-007: Connected Handles SubmitQuery
+**Objective**: Verify query submission in Connected state
+
+**Setup**: ConnectedState with mock transport
+
+**Test Steps**:
+1. Create SubmitQuery action with payload and promise
+2. Call `state.handle(event, transport, queue)`
+3. Verify query added to pendingQueries
+4. Verify transport.sendMessage() called with Query message
+5. Verify correlationId is UUID format
+6. Verify state remains Connected
+
+**Expected Result**: Query queued and sent, promise pending
+
+---
+
+#### TC-STATE-008: Connected Handles QueryResponse
+**Objective**: Verify query response completes pending query
+
+**Setup**: ConnectedState with pending query (correlation ID)
+
+**Test Steps**:
+1. Create QueryResponse event with correlationId and result
+2. Call `state.handle(event, transport, queue)`
+3. Verify pending query removed from map
+4. Verify promise resolved with result payload
+5. Verify state remains Connected
+
+**Expected Result**: Promise resolved, query removed
+
+---
+
+#### TC-STATE-009: Connected Handles Network Disconnect
+**Objective**: Verify automatic reconnection on network failure
+
+**Setup**: ConnectedState with active session
+
+**Test Steps**:
+1. Create Disconnect event from transport
+2. Call `state.handle(event, transport, queue)`
+3. Verify 'disconnected' event emitted
+4. Verify returns ConnectingExistingSessionState (preserving sessionId)
+5. Verify pending requests preserved in new state
+
+**Expected Result**: Transition to reconnecting, session preserved
+
+---
+
+#### TC-STATE-010: ConnectingExistingSession Handles SessionContinued
+**Objective**: Verify session resumption after reconnection
+
+**Setup**: ConnectingExistingSessionState with sessionId, pending requests
+
+**Test Steps**:
+1. Create SessionContinued event
+2. Call `state.handle(event, transport, queue)`
+3. Verify 'connected' event emitted
+4. Verify all pending requests resent via transport
+5. Verify returns ConnectedState with same sessionId
+
+**Expected Result**: Session resumed, pending requests resent
+
+---
+
+#### TC-STATE-011: Connected Handles SessionExpired
+**Objective**: Verify session expiry terminates client
+
+**Setup**: ConnectedState with active session, pending requests
+
+**Test Steps**:
+1. Create SessionClosed event with SessionExpired reason
+2. Call `state.handle(event, transport, queue)`
+3. Verify 'sessionExpired' event emitted
+4. Verify all pending requests rejected with SessionExpiredError
+5. Verify returns terminal state (no further transitions)
+
+**Expected Result**: Session terminated, all requests failed, event emitted
+
+---
+
+#### TC-STATE-012: Connected Handles KeepAliveTick
+**Objective**: Verify keep-alive heartbeat sent periodically
+
+**Setup**: ConnectedState with active session
+
+**Test Steps**:
+1. Create KeepAliveTick event
+2. Call `state.handle(event, transport, queue)`
+3. Verify transport.sendMessage() called with KeepAlive message
+4. Verify timestamp in KeepAlive is current time
+5. Verify state remains Connected
+
+**Expected Result**: KeepAlive sent, state unchanged
+
+---
+
+#### TC-STATE-013: Connected Handles TimeoutCheck
+**Objective**: Verify timed-out requests are rejected
+
+**Setup**: ConnectedState with pending request created 31 seconds ago (timeout 30s)
+
+**Test Steps**:
+1. Create TimeoutCheck event
+2. Call `state.handle(event, transport, queue)`
+3. Verify timed-out request identified
+4. Verify promise rejected with TimeoutError
+5. Verify request removed from pending map
+
+**Expected Result**: Timed-out request rejected and removed
+
+---
+
+#### TC-STATE-014: Connected Handles ServerRequest
+**Objective**: Verify server-initiated request delivered to handler
+
+**Setup**: ConnectedState with ServerRequestTracker (last ack 5)
+
+**Test Steps**:
+1. Create ServerRequest event with requestId 6 (next consecutive)
+2. Call `state.handle(event, transport, queue)`
+3. Verify request added to serverRequestQueue
+4. Verify ServerRequestAck sent via transport
+5. Verify ServerRequestTracker updated (last ack 6)
+6. Verify state remains Connected
+
+**Expected Result**: Request delivered, acknowledged, tracker updated
+
+---
+
+#### TC-STATE-015: Connected Handles Duplicate ServerRequest
+**Objective**: Verify duplicate server request acknowledged but not delivered
+
+**Setup**: ConnectedState with ServerRequestTracker (last ack 10)
+
+**Test Steps**:
+1. Create ServerRequest event with requestId 10 (duplicate)
+2. Call `state.handle(event, transport, queue)`
+3. Verify ServerRequestAck sent
+4. Verify request NOT added to serverRequestQueue
+5. Verify state remains Connected
+
+**Expected Result**: Acknowledged but not delivered
+
+---
+
+#### TC-STATE-016: Connected Handles Out-of-Order ServerRequest
+**Objective**: Verify out-of-order server request logged and not processed
+
+**Setup**: ConnectedState with ServerRequestTracker (last ack 10)
+
+**Test Steps**:
+1. Create ServerRequest event with requestId 15 (gap from 11-14)
+2. Call `state.handle(event, transport, queue)`
+3. Verify NO ServerRequestAck sent
+4. Verify request NOT added to queue
+5. Verify warning logged (gap detected)
+6. Verify state remains Connected
+
+**Expected Result**: Ignored (waiting for missing requests)
+
+---
+
+### Pending Request Management Tests
+
+#### TC-PENDING-001: Add Pending Request
+**Objective**: Verify request added to pending map
+
+**Setup**: Empty PendingRequests
+
+**Test Steps**:
+1. Create promise (resolve/reject callbacks)
+2. Call `pending.add(42n, payload, resolve, reject, createdAt)`
+3. Verify map contains requestId 42
+4. Verify size is 1
+
+**Expected Result**: Request added successfully
+
+---
+
+#### TC-PENDING-002: Complete Pending Request
+**Objective**: Verify request completion resolves promise
+
+**Setup**: PendingRequests with request ID 42
+
+**Test Steps**:
+1. Call `pending.complete(42n, resultPayload)`
+2. Verify promise resolved with resultPayload
+3. Verify request removed from map
+4. Verify size is 0
+
+**Expected Result**: Promise resolved, request removed
+
+---
+
+#### TC-PENDING-003: Timeout Pending Request
+**Objective**: Verify timeout rejects promise
+
+**Setup**: PendingRequests with request ID 42
+
+**Test Steps**:
+1. Call `pending.timeout(42n)`
+2. Verify promise rejected with TimeoutError
+3. Verify TimeoutError contains requestId 42
+4. Verify request removed from map
+
+**Expected Result**: Promise rejected with TimeoutError
+
+---
+
+#### TC-PENDING-004: Check Timeouts
+**Objective**: Verify timeout detection logic
+
+**Setup**: PendingRequests with 3 requests:
+- Request 1: created 10 seconds ago
+- Request 2: created 31 seconds ago (timed out)
+- Request 3: created 5 seconds ago
+
+**Test Steps**:
+1. Call `pending.checkTimeouts(now, 30000)` (30s timeout)
+2. Verify returns array containing only request 2
+
+**Expected Result**: Only timed-out requests identified
+
+---
+
+#### TC-PENDING-005: Lowest Pending Request ID
+**Objective**: Verify lowest ID calculation for cache eviction
+
+**Setup**: PendingRequests with IDs: 10, 5, 20, 15
+
+**Test Steps**:
+1. Call `pending.lowestPendingRequestId()`
+2. Verify returns 5n
+
+**Expected Result**: Correct lowest ID returned
+
+---
+
+### Server Request Tracker Tests
+
+#### TC-TRACKER-001: Check Consecutive Request (Process)
+**Objective**: Verify consecutive request marked for processing
+
+**Setup**: ServerRequestTracker (last ack 10)
+
+**Test Steps**:
+1. Call `tracker.check(11n)`
+2. Verify returns 'Process'
+
+**Expected Result**: Marked for processing
+
+---
+
+#### TC-TRACKER-002: Check Old Request (Duplicate)
+**Objective**: Verify old request marked as duplicate
+
+**Setup**: ServerRequestTracker (last ack 10)
+
+**Test Steps**:
+1. Call `tracker.check(8n)`
+2. Verify returns 'OldRequest'
+
+**Expected Result**: Marked as old/duplicate
+
+---
+
+#### TC-TRACKER-003: Check Out-of-Order Request (Gap)
+**Objective**: Verify gap detected in request sequence
+
+**Setup**: ServerRequestTracker (last ack 10)
+
+**Test Steps**:
+1. Call `tracker.check(15n)` (gap from 11-14)
+2. Verify returns 'OutOfOrder'
+
+**Expected Result**: Marked as out-of-order
+
+---
+
+#### TC-TRACKER-004: Acknowledge Request
+**Objective**: Verify acknowledge updates last ack ID
+
+**Setup**: ServerRequestTracker (last ack 10)
+
+**Test Steps**:
+1. Call `tracker.acknowledge(11n)`
+2. Verify `tracker.check(11n)` now returns 'OldRequest'
+3. Verify `tracker.check(12n)` now returns 'Process'
+
+**Expected Result**: Last ack updated correctly
+
+---
+
+### Configuration Validation Tests
+
+#### TC-CONFIG-001: Valid Configuration Accepted
+**Objective**: Verify valid config passes validation
+
+**Setup**:
+```typescript
+const config = {
+  endpoints: ['tcp://localhost:5555'],
+  capabilities: { version: '1.0.0' }
+};
+```
+
+**Test Steps**:
+1. Create RaftClient with config
+2. Verify no ValidationError thrown
+
+**Expected Result**: Client created successfully
+
+---
+
+#### TC-CONFIG-002: Empty Endpoints Rejected
+**Objective**: Verify empty endpoints array rejected
+
+**Setup**:
+```typescript
+const config = {
+  endpoints: [],
+  capabilities: { version: '1.0.0' }
+};
+```
+
+**Test Steps**:
+1. Attempt to create RaftClient
+2. Verify ValidationError thrown
+3. Verify error message mentions endpoints
+
+**Expected Result**: ValidationError thrown
+
+---
+
+#### TC-CONFIG-003: Empty Capabilities Rejected
+**Objective**: Verify empty capabilities rejected
+
+**Setup**:
+```typescript
+const config = {
+  endpoints: ['tcp://localhost:5555'],
+  capabilities: {}
+};
+```
+
+**Test Steps**:
+1. Attempt to create RaftClient
+2. Verify ValidationError thrown
+3. Verify error message mentions capabilities
+
+**Expected Result**: ValidationError thrown
+
+---
+
+#### TC-CONFIG-004: Negative Timeout Rejected
+**Objective**: Verify negative timeout values rejected
+
+**Setup**:
+```typescript
+const config = {
+  endpoints: ['tcp://localhost:5555'],
+  capabilities: { version: '1.0.0' },
+  requestTimeout: -1000
+};
+```
+
+**Test Steps**:
+1. Attempt to create RaftClient
+2. Verify ValidationError thrown
+3. Verify error message mentions timeout
+
+**Expected Result**: ValidationError thrown
+
+---
+
+## Integration Tests
+
+### Client Lifecycle Tests
+
+#### TC-INT-001: Full Connect → Command → Disconnect Cycle
+**Objective**: Verify complete client lifecycle
+
+**Setup**: Real ZMQ transport, mock server
+
+**Test Steps**:
+1. Create RaftClient with config
+2. Register 'connected' event handler
+3. Call `await client.connect()`
+4. Verify 'connected' event emitted with sessionId
+5. Call `result = await client.submitCommand(payload)`
+6. Verify result is Buffer with expected response
+7. Call `await client.disconnect()`
+8. Verify 'disconnected' event emitted
+
+**Expected Result**: Full lifecycle completes successfully
+
+---
+
+#### TC-INT-002: Multiple Commands Sequentially
+**Objective**: Verify multiple commands work correctly
+
+**Setup**: Connected client
+
+**Test Steps**:
+1. Submit command 1, await result
+2. Submit command 2, await result
+3. Submit command 3, await result
+4. Verify all results correct
+5. Verify requestIds are sequential (1, 2, 3)
+
+**Expected Result**: All commands complete successfully
+
+---
+
+#### TC-INT-003: Multiple Commands Concurrently (Promise.all)
+**Objective**: Verify concurrent command submission
+
+**Setup**: Connected client
+
+**Test Steps**:
+1. Create 100 command promises
+2. Call `results = await Promise.all(promises)`
+3. Verify all 100 results received
+4. Verify no duplicate requestIds
+5. Verify all promises resolved (no rejections)
+
+**Expected Result**: All commands complete concurrently
+
+---
+
+#### TC-INT-004: Query Submission
+**Objective**: Verify query (read-only) operations
+
+**Setup**: Connected client
+
+**Test Steps**:
+1. Call `result = await client.submitQuery(payload)`
+2. Verify result is Buffer with expected response
+3. Verify correlationId is UUID format
+
+**Expected Result**: Query completes successfully
+
+---
+
+#### TC-INT-005: Keep-Alive Maintenance
+**Objective**: Verify keep-alive heartbeats maintain session
+
+**Setup**: Connected client with 2-second keep-alive interval
+
+**Test Steps**:
+1. Wait 10 seconds (5 keep-alive cycles)
+2. Submit command to verify session still active
+3. Verify command succeeds (session not expired)
+
+**Expected Result**: Session remains active due to keep-alives
+
+---
+
+### Reconnection Tests
+
+#### TC-INT-006: Network Disconnection and Reconnection
+**Objective**: Verify automatic reconnection on network failure
+
+**Setup**: Connected client, mock server that can disconnect
+
+**Test Steps**:
+1. Register 'disconnected' and 'reconnecting' event handlers
+2. Trigger network disconnect from server
+3. Verify 'disconnected' event emitted
+4. Verify 'reconnecting' event emitted (attempt 1)
+5. Allow server to accept reconnection
+6. Verify 'connected' event emitted (SessionContinued)
+
+**Expected Result**: Client automatically reconnects
+
+---
+
+#### TC-INT-007: Pending Requests Preserved Across Reconnection
+**Objective**: Verify pending requests resent after reconnection
+
+**Setup**: Connected client
+
+**Test Steps**:
+1. Submit command 1, don't wait for response
+2. Trigger network disconnect immediately
+3. Verify 'disconnected' event
+4. Allow reconnection
+5. Verify command 1 response received after reconnection
+
+**Expected Result**: Pending request preserved and completed
+
+---
+
+#### TC-INT-008: Requests During Disconnection Queue with Timeout
+**Objective**: Verify requests submitted while disconnected queue and wait
+
+**Setup**: Disconnected client (after network failure)
+
+**Test Steps**:
+1. Submit command while disconnected
+2. Verify promise does not reject immediately
+3. Allow reconnection within timeout
+4. Verify command sent after reconnection
+5. Verify promise resolves with response
+
+**Expected Result**: Request queued, sent after reconnection
+
+---
+
+#### TC-INT-009: Requests During Disconnection Timeout
+**Objective**: Verify queued requests timeout if reconnection delayed
+
+**Setup**: Disconnected client with 5-second queued request timeout
+
+**Test Steps**:
+1. Submit command while disconnected
+2. Prevent reconnection for 6 seconds
+3. Verify promise rejects with TimeoutError
+4. Verify error message mentions timeout waiting for reconnection
+
+**Expected Result**: Request times out, promise rejected
+
+---
+
+#### TC-INT-010: Leadership Change Reconnection
+**Objective**: Verify reconnection to new leader on NotLeader rejection
+
+**Setup**: Connected client to follower node
+
+**Test Steps**:
+1. Server sends SessionRejected(NotLeader) with leader hint
+2. Verify 'disconnected' event
+3. Verify client connects to leader endpoint
+4. Verify 'connected' event with new endpoint
+
+**Expected Result**: Client automatically finds and connects to leader
+
+---
+
+### Session Expiry Tests
+
+#### TC-INT-011: Session Expiry Due to Missed Keep-Alives
+**Objective**: Verify session expiry handling
+
+**Setup**: Connected client with keep-alive disabled (for test)
+
+**Test Steps**:
+1. Wait for server session timeout period
+2. Submit command (triggers SessionExpired rejection)
+3. Verify 'sessionExpired' event emitted
+4. Verify command promise rejected with SessionExpiredError
+5. Verify event loop terminates
+
+**Expected Result**: Session expires, client terminates gracefully
+
+---
+
+#### TC-INT-012: All Pending Requests Fail on Session Expiry
+**Objective**: Verify all pending requests fail when session expires
+
+**Setup**: Connected client with 3 pending requests
+
+**Test Steps**:
+1. Submit 3 commands, don't wait
+2. Trigger SessionExpired from server
+3. Verify all 3 promises reject with SessionExpiredError
+4. Verify 'sessionExpired' event emitted
+
+**Expected Result**: All pending requests fail, event emitted
+
+---
+
+### Server Request Handling Tests
+
+#### TC-INT-013: Server-Initiated Request Delivery
+**Objective**: Verify server requests delivered to handler
+
+**Setup**: Connected client with server request handler registered
+
+**Test Steps**:
+1. Register handler: `client.onServerRequest(handler)`
+2. Server sends ServerRequest(requestId 1, payload)
+3. Verify handler invoked with request payload
+4. Verify ServerRequestAck sent automatically
+
+**Expected Result**: Request delivered, acknowledged
+
+---
+
+#### TC-INT-014: Consecutive Server Requests Processed
+**Objective**: Verify consecutive server requests processed in order
+
+**Setup**: Connected client with handler
+
+**Test Steps**:
+1. Server sends ServerRequest ID 1
+2. Verify handler invoked for ID 1
+3. Server sends ServerRequest ID 2
+4. Verify handler invoked for ID 2
+5. Server sends ServerRequest ID 3
+6. Verify handler invoked for ID 3
+
+**Expected Result**: All requests processed in order
+
+---
+
+#### TC-INT-015: Duplicate Server Request Ignored
+**Objective**: Verify duplicate server request not delivered twice
+
+**Setup**: Connected client with handler (last ack 5)
+
+**Test Steps**:
+1. Server sends ServerRequest ID 5 (duplicate)
+2. Verify handler NOT invoked
+3. Verify ServerRequestAck sent (idempotent ack)
+
+**Expected Result**: Duplicate acknowledged but not delivered
+
+---
+
+## Compatibility Tests
+
+### Wire Protocol Compatibility
+
+#### TC-COMPAT-001: TypeScript Client → Scala Server CreateSession
+**Objective**: Verify CreateSession wire format compatible
+
+**Setup**: TypeScript client, real Scala server
+
+**Test Steps**:
+1. Call `client.connect()`
+2. Capture network traffic (CreateSession message bytes)
+3. Verify Scala server accepts message
+4. Verify Scala server responds with SessionCreated
+5. Compare TypeScript encoding with Scala reference
+
+**Expected Result**: Byte-for-byte compatible, session established
+
+---
+
+#### TC-COMPAT-002: TypeScript Client → Scala Server ClientRequest
+**Objective**: Verify ClientRequest wire format compatible
+
+**Setup**: Connected TypeScript client, Scala server
+
+**Test Steps**:
+1. Call `client.submitCommand(payload)`
+2. Capture ClientRequest message bytes
+3. Verify Scala server accepts and processes
+4. Verify Scala server responds with ClientResponse
+5. Compare encoding with Scala reference
+
+**Expected Result**: Byte-for-byte compatible, command processed
+
+---
+
+#### TC-COMPAT-003: Scala Server → TypeScript Client SessionCreated
+**Objective**: Verify SessionCreated decoding compatible
+
+**Setup**: TypeScript client connecting to Scala server
+
+**Test Steps**:
+1. Scala server sends SessionCreated
+2. TypeScript client decodes message
+3. Verify sessionId extracted correctly
+4. Verify nonce matches sent value
+5. Verify transition to Connected state
+
+**Expected Result**: Message decoded correctly, session established
+
+---
+
+#### TC-COMPAT-004: Scala Server → TypeScript Client ClientResponse
+**Objective**: Verify ClientResponse decoding compatible
+
+**Setup**: TypeScript client with pending request, Scala server
+
+**Test Steps**:
+1. Scala server sends ClientResponse
+2. TypeScript client decodes message
+3. Verify requestId matches
+4. Verify payload bytes match
+5. Verify promise resolved
+
+**Expected Result**: Message decoded, promise resolved
+
+---
+
+#### TC-COMPAT-005: Interoperability with Scala Client
+**Objective**: Verify TypeScript and Scala clients can coexist
+
+**Setup**: Same Raft cluster, 1 TypeScript client + 1 Scala client
+
+**Test Steps**:
+1. Both clients connect (separate sessions)
+2. TypeScript client submits command 1
+3. Scala client submits command 2
+4. TypeScript client submits command 3
+5. Verify all commands processed correctly
+6. Verify no interference between clients
+
+**Expected Result**: Both clients work independently on same cluster
+
+---
+
+#### TC-COMPAT-006: All Message Types Round-Trip
+**Objective**: Comprehensive compatibility test for all message types
+
+**Setup**: TypeScript client, Scala server
+
+**Test Steps**:
+For each ClientMessage type:
+1. TypeScript client sends message
+2. Scala server receives and responds
+3. TypeScript client receives response
+4. Verify entire cycle works
+
+For each ServerMessage type:
+1. Scala server sends message
+2. TypeScript client receives and decodes
+3. Verify message decoded correctly
+
+**Expected Result**: All message types compatible
+
+---
+
+## Performance Tests
+
+### Throughput Tests
+
+#### TC-PERF-001: Single Request Latency
+**Objective**: Measure round-trip time for single request
+
+**Setup**: Connected client, Scala server (local network)
+
+**Test Steps**:
+1. Submit single command
+2. Measure time from submit to response
+3. Repeat 100 times
+4. Calculate p50, p95, p99 latencies
+
+**Expected Result**: 
+- p50 < 5ms
+- p95 < 10ms
+- p99 < 20ms
+(client-side overhead only, excludes Raft consensus time)
+
+---
+
+#### TC-PERF-002: Throughput at 1,000 req/s
+**Objective**: Verify client handles 1K req/s
+
+**Setup**: Connected client, Scala server
+
+**Test Steps**:
+1. Submit 1,000 commands over 1 second
+2. Measure actual throughput
+3. Verify all commands complete successfully
+4. Measure latency distribution
+
+**Expected Result**: 
+- Throughput ≥ 1,000 req/s
+- No errors
+- p99 latency < 50ms
+
+---
+
+#### TC-PERF-003: Throughput at 10,000 req/s
+**Objective**: Verify client handles 10K req/s
+
+**Setup**: Connected client, Scala server (high-performance hardware)
+
+**Test Steps**:
+1. Submit 10,000 commands over 1 second
+2. Measure actual throughput
+3. Verify all commands complete successfully
+4. Measure latency distribution
+
+**Expected Result**: 
+- Throughput ≥ 10,000 req/s
+- No errors
+- p99 latency < 100ms
+
+---
+
+#### TC-PERF-004: Concurrent Requests (Promise.all)
+**Objective**: Measure performance of concurrent submission
+
+**Setup**: Connected client
+
+**Test Steps**:
+1. Create 1,000 command promises
+2. Submit all with Promise.all
+3. Measure total time to complete
+4. Measure peak memory usage
+
+**Expected Result**: 
+- All commands complete
+- Total time < 2 seconds (1K req/s sustained)
+- Memory usage stable (no leaks)
+
+---
+
+#### TC-PERF-005: Protocol Encoding Overhead
+**Objective**: Measure encoding/decoding performance
+
+**Setup**: Standalone codec benchmarks
+
+**Test Steps**:
+1. Encode 100,000 ClientRequest messages
+2. Measure time per encode
+3. Decode 100,000 ClientResponse messages
+4. Measure time per decode
+
+**Expected Result**:
+- Encode: < 10μs per message
+- Decode: < 10μs per message
+
+---
+
+#### TC-PERF-006: Memory Usage Under Sustained Load
+**Objective**: Verify no memory leaks under load
+
+**Setup**: Connected client, 10-minute test
+
+**Test Steps**:
+1. Submit 1,000 req/s for 10 minutes (600K total requests)
+2. Monitor memory usage every 10 seconds
+3. Verify memory usage stable (no growth)
+4. Check for leaked timers, sockets, promises
+
+**Expected Result**: 
+- Memory usage flat (no leaks)
+- No leaked resources
+
+---
+
+## Edge Case Tests
+
+#### TC-EDGE-001: Payload Validation (Empty Payload)
+**Objective**: Verify empty payload rejected
+
+**Setup**: Connected client
+
+**Test Steps**:
+1. Call `client.submitCommand(Buffer.from([]))` (empty)
+2. Verify ValidationError thrown synchronously
+3. Verify error message mentions invalid payload
+
+**Expected Result**: ValidationError thrown, no network send
+
+---
+
+#### TC-EDGE-002: Payload Validation (Null Payload)
+**Objective**: Verify null payload rejected
+
+**Setup**: Connected client
+
+**Test Steps**:
+1. Call `client.submitCommand(null as any)`
+2. Verify ValidationError thrown synchronously
+
+**Expected Result**: ValidationError thrown
+
+---
+
+#### TC-EDGE-003: Connect Called Twice
+**Objective**: Verify duplicate connect() call ignored
+
+**Setup**: Client in Connected state
+
+**Test Steps**:
+1. Call `await client.connect()` (already connected)
+2. Verify no error thrown
+3. Verify state remains Connected (no duplicate session)
+4. Verify warning logged
+
+**Expected Result**: Second connect() ignored gracefully
+
+---
+
+#### TC-EDGE-004: Disconnect Before Connect
+**Objective**: Verify disconnect() on disconnected client is no-op
+
+**Setup**: Newly created client (never connected)
+
+**Test Steps**:
+1. Call `await client.disconnect()`
+2. Verify no error thrown
+3. Verify state remains Disconnected
+
+**Expected Result**: No-op, no error
+
+---
+
+#### TC-EDGE-005: Submit Command Before Connect
+**Objective**: Verify command before connect throws error
+
+**Setup**: Newly created client (never connected)
+
+**Test Steps**:
+1. Call `client.submitCommand(payload)`
+2. Verify promise rejects with error "Not connected"
+3. Verify no network send attempted
+
+**Expected Result**: Promise rejected immediately
+
+---
+
+#### TC-EDGE-006: Large Payload (1MB)
+**Objective**: Verify large payloads handled correctly
+
+**Setup**: Connected client
+
+**Test Steps**:
+1. Create 1MB payload (Buffer)
+2. Call `result = await client.submitCommand(payload)`
+3. Verify command completes successfully
+4. Verify result payload matches expected response
+
+**Expected Result**: Large payload works (no size limit in client)
+
+---
+
+#### TC-EDGE-007: Very Large Payload (10MB)
+**Objective**: Verify very large payloads work (server limits may apply)
+
+**Setup**: Connected client
+
+**Test Steps**:
+1. Create 10MB payload
+2. Submit command
+3. If server accepts: verify success
+4. If server rejects: verify rejection handled gracefully
+
+**Expected Result**: Client handles either success or rejection
+
+---
+
+#### TC-EDGE-008: Cluster All Unreachable
+**Objective**: Verify behavior when all cluster members unreachable
+
+**Setup**: Client with 3 endpoints, all unreachable
+
+**Test Steps**:
+1. Call `client.connect()`
+2. Verify connection attempts to all 3 members
+3. Verify 'reconnecting' events emitted for each attempt
+4. Verify client keeps retrying (infinite retry by default)
+
+**Expected Result**: Continuous retry, no crash
+
+---
+
+#### TC-EDGE-009: Malformed Server Response
+**Objective**: Verify malformed message doesn't crash client
+
+**Setup**: Connected client, mock server sends garbage
+
+**Test Steps**:
+1. Mock server sends invalid bytes (bad signature)
+2. Verify client logs ProtocolError
+3. Verify client does not crash
+4. Verify event loop continues running
+
+**Expected Result**: Error logged, client continues
+
+---
+
+#### TC-EDGE-010: Request Timeout with Manual Retry
+**Objective**: Verify manual retry after timeout works
+
+**Setup**: Connected client with 1-second request timeout
+
+**Test Steps**:
+1. Submit command, server delays response > 1s
+2. Verify promise rejects with TimeoutError after 1s
+3. Manually retry: `result = await client.submitCommand(payload)`
+4. Server responds to retry
+5. Verify retry promise resolves successfully
+
+**Expected Result**: Manual retry works after timeout
+
+---
+
+## Test Execution Summary
+
+**Total Test Scenarios**: 95
+
+**Breakdown**:
+- Unit Tests: 45
+  - Protocol: 11
+  - State Machine: 16
+  - Pending Requests: 5
+  - Server Request Tracker: 4
+  - Configuration: 4
+  - Errors: 5
+- Integration Tests: 30
+  - Lifecycle: 5
+  - Reconnection: 5
+  - Session Expiry: 2
+  - Server Requests: 3
+  - Compatibility: 6
+  - Performance: 6
+  - Edge Cases: 10
+- Compatibility Tests: 6
+- Performance Tests: 6
+- Edge Case Tests: 10
+
+**Priority**:
+- **P0 (Critical)**: Protocol compatibility, state transitions, basic lifecycle
+- **P1 (High)**: Reconnection, session management, error handling
+- **P2 (Medium)**: Performance validation, edge cases
+- **P3 (Low)**: Stress tests, extreme edge cases
+
+**Test Environment**:
+- Unit: Mock transport, no network
+- Integration: Real ZMQ sockets, mock Scala server (or test harness)
+- Compatibility: Real Scala ZIO Raft server
+- Performance: Dedicated test environment (controlled network/hardware)
+
+---
+
+## Next Steps
+
+1. Implement test infrastructure (Vitest setup, mock transport, test utilities)
+2. Implement tests incrementally alongside feature implementation
+3. Run compatibility tests against real Scala server
+4. Run performance benchmarks to validate NFR-001/NFR-002
+5. Update test suite as new edge cases discovered
+
+All test scenarios documented. Ready for quickstart.md generation.

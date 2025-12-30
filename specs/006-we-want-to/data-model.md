@@ -1,320 +1,456 @@
 # Data Model: TypeScript Client Library
 
-**Date**: 2025-12-24  
-**Feature**: TypeScript Client for ZIO Raft
+**Feature**: TypeScript Client Library  
+**Date**: 2025-12-29  
+**Status**: Complete
 
 ## Overview
-This document defines all data structures, types, and entities for the TypeScript client library, matching the protocol defined in the Scala client-server-protocol module.
+
+This document defines the data model for the TypeScript Raft client library. All types are strongly typed using TypeScript interfaces and discriminated unions to ensure type safety at compile time.
 
 ---
 
-## 1. Core Type Aliases (Branded Types)
+## Core Entities
 
-TypeScript branded types provide newtype-like safety similar to Scala's Newtype pattern:
+### 1. Client
 
+**Description**: The main interface that applications use to interact with the Raft cluster.
+
+**Properties**:
 ```typescript
-// Session identification
-export type SessionId = string & { readonly __brand: 'SessionId' };
-export const SessionId = {
-  fromString: (value: string): SessionId => {
-    if (!value) throw new Error('SessionId cannot be empty');
-    return value as SessionId;
-  },
-  unwrap: (id: SessionId): string => id as string
-};
-
-// Request identification (commands)
-export type RequestId = bigint & { readonly __brand: 'RequestId' };
-export const RequestId = {
-  zero: 0n as RequestId,
-  fromBigInt: (value: bigint): RequestId => {
-    if (value < 0n) throw new Error('RequestId must be non-negative');
-    return value as RequestId;
-  },
-  next: (id: RequestId): RequestId => (id + 1n) as RequestId,
-  unwrap: (id: RequestId): bigint => id as bigint
-};
-
-// Cluster member identification
-export type MemberId = string & { readonly __brand: 'MemberId' };
-export const MemberId = {
-  fromString: (value: string): MemberId => value as MemberId,
-  unwrap: (id: MemberId): string => id as string
-};
-
-// Nonce for request/response correlation
-export type Nonce = bigint & { readonly __brand: 'Nonce' };
-export const Nonce = {
-  generate: (): Nonce => {
-    const value = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER) + 1);
-    return value as Nonce;
-  },
-  fromBigInt: (value: bigint): Nonce => {
-    if (value === 0n) throw new Error('Nonce cannot be zero');
-    return value as Nonce;
-  },
-  unwrap: (nonce: Nonce): bigint => nonce as bigint
-};
-
-// Correlation ID for queries
-export type CorrelationId = string & { readonly __brand: 'CorrelationId' };
-export const CorrelationId = {
-  generate: (): CorrelationId => {
-    const uuid = crypto.randomUUID();
-    return uuid as CorrelationId;
-  },
-  fromString: (value: string): CorrelationId => {
-    if (!value) throw new Error('CorrelationId cannot be empty');
-    return value as CorrelationId;
-  },
-  unwrap: (id: CorrelationId): string => id as string
-};
+class RaftClient {
+  // Private internal state
+  private config: ClientConfig;
+  private transport: ClientTransport;
+  private state: ClientState;
+  private actionQueue: AsyncQueue<ClientAction>;
+  private serverRequestQueue: AsyncQueue<ServerRequest>;
+  private eventEmitter: TypedEventEmitter;
+  private eventLoop: Promise<void> | null;
+  
+  // Public API
+  constructor(config: ClientConfig);
+  async connect(): Promise<void>;
+  async submitCommand(payload: Buffer): Promise<Buffer>;
+  async submitQuery(payload: Buffer): Promise<Buffer>;
+  async disconnect(): Promise<void>;
+  
+  // Event subscription
+  on(event: 'connected', handler: (evt: ConnectedEvent) => void): this;
+  on(event: 'disconnected', handler: (evt: DisconnectedEvent) => void): this;
+  on(event: 'reconnecting', handler: (evt: ReconnectingEvent) => void): this;
+  on(event: 'sessionExpired', handler: (evt: SessionExpiredEvent) => void): this;
+  
+  // Server-initiated request stream
+  onServerRequest(handler: (request: ServerRequest) => void): void;
+}
 ```
 
+**Lifecycle**:
+1. **Constructed**: Config validated, no connection initiated
+2. **Connecting**: `connect()` called, establishing session
+3. **Connected**: Active session, processing requests
+4. **Reconnecting**: Temporary disconnection, automatic recovery
+5. **Terminated**: Session expired or explicit disconnect
+
+**Validation Rules**:
+- Constructor validates config completeness and correctness
+- Throws `ValidationError` for invalid configuration
+- Only one `connect()` call allowed (subsequent calls ignored)
+
+**State Management**:
+- Internal state machine tracks connection lifecycle
+- State transitions driven by unified event stream
+- All state immutable (functional updates)
+
 ---
 
-## 2. Protocol Messages
+### 2. Session
 
-### 2.1 Client Messages (Client → Server)
+**Description**: A durable server-side session that persists across reconnections.
 
+**Properties**:
 ```typescript
-// Base type for all client messages
-export type ClientMessage =
-  | CreateSession
-  | ContinueSession
-  | KeepAlive
-  | ClientRequest
-  | Query
-  | ServerRequestAck
-  | CloseSession
-  | ConnectionClosed;
-
-// Create a new durable session
-export interface CreateSession {
-  readonly type: 'CreateSession';
-  readonly capabilities: Map<string, string>;
-  readonly nonce: Nonce;
-}
-
-// Resume an existing session after reconnection
-export interface ContinueSession {
-  readonly type: 'ContinueSession';
+interface Session {
   readonly sessionId: SessionId;
-  readonly nonce: Nonce;
+  readonly capabilities: Map<string, string>;
+  readonly createdAt: Date;
+  readonly serverRequestTracker: ServerRequestTracker;
 }
+```
 
-// Heartbeat to maintain session liveness
-export interface KeepAlive {
-  readonly type: 'KeepAlive';
-  readonly timestamp: Date;  // Instant equivalent
-}
+**Type Definitions**:
+```typescript
+type SessionId = string; // UUID format
+```
 
-// Generic request for read/write operations
-export interface ClientRequest {
-  readonly type: 'ClientRequest';
+**Lifecycle**:
+1. **Created**: Server generates SessionId, returns SessionCreated
+2. **Active**: Client maintains session via keep-alives
+3. **Reconnecting**: Client resumes with ContinueSession
+4. **Expired**: Server terminates due to missed keep-alives (terminal)
+
+**Validation Rules**:
+- SessionId must be non-empty string (UUID format)
+- Capabilities must match initial CreateSession request
+- CreatedAt timestamp preserved across reconnections
+
+**Server-Side Behavior**:
+- Session persists on server across client disconnections
+- Session expires if keep-alives not received within server-configured window
+- Session identified by ZMQ routing identity (implicit in transport)
+
+---
+
+### 3. Command
+
+**Description**: A write operation submitted by the client.
+
+**Properties**:
+```typescript
+interface Command {
   readonly requestId: RequestId;
   readonly lowestPendingRequestId: RequestId;
   readonly payload: Buffer;
   readonly createdAt: Date;
 }
 
-// Read-only query
-export interface Query {
-  readonly type: 'Query';
-  readonly correlationId: CorrelationId;
+interface PendingCommand {
+  readonly requestId: RequestId;
   readonly payload: Buffer;
+  readonly promise: Promise<Buffer>; // Resolves with response
+  readonly resolve: (result: Buffer) => void;
+  readonly reject: (error: Error) => void;
   readonly createdAt: Date;
 }
-
-// Acknowledge server-initiated request
-export interface ServerRequestAck {
-  readonly type: 'ServerRequestAck';
-  readonly requestId: RequestId;
-}
-
-// Explicit session termination
-export interface CloseSession {
-  readonly type: 'CloseSession';
-  readonly reason: CloseReason;
-}
-
-// Connection closed notification
-export interface ConnectionClosed {
-  readonly type: 'ConnectionClosed';
-}
-
-// Close reason enum
-export type CloseReason = 'ClientShutdown';
 ```
 
-### 2.2 Server Messages (Server → Client)
-
+**Type Definitions**:
 ```typescript
-// Base type for all server messages
-export type ServerMessage =
-  | SessionCreated
-  | SessionContinued
-  | SessionRejected
-  | SessionClosed
-  | KeepAliveResponse
-  | ClientResponse
-  | QueryResponse
-  | ServerRequest
-  | RequestError;
-
-// Successful session creation
-export interface SessionCreated {
-  readonly type: 'SessionCreated';
-  readonly sessionId: SessionId;
-  readonly nonce: Nonce;
-}
-
-// Successful session resumption
-export interface SessionContinued {
-  readonly type: 'SessionContinued';
-  readonly nonce: Nonce;
-}
-
-// Session rejected
-export interface SessionRejected {
-  readonly type: 'SessionRejected';
-  readonly reason: RejectionReason;
-  readonly nonce: Nonce;
-  readonly leaderId?: MemberId;
-}
-
-// Server-initiated session termination
-export interface SessionClosed {
-  readonly type: 'SessionClosed';
-  readonly reason: SessionCloseReason;
-  readonly leaderId?: MemberId;
-}
-
-// Heartbeat acknowledgment
-export interface KeepAliveResponse {
-  readonly type: 'KeepAliveResponse';
-  readonly timestamp: Date;
-}
-
-// Request execution result
-export interface ClientResponse {
-  readonly type: 'ClientResponse';
-  readonly requestId: RequestId;
-  readonly result: Buffer;
-}
-
-// Query result
-export interface QueryResponse {
-  readonly type: 'QueryResponse';
-  readonly correlationId: CorrelationId;
-  readonly result: Buffer;
-}
-
-// Server-initiated work dispatch
-export interface ServerRequest {
-  readonly type: 'ServerRequest';
-  readonly requestId: RequestId;
-  readonly payload: Buffer;
-  readonly createdAt: Date;
-}
-
-// Request error notification
-export interface RequestError {
-  readonly type: 'RequestError';
-  readonly requestId: RequestId;
-  readonly reason: RequestErrorReason;
-}
-
-// Rejection reason enum
-export type RejectionReason =
-  | 'NotLeader'
-  | 'SessionExpired'
-  | 'InvalidCapabilities'
-  | 'Other';
-
-// Session close reason enum
-export type SessionCloseReason =
-  | 'Shutdown'
-  | 'NotLeaderAnymore'
-  | 'SessionError'
-  | 'ConnectionClosed'
-  | 'SessionExpired';
-
-// Request error reason enum
-export type RequestErrorReason = 'ResponseEvicted';
+type RequestId = bigint; // Unsigned 64-bit integer
 ```
+
+**Lifecycle**:
+1. **Submitted**: `submitCommand(payload)` called
+2. **Queued**: Added to pending requests map
+3. **Sent**: Encoded and sent via transport (when connected)
+4. **Awaiting Response**: Promise pending
+5. **Completed**: ClientResponse received, promise resolved
+6. **Timed Out**: Timeout expired, promise rejected with TimeoutError
+7. **Failed**: Error occurred, promise rejected
+
+**Validation Rules**:
+- Payload must be non-null Buffer
+- RequestId must be unique and monotonically increasing
+- `lowestPendingRequestId` indicates cache eviction boundary
+
+**Request ID Generation**:
+- Start at 1 (zero reserved as sentinel)
+- Increment sequentially for each command
+- Thread-safe counter (atomic increment)
+
+**Timeout Behavior**:
+- Each command has individual timeout (from config)
+- Timeout starts when request added to pending map
+- On timeout: promise rejected, request removed from pending map
+- **No automatic retry** - application must manually retry
 
 ---
 
-## 3. Client Configuration
+### 4. Query
 
+**Description**: A read-only operation submitted by the client.
+
+**Properties**:
 ```typescript
-export interface ClientConfig {
-  readonly clusterMembers: Map<MemberId, string>;  // memberId -> ZMQ address
-  readonly capabilities: Map<string, string>;       // user-provided capabilities
-  readonly connectionTimeout: number;               // milliseconds, default 5000
-  readonly keepAliveInterval: number;               // milliseconds, default 30000
-  readonly requestTimeout: number;                  // milliseconds, default 10000
+interface Query {
+  readonly correlationId: CorrelationId;
+  readonly payload: Buffer;
+  readonly createdAt: Date;
 }
 
-export const ClientConfig = {
-  DEFAULT_CONNECTION_TIMEOUT: 5000,
-  DEFAULT_KEEP_ALIVE_INTERVAL: 30000,
-  DEFAULT_REQUEST_TIMEOUT: 10000,
+interface PendingQuery {
+  readonly correlationId: CorrelationId;
+  readonly payload: Buffer;
+  readonly promise: Promise<Buffer>; // Resolves with response
+  readonly resolve: (result: Buffer) => void;
+  readonly reject: (error: Error) => void;
+  readonly createdAt: Date;
+}
+```
+
+**Type Definitions**:
+```typescript
+type CorrelationId = string; // UUID format
+```
+
+**Lifecycle**:
+1. **Submitted**: `submitQuery(payload)` called
+2. **Queued**: Added to pending queries map
+3. **Sent**: Encoded and sent via transport (when connected)
+4. **Awaiting Response**: Promise pending
+5. **Completed**: QueryResponse received, promise resolved
+6. **Timed Out**: Timeout expired, promise rejected with TimeoutError
+7. **Failed**: Error occurred, promise rejected
+
+**Validation Rules**:
+- Payload must be non-null Buffer
+- CorrelationId must be unique UUID v4
+- Queries are idempotent (safe to retry)
+
+**Correlation ID Generation**:
+- Generate new UUID v4 for each query
+- Use `crypto.randomUUID()` (Node.js 18+ built-in)
+
+**Difference from Command**:
+- Queries use correlation ID (UUID) instead of request ID (sequential int)
+- Queries don't have `lowestPendingRequestId` field
+- Queries are read-only (no state mutation on server)
+
+---
+
+### 5. KeepAlive
+
+**Description**: A periodic heartbeat message to maintain session liveness.
+
+**Properties**:
+```typescript
+interface KeepAlive {
+  readonly timestamp: Date; // ISO 8601 instant
+}
+
+interface KeepAliveResponse {
+  readonly clientTimestamp: Date; // Original client timestamp
+  readonly serverTimestamp: Date; // Server processing timestamp
+}
+```
+
+**Lifecycle**:
+1. **Timer Tick**: Keep-alive interval elapsed (default 30s)
+2. **Sent**: KeepAlive(current timestamp) sent to server
+3. **Response**: Server responds with KeepAliveResponse
+4. **RTT Calculation**: Optional (clientTimestamp round-trip time)
+
+**Validation Rules**:
+- Timestamp must be valid ISO 8601 instant
+- Keep-alive interval must be > 0
+
+**Timing Considerations**:
+- Interval configurable (default 30s)
+- Server session timeout typically 2-3x keep-alive interval
+- Missing keep-alives lead to session expiry
+
+**Purpose**:
+- Prevents server-side session expiry
+- Provides RTT measurement capability
+- Validates connection liveness
+
+---
+
+### 6. ServerRequest
+
+**Description**: A server-initiated request sent to the client.
+
+**Properties**:
+```typescript
+interface ServerRequest {
+  readonly requestId: RequestId;
+  readonly payload: Buffer;
+}
+
+interface ServerRequestAck {
+  readonly requestId: RequestId;
+}
+```
+
+**Lifecycle**:
+1. **Received**: ServerRequest message from server
+2. **Deduplicated**: Check against ServerRequestTracker
+3. **Delivered**: Handler invoked with payload (if new request)
+4. **Acknowledged**: ServerRequestAck sent automatically
+
+**Validation Rules**:
+- RequestId must be consecutive (no gaps)
+- Payload must be non-null Buffer
+
+**Deduplication Logic**:
+```typescript
+class ServerRequestTracker {
+  private lastAcknowledgedRequestId: bigint = 0n;
   
-  validate: (config: ClientConfig): void => {
-    if (config.clusterMembers.size === 0) {
-      throw new Error('clusterMembers cannot be empty');
-    }
-    if (config.capabilities.size === 0) {
-      throw new Error('capabilities cannot be empty');
-    }
-    if (config.connectionTimeout <= 0) {
-      throw new Error('connectionTimeout must be positive');
-    }
-    if (config.keepAliveInterval <= 0) {
-      throw new Error('keepAliveInterval must be positive');
-    }
-    if (config.requestTimeout <= 0) {
-      throw new Error('requestTimeout must be positive');
+  check(requestId: bigint): 'Process' | 'OldRequest' | 'OutOfOrder' {
+    if (requestId === this.lastAcknowledgedRequestId + 1n) {
+      return 'Process'; // Expected next request
+    } else if (requestId <= this.lastAcknowledgedRequestId) {
+      return 'OldRequest'; // Already processed
+    } else {
+      return 'OutOfOrder'; // Gap in sequence
     }
   }
+  
+  acknowledge(requestId: bigint): void {
+    this.lastAcknowledgedRequestId = requestId;
+  }
+}
+```
+
+**Handler Registration**:
+- Application registers handler via `onServerRequest(handler)`
+- Handler receives ServerRequest object
+- Acknowledgment sent automatically (no manual ack required)
+
+---
+
+### 7. Capabilities
+
+**Description**: A set of feature flags or version indicators provided by the application.
+
+**Properties**:
+```typescript
+type Capabilities = Record<string, string>;
+```
+
+**Example**:
+```typescript
+const capabilities = {
+  version: '1.0.0',
+  features: 'compression,encryption',
+  clientType: 'typescript'
 };
 ```
 
+**Lifecycle**:
+1. **Provided**: Application passes capabilities to client constructor
+2. **Sent**: Included in CreateSession message
+3. **Negotiated**: Server validates and responds with SessionCreated
+4. **Stored**: Preserved in session for entire session lifetime
+
+**Validation Rules**:
+- Must be non-empty object
+- Keys and values must be non-empty strings
+- No specific capability names enforced (application-defined)
+
+**Purpose**:
+- Protocol version negotiation
+- Feature detection and capability matching
+- Client identification and metadata
+
+**Note**: The TypeScript client does not define specific capability values; they are passed through from the application.
+
 ---
 
-## 4. Client State Machine
+### 8. ConnectionEvent
+
+**Description**: An event emitted by the client for connection state changes.
+
+**Event Types**:
+```typescript
+interface ConnectedEvent {
+  readonly type: 'connected';
+  readonly sessionId: string;
+  readonly endpoint: string;
+  readonly timestamp: Date;
+}
+
+interface DisconnectedEvent {
+  readonly type: 'disconnected';
+  readonly reason: 'network' | 'server-closed' | 'client-shutdown';
+  readonly timestamp: Date;
+}
+
+interface ReconnectingEvent {
+  readonly type: 'reconnecting';
+  readonly attempt: number;
+  readonly endpoint: string;
+  readonly timestamp: Date;
+}
+
+interface SessionExpiredEvent {
+  readonly type: 'sessionExpired';
+  readonly sessionId: string;
+  readonly timestamp: Date;
+}
+
+type ConnectionEvent = 
+  | ConnectedEvent
+  | DisconnectedEvent
+  | ReconnectingEvent
+  | SessionExpiredEvent;
+```
+
+**Emission Rules**:
+- Events emitted asynchronously via EventEmitter
+- Events delivered in order of occurrence
+- Handlers registered before `connect()` receive all events
+
+**Event Semantics**:
+- **connected**: Session successfully established (SessionCreated or SessionContinued)
+- **disconnected**: Connection lost (ZMQ disconnect, server close, or client disconnect)
+- **reconnecting**: Attempting to reconnect after disconnection (includes attempt count)
+- **sessionExpired**: Session terminated by server (terminal event, no reconnection)
+
+---
+
+## Client State Machine
+
+### State Types
 
 ```typescript
-// State machine states as discriminated union
-export type ClientState =
+type ClientState =
   | DisconnectedState
   | ConnectingNewSessionState
   | ConnectingExistingSessionState
   | ConnectedState;
+```
 
-// Disconnected: Initial state
-export interface DisconnectedState {
+### State Definitions
+
+#### 1. DisconnectedState
+
+**Description**: Initial state, not connected to cluster.
+
+```typescript
+interface DisconnectedState {
   readonly state: 'Disconnected';
   readonly config: ClientConfig;
 }
+```
 
-// Connecting to create NEW session
-export interface ConnectingNewSessionState {
+**Valid Transitions**:
+- `connect()` → `ConnectingNewSessionState`
+
+---
+
+#### 2. ConnectingNewSessionState
+
+**Description**: Creating a new session (first connection).
+
+```typescript
+interface ConnectingNewSessionState {
   readonly state: 'ConnectingNewSession';
   readonly config: ClientConfig;
   readonly capabilities: Map<string, string>;
   readonly nonce: Nonce;
   readonly currentMemberId: MemberId;
   readonly createdAt: Date;
-  readonly nextRequestId: RequestIdRef;
   readonly pendingRequests: PendingRequests;
   readonly pendingQueries: PendingQueries;
 }
+```
 
-// Connecting to resume EXISTING session
-export interface ConnectingExistingSessionState {
+**Valid Transitions**:
+- `SessionCreated` → `ConnectedState`
+- `SessionRejected` → `ConnectingNewSessionState` (retry next member)
+- `timeout` → `ConnectingNewSessionState` (retry next member)
+
+---
+
+#### 3. ConnectingExistingSessionState
+
+**Description**: Resuming an existing session after reconnection.
+
+```typescript
+interface ConnectingExistingSessionState {
   readonly state: 'ConnectingExistingSession';
   readonly config: ClientConfig;
   readonly sessionId: SessionId;
@@ -323,288 +459,272 @@ export interface ConnectingExistingSessionState {
   readonly currentMemberId: MemberId;
   readonly createdAt: Date;
   readonly serverRequestTracker: ServerRequestTracker;
-  readonly nextRequestId: RequestIdRef;
   readonly pendingRequests: PendingRequests;
   readonly pendingQueries: PendingQueries;
 }
+```
 
-// Connected: Active session
-export interface ConnectedState {
+**Valid Transitions**:
+- `SessionContinued` → `ConnectedState`
+- `SessionRejected(SessionNotFound)` → `ConnectingNewSessionState`
+- `SessionRejected(SessionExpired)` → Terminal (emit sessionExpired, terminate)
+- `timeout` → `ConnectingExistingSessionState` (retry next member)
+
+---
+
+#### 4. ConnectedState
+
+**Description**: Active session with the cluster.
+
+```typescript
+interface ConnectedState {
   readonly state: 'Connected';
   readonly config: ClientConfig;
   readonly sessionId: SessionId;
   readonly capabilities: Map<string, string>;
   readonly createdAt: Date;
   readonly serverRequestTracker: ServerRequestTracker;
-  readonly nextRequestId: RequestIdRef;
   readonly pendingRequests: PendingRequests;
   readonly pendingQueries: PendingQueries;
   readonly currentMemberId: MemberId;
 }
 ```
 
+**Valid Transitions**:
+- `disconnect()` → `DisconnectedState`
+- `network disconnect` → `ConnectingExistingSessionState` (automatic reconnection)
+- `SessionClosed(SessionExpired)` → Terminal (emit sessionExpired, terminate)
+- `SessionRejected(NotLeader)` → `ConnectingExistingSessionState` (reconnect to leader)
+
 ---
 
-## 5. Pending Request Tracking
+## Configuration
+
+### ClientConfig
+
+**Description**: Client configuration provided to constructor.
 
 ```typescript
-// Pending requests (commands) tracker
-export interface PendingRequests {
-  readonly requests: Map<RequestId, PendingRequestData>;
+interface ClientConfig {
+  // Required
+  readonly endpoints: string[]; // ['tcp://host:port', ...]
+  readonly capabilities: Record<string, string>;
+  
+  // Optional (with defaults)
+  readonly connectionTimeout?: number; // Default: 5000ms
+  readonly requestTimeout?: number; // Default: 30000ms
+  readonly keepAliveInterval?: number; // Default: 30000ms
+  readonly queuedRequestTimeout?: number; // Default: 60000ms
+  readonly maxReconnectAttempts?: number; // Default: Infinity
+  readonly reconnectInterval?: number; // Default: 1000ms
+}
+```
+
+**Validation Rules**:
+- `endpoints`: Must be non-empty array of valid ZMQ endpoint strings
+- `capabilities`: Must be non-empty object
+- All timeout values must be positive integers
+- Validation occurs in constructor, throws `ValidationError` if invalid
+
+**Defaults Rationale**:
+- Connection timeout: 5s (fail fast for misconfig)
+- Request timeout: 30s (balance responsiveness vs slow writes)
+- Keep-alive interval: 30s (typical session timeout / 2)
+- Queued request timeout: 60s (resilience during reconnection)
+- Max reconnect attempts: Infinity (keep trying)
+- Reconnect interval: 1s (fast recovery)
+
+---
+
+## Error Types
+
+### Error Hierarchy
+
+```typescript
+class RaftClientError extends Error {
+  readonly name = 'RaftClientError';
 }
 
-export interface PendingRequestData {
-  readonly payload: Buffer;
-  readonly resolve: (result: Buffer) => void;
-  readonly reject: (error: Error) => void;
-  readonly createdAt: Date;
-  readonly lastSentAt: Date;
+class ValidationError extends RaftClientError {
+  readonly name = 'ValidationError';
+  constructor(message: string) {
+    super(message);
+  }
 }
 
-// Pending queries tracker
-export interface PendingQueries {
-  readonly queries: Map<CorrelationId, PendingQueryData>;
+class TimeoutError extends RaftClientError {
+  readonly name = 'TimeoutError';
+  readonly requestId?: RequestId;
+  readonly correlationId?: CorrelationId;
+  
+  constructor(message: string, id?: RequestId | CorrelationId) {
+    super(message);
+    if (typeof id === 'bigint') {
+      this.requestId = id;
+    } else if (typeof id === 'string') {
+      this.correlationId = id;
+    }
+  }
 }
 
-export interface PendingQueryData {
-  readonly payload: Buffer;
-  readonly resolve: (result: Buffer) => void;
-  readonly reject: (error: Error) => void;
-  readonly createdAt: Date;
-  readonly lastSentAt: Date;
+class ConnectionError extends RaftClientError {
+  readonly name = 'ConnectionError';
+  readonly endpoint?: string;
+  readonly cause?: Error;
+  
+  constructor(message: string, endpoint?: string, cause?: Error) {
+    super(message);
+    this.endpoint = endpoint;
+    this.cause = cause;
+  }
 }
 
-// Request ID reference (mutable counter)
-export interface RequestIdRef {
-  current: RequestId;
-  next(): RequestId;
+class SessionExpiredError extends RaftClientError {
+  readonly name = 'SessionExpiredError';
+  readonly sessionId: string;
+  
+  constructor(sessionId: string) {
+    super(`Session expired: ${sessionId}`);
+    this.sessionId = sessionId;
+  }
 }
+
+class ProtocolError extends RaftClientError {
+  readonly name = 'ProtocolError';
+  
+  constructor(message: string) {
+    super(`Protocol error: ${message}`);
+  }
+}
+```
+
+**Usage**:
+- `ValidationError`: Thrown synchronously for bad input
+- `TimeoutError`: Promise rejection for request timeout
+- `ConnectionError`: Promise rejection for connection failures
+- `SessionExpiredError`: Promise rejection when session expires
+- `ProtocolError`: Thrown for wire protocol violations
+
+---
+
+## Pending Request Management
+
+### PendingRequests
+
+**Description**: Tracks pending commands awaiting responses.
+
+```typescript
+class PendingRequests {
+  private requests: Map<RequestId, PendingCommand>;
+  
+  add(
+    requestId: RequestId,
+    payload: Uint8Array,
+    resolve: (result: Uint8Array) => void,
+    reject: (error: Error) => void,
+    createdAt: Date
+  ): void;
+  
+  complete(requestId: RequestId, result: Uint8Array): void;
+  timeout(requestId: RequestId): void;
+  remove(requestId: RequestId): void;
+  
+  lowestPendingRequestId(): RequestId | undefined;
+  checkTimeouts(now: Date, timeout: number): RequestId[];
+  
+  get size(): number;
+  clear(): void;
+}
+```
+
+**Operations**:
+- **add**: Add new pending request
+- **complete**: Resolve promise with result, remove from map
+- **timeout**: Reject promise with TimeoutError, remove from map
+- **remove**: Remove without resolving/rejecting
+- **lowestPendingRequestId**: Returns lowest pending ID (for cache eviction)
+- **checkTimeouts**: Returns list of timed-out request IDs
+
+---
+
+### PendingQueries
+
+**Description**: Tracks pending queries awaiting responses.
+
+```typescript
+class PendingQueries {
+  private queries: Map<CorrelationId, PendingQuery>;
+  
+  add(
+    correlationId: CorrelationId,
+    payload: Uint8Array,
+    resolve: (result: Uint8Array) => void,
+    reject: (error: Error) => void,
+    createdAt: Date
+  ): void;
+  
+  complete(correlationId: CorrelationId, result: Uint8Array): void;
+  timeout(correlationId: CorrelationId): void;
+  remove(correlationId: CorrelationId): void;
+  
+  checkTimeouts(now: Date, timeout: number): CorrelationId[];
+  
+  get size(): number;
+  clear(): void;
+}
+```
+
+**Operations**: Similar to PendingRequests but keyed by CorrelationId (UUID string).
+
+---
+
+## Type Summary
+
+| Type | Description | Format |
+|------|-------------|--------|
+| `SessionId` | Unique session identifier | UUID string |
+| `RequestId` | Sequential command identifier | bigint (uint64) |
+| `CorrelationId` | Query correlation identifier | UUID string |
+| `Nonce` | Session creation nonce | bigint (uint64) |
+| `MemberId` | Cluster member identifier | string |
+| `Capabilities` | Client capability map | Record<string, string> |
+| `Payload` | Binary command/query data | Buffer |
+| `Timestamp` | ISO 8601 instant | Date |
+
+---
+
+## Relationships
+
+```
+RaftClient
+  ├── config: ClientConfig
+  ├── state: ClientState
+  │     ├── Disconnected
+  │     ├── ConnectingNewSession
+  │     │     ├── pendingRequests: PendingRequests
+  │     │     └── pendingQueries: PendingQueries
+  │     ├── ConnectingExistingSession
+  │     │     ├── session: SessionId
+  │     │     ├── serverRequestTracker: ServerRequestTracker
+  │     │     ├── pendingRequests: PendingRequests
+  │     │     └── pendingQueries: PendingQueries
+  │     └── Connected
+  │           ├── session: SessionId
+  │           ├── serverRequestTracker: ServerRequestTracker
+  │           ├── pendingRequests: PendingRequests
+  │           └── pendingQueries: PendingQueries
+  ├── transport: ClientTransport
+  │     └── zmqSocket: ZMQ DEALER
+  ├── actionQueue: AsyncQueue<ClientAction>
+  ├── serverRequestQueue: AsyncQueue<ServerRequest>
+  └── eventEmitter: TypedEventEmitter
 ```
 
 ---
 
-## 6. Server Request Tracking
+## Next Steps
 
-```typescript
-// Tracks server-initiated requests for deduplication
-export interface ServerRequestTracker {
-  readonly lastAcknowledgedRequestId: RequestId;
-}
-
-export type ServerRequestResult =
-  | { type: 'Process' }           // New request, should process
-  | { type: 'OldRequest' }        // Already processed, re-ack
-  | { type: 'OutOfOrder' };       // Gap detected, drop
-```
-
----
-
-## 7. Event Types
-
-```typescript
-// Events emitted by client for observability
-export type ClientEvent =
-  | StateChangeEvent
-  | ConnectionAttemptEvent
-  | ConnectionSuccessEvent
-  | ConnectionFailureEvent
-  | MessageReceivedEvent
-  | MessageSentEvent
-  | RequestTimeoutEvent
-  | QueryTimeoutEvent
-  | SessionExpiredEvent
-  | ServerRequestReceivedEvent;
-
-export interface StateChangeEvent {
-  readonly type: 'stateChange';
-  readonly oldState: ClientState['state'];
-  readonly newState: ClientState['state'];
-}
-
-export interface ConnectionAttemptEvent {
-  readonly type: 'connectionAttempt';
-  readonly memberId: MemberId;
-  readonly address: string;
-}
-
-export interface ConnectionSuccessEvent {
-  readonly type: 'connectionSuccess';
-  readonly memberId: MemberId;
-}
-
-export interface ConnectionFailureEvent {
-  readonly type: 'connectionFailure';
-  readonly memberId: MemberId;
-  readonly error: Error;
-}
-
-export interface MessageReceivedEvent {
-  readonly type: 'messageReceived';
-  readonly message: ServerMessage;
-}
-
-export interface MessageSentEvent {
-  readonly type: 'messageSent';
-  readonly message: ClientMessage;
-}
-
-export interface RequestTimeoutEvent {
-  readonly type: 'requestTimeout';
-  readonly requestId: RequestId;
-}
-
-export interface QueryTimeoutEvent {
-  readonly type: 'queryTimeout';
-  readonly correlationId: CorrelationId;
-}
-
-export interface SessionExpiredEvent {
-  readonly type: 'sessionExpired';
-}
-
-export interface ServerRequestReceivedEvent {
-  readonly type: 'serverRequestReceived';
-  readonly request: ServerRequest;
-}
-```
-
----
-
-## 8. Action Types (Internal)
-
-```typescript
-// Internal actions from user API calls
-export type ClientAction =
-  | ConnectAction
-  | DisconnectAction
-  | SubmitCommandAction
-  | SubmitQueryAction;
-
-export interface ConnectAction {
-  readonly type: 'Connect';
-}
-
-export interface DisconnectAction {
-  readonly type: 'Disconnect';
-}
-
-export interface SubmitCommandAction {
-  readonly type: 'SubmitCommand';
-  readonly payload: Buffer;
-  readonly resolve: (result: Buffer) => void;
-  readonly reject: (error: Error) => void;
-}
-
-export interface SubmitQueryAction {
-  readonly type: 'SubmitQuery';
-  readonly payload: Buffer;
-  readonly resolve: (result: Buffer) => void;
-  readonly reject: (error: Error) => void;
-}
-```
-
----
-
-## 9. Stream Events (Internal)
-
-```typescript
-// Unified event stream events (internal to state machine)
-export type StreamEvent =
-  | ActionEvent
-  | ServerMessageEvent
-  | KeepAliveTickEvent
-  | TimeoutCheckEvent;
-
-export interface ActionEvent {
-  readonly type: 'Action';
-  readonly action: ClientAction;
-}
-
-export interface ServerMessageEvent {
-  readonly type: 'ServerMsg';
-  readonly message: ServerMessage;
-}
-
-export interface KeepAliveTickEvent {
-  readonly type: 'KeepAliveTick';
-}
-
-export interface TimeoutCheckEvent {
-  readonly type: 'TimeoutCheck';
-}
-```
-
----
-
-## 10. Protocol Constants
-
-```typescript
-export const PROTOCOL_SIGNATURE = Buffer.from([0x7a, 0x72, 0x61, 0x66, 0x74]); // "zraft"
-export const PROTOCOL_VERSION: number = 1;
-
-// Client message type discriminators
-export enum ClientMessageType {
-  CreateSession = 1,
-  ContinueSession = 2,
-  KeepAlive = 3,
-  ClientRequest = 4,
-  ServerRequestAck = 5,
-  CloseSession = 6,
-  ConnectionClosed = 7,
-  Query = 8
-}
-
-// Server message type discriminators
-export enum ServerMessageType {
-  SessionCreated = 1,
-  SessionContinued = 2,
-  SessionRejected = 3,
-  SessionClosed = 4,
-  KeepAliveResponse = 5,
-  ClientResponse = 6,
-  ServerRequest = 7,
-  RequestError = 8,
-  QueryResponse = 9
-}
-
-// Reason enum discriminators
-export enum RejectionReasonCode {
-  NotLeader = 1,
-  SessionExpired = 2,
-  InvalidCapabilities = 3,
-  Other = 4
-}
-
-export enum SessionCloseReasonCode {
-  Shutdown = 1,
-  NotLeaderAnymore = 2,
-  SessionError = 3,
-  ConnectionClosed = 4,
-  SessionExpired = 5
-}
-
-export enum CloseReasonCode {
-  ClientShutdown = 1
-}
-
-export enum RequestErrorReasonCode {
-  ResponseEvicted = 1
-}
-```
-
----
-
-## Summary
-
-This data model provides:
-- **Type Safety**: Branded types prevent mixing incompatible IDs
-- **Protocol Compatibility**: Message structures exactly match Scala definitions
-- **State Machine**: Discriminated unions for states enable exhaustive pattern matching
-- **Event System**: Rich event types for observability without built-in logging
-- **Immutability**: All interfaces readonly for functional state management
-
-All structures are designed to be:
-1. Serializable for wire protocol compatibility
-2. Type-safe for compile-time correctness
-3. Immutable for predictable state transitions
-4. Observable for application-level logging and monitoring
+Data model complete. Proceed to:
+1. Design.md - High-level architecture and solution overview
+2. Tests.md - Test scenarios derived from acceptance criteria
+3. Quickstart.md - End-to-end validation guide

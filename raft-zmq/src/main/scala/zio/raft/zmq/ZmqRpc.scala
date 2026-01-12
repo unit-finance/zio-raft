@@ -84,7 +84,7 @@ class ZmqRpc[A <: Command: Codec](server: ZSocket, clients: Map[MemberId, ZSocke
   override def incomingMessages =
     server.stream
       .mapZIO { message =>
-        val bytes = message.data()
+        val bytes = message.data
         val rpcMessage = RpcMessageCodec.codec[A].decodeValue(BitVector(bytes)).toEither
         ZIO.succeed(rpcMessage)
       }

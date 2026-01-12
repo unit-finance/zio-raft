@@ -63,7 +63,7 @@ object ClientTransport {
 
     override def incomingMessages: ZStream[Any, Throwable, ServerMessage] =
       socket.stream.mapZIO { msg =>
-        ZIO.attempt(serverMessageCodec.decode(BitVector(msg.data())).require.value)
+        ZIO.attempt(serverMessageCodec.decode(BitVector(msg.data)).require.value)
       }
   }
 }

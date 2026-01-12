@@ -1,4 +1,4 @@
-lazy val zio2Version = "2.1.1"
+lazy val zio2Version = "2.1.24"
 lazy val zioLoggingVersion = "2.2.4"
 lazy val zioPreludeVersion = "1.0.0-RC41"
 
@@ -86,7 +86,7 @@ lazy val root = project
     kvstoreCli,
     kvstoreProtocol,
     zio1zmq,
-    zio2zmq,
+    zio2zmq.jvm,
     raftZmq,
     stores,
     ziolmdb,
@@ -152,7 +152,7 @@ lazy val raftZmq = project
     ),
     excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
-  .dependsOn(raft, zio2zmq)
+  .dependsOn(raft, zio2zmq.jvm)
 
 lazy val zio1zmq = project
   .in(file("zio1-zmq"))
@@ -174,17 +174,21 @@ lazy val zio1zmq = project
     }
   )
 
-lazy val zio2zmq = project
+lazy val zio2zmq = crossProject(JVMPlatform, NativePlatform)
+  .crossType(CrossType.Full)
+  .withoutSuffixFor(JVMPlatform)
   .in(file("zio2-zmq"))
   .settings(
-    name := "zio2-zmq",
     scalaVersion := mainScalaVersion,
-    crossScalaVersions := supportedScalaVersions,
     scalacOptions ++= commonScalacOptions.value,
+    name := "zio2-zmq",    
     libraryDependencies ++= Seq(
-      "dev.zio" %% "zio" % zio2Version,
-      "dev.zio" %% "zio-prelude" % zioPreludeVersion,
-      "org.zeromq" % "jeromq" % jeromqVersion
+      "dev.zio" %%% "zio" % zio2Version,
+      "dev.zio" %%% "zio-prelude" % zioPreludeVersion    
+    ),    
+    libraryDependencies ++= Seq(
+      "dev.zio" %%% "zio-test" % zio2Version % Test,
+      "dev.zio" %%% "zio-test-sbt" % zio2Version % Test
     ),
     libraryDependencies ++= {
       CrossVersion.partialVersion(scalaVersion.value) match {
@@ -193,6 +197,16 @@ lazy val zio2zmq = project
         case _            => Seq()
       }
     }
+  )
+  .nativeSettings(
+    
+  )
+  .jvmSettings(        
+    crossScalaVersions := supportedScalaVersions,
+    
+    libraryDependencies ++= Seq(      
+      "org.zeromq" % "jeromq" % jeromqVersion
+    )    
   )
 
 lazy val ziolmdb = project
@@ -208,7 +222,8 @@ lazy val ziolmdb = project
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test,
       "org.lmdbjava" % "lmdbjava" % "0.9.0"
-    )
+    ),
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
 
 lazy val stores = project
@@ -269,7 +284,7 @@ lazy val clientServerServer = project
     ),
     excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
   )
-  .dependsOn(raft, clientServerProtocol, zio2zmq)
+  .dependsOn(raft, clientServerProtocol, zio2zmq.jvm)
 
 lazy val clientServerClient = project
   .in(file("client-server-client"))
@@ -292,7 +307,7 @@ lazy val clientServerClient = project
       case _            => Seq.empty
     })
   )
-  .dependsOn(clientServerProtocol, zio2zmq)
+  .dependsOn(clientServerProtocol, zio2zmq.jvm)
 
 lazy val sessionStateMachine = project
   .in(file("session-state-machine"))

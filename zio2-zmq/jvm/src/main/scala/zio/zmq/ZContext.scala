@@ -8,11 +8,10 @@ import zmq.Ctx
 class ZContext {
   private val ctx = new Ctx()
 
-  def shutdown() = ctx.terminate()
+  private[zmq] def shutdown() = ctx.terminate()
 
   private[zmq] def createSocket(socketType: Int) = ctx.createSocket(socketType)
 }
-
 object ZContext {
   val InterruptedFunction = 4
 

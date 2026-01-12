@@ -1,0 +1,16 @@
+package zio.zmq
+
+trait ZSocketObjectPlatformSpecific {
+   
+  def dealer = ???
+
+  def router = ???
+
+  def client = ???
+
+  def server = ???
+
+  def raw = ???
+
+  def peer = ???
+}

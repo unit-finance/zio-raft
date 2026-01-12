@@ -26,8 +26,8 @@ object KVStoreQueryGetSpec extends ZIOSpec[TestEnvironment & ZContext]:
 
   def receiveServerMessage(socket: ZSocket): Task[ServerMessage] =
     for
-      chunk <- socket.receive
-      bytes = ByteVector(chunk.toArray)
+      msg <- socket.receive
+      bytes = ByteVector(msg.data)
       message <- ZIO
         .fromEither(serverMessageCodec.decode(bytes.bits).toEither.map(_.value))
         .mapError(err => new RuntimeException(s"Failed to decode: $err"))

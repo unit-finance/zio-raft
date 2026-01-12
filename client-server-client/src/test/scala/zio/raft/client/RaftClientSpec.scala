@@ -41,15 +41,14 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
   def expectMessage[A <: ClientMessage](
     socket: ZSocket
   )(implicit ct: scala.reflect.ClassTag[A]): Task[(RoutingId, A)] = {
-    socket.receiveMsg.flatMap { msgRaw =>
-      val routingId = RoutingId(msgRaw.getRoutingId)
+    socket.receive.flatMap { case msg =>
       ZIO
         .fromEither(
-          clientMessageCodec.decode(scodec.bits.BitVector(msgRaw.data())).toEither.map(_.value)
+          clientMessageCodec.decode(scodec.bits.BitVector(msg.data)).toEither.map(_.value)
         )
         .mapError(err => new RuntimeException(s"Decode error: $err"))
         .flatMap {
-          case msg: A => ZIO.succeed((routingId, msg))
+          case a: A => ZIO.succeed((msg.routingId, a))
           case other =>
             ZIO.fail(
               new RuntimeException(s"Expected ${ct.runtimeClass.getSimpleName}, got ${other.getClass.getSimpleName}")
@@ -64,16 +63,15 @@ object RaftClientSpec extends ZIOSpec[TestEnvironment & ZContext] {
     socket: ZSocket
   )(implicit ct: scala.reflect.ClassTag[A]): Task[(RoutingId, A)] =
     for {
-      msg <- socket.receiveMsg
-      routingId = RoutingId(msg.getRoutingId)
+      msg <- socket.receive
       decoded <- ZIO
-        .fromEither(clientMessageCodec.decode(scodec.bits.BitVector(msg.data())).toEither.map(_.value))
+        .fromEither(clientMessageCodec.decode(scodec.bits.BitVector(msg.data)).toEither.map(_.value))
         .mapError(err => new RuntimeException(s"Decode error: $err"))
 
       result <- decoded match {
-        case msg: A => ZIO.succeed((routingId, msg))
-        case msg: KeepAlive =>
-          sendServerMessage(socket, routingId, KeepAliveResponse(msg.timestamp)) *> waitForMessage[A](socket)
+        case a: A => ZIO.succeed((msg.routingId, a))
+        case ka: KeepAlive =>
+          sendServerMessage(socket, msg.routingId, KeepAliveResponse(ka.timestamp)) *> waitForMessage[A](socket)
         case other =>
           waitForMessage[A](socket)
       }

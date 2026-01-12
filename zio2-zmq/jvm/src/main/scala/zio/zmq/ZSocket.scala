@@ -1,54 +1,28 @@
 package zio.zmq
 
-import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 
 import zio.stream.ZStream
-import zio.{Chunk, ChunkBuilder, Scope, ZIO}
+import zio.{Chunk, ChunkBuilder, ZIO}
 
-import org.zeromq.ZMQException
-import zmq.{Msg, SocketBase, ZError as ZmqError, ZMQ}
+import zmq.{Msg, SocketBase, ZMQ}
+import zio.zmq.{RoutingId, ZError as ZmqError}
+import zio.Scope
 
-class ZSocket private (
+class ZSocket(
   socket: SocketBase
 ) {
-  def pollIn: ZIO[Any, ZMQException, Boolean] =
-    for {
-      ready <- ZIO
-        .attempt {
-          val events = socket.poll(ZMQ.ZMQ_POLLIN, 0, null)
-
-          if (events == ZMQ.ZMQ_POLLIN) true
-          else if (events == -1 && socket.errno() == ZmqError.EAGAIN) false
-          else throw new ZMQException(socket.errno())
-        }
-        .refineToOrDie[ZMQException]
-      result <-
-        if (ready) ZIO.succeed(true)
-        else {
-          val canceled = new AtomicBoolean(false)
-          ZIO
-            .attemptBlockingCancelable {
-              val events = socket.poll(ZMQ.ZMQ_POLLIN, -1, canceled)
-
-              // We actually should repeat until error is not EAGAIN
-              if (events == ZMQ.ZMQ_POLLIN) true
-              else throw new ZMQException(socket.errno())
-            }(ZIO.attempt(socket.cancel(canceled)).orDie)
-            .refineToOrDie[ZMQException]
-        }
-    } yield result
 
   private def receiveImmediatelyIntoChunkBuilder(
-    builder: ChunkBuilder[Msg],
+    builder: ChunkBuilder[Message],
     max: Int,
     size: Int
-  ): Chunk[Msg] = {
+  ): Chunk[Message] = {
     val msg = socket.recv(ZMQ.ZMQ_DONTWAIT)
 
     if (msg != null && size < max - 1)
-      receiveImmediatelyIntoChunkBuilder(builder += msg, max, size + 1)
-    else if (msg != null) (builder += msg).result()
+      receiveImmediatelyIntoChunkBuilder(builder += Message(msg), max, size + 1)
+    else if (msg != null) (builder += Message(msg)).result()
     else if (socket.errno() == ZmqError.EAGAIN) builder.result()
     else throw new ZMQException(socket.errno())
   }
@@ -57,7 +31,7 @@ class ZSocket private (
     for {
       _ <- ZIO.succeed(canceled.set(false))
       msg <- receiveMsgWait(canceled)
-      builder = ChunkBuilder.make[Msg](chunkSize)
+      builder = ChunkBuilder.make[Message](chunkSize)
       chunk <- ZIO
         .attempt(
           receiveImmediatelyIntoChunkBuilder(builder += msg, chunkSize, 1)
@@ -65,23 +39,16 @@ class ZSocket private (
         .refineToOrDie[ZMQException]
     } yield chunk
 
-  def receiveChunkImmediately(max: Int) =
-    ZIO
-      .attempt(
-        receiveImmediatelyIntoChunkBuilder(ChunkBuilder.make(max), max, 0)
-      )
-      .refineToOrDie[ZMQException]
+  def stream: ZStream[Any, ZMQException, Message] = stream(chunkSize = 100)
 
-  def stream: ZStream[Any, ZMQException, Msg] = stream(chunkSize = 100)
-
-  def stream(chunkSize: Int): ZStream[Any, ZMQException, Msg] =
+  def stream(chunkSize: Int): ZStream[Any, ZMQException, Message] =
     ZStream
       .succeed(new AtomicBoolean(false))
       .flatMap(canceled => ZStream.repeatZIOChunk(receiveChunk(canceled, chunkSize)))
 
   private def receiveMsgWait(
     canceled: AtomicBoolean
-  ): ZIO[Any, ZMQException, Msg] =
+  ): ZIO[Any, ZMQException, Message] =
     for {
       msg <- ZIO
         .attempt {
@@ -95,7 +62,7 @@ class ZSocket private (
 
       msg <-
         if (msg != null) ZIO.succeed(msg)
-        else {
+        else
           zio.ZIO
             .attemptBlockingCancelable {
               val msg = socket.recv(0, canceled)
@@ -105,25 +72,13 @@ class ZSocket private (
             .absolve
             .refineToOrDie[ZMQException]
             .retryWhile(_.getErrorCode() == ZmqError.EAGAIN)
-        }
-    } yield msg
+    } yield Message(msg)
 
-  def receiveMsg: ZIO[Any, ZMQException, Msg] = receiveMsgWait(
+  def receive: ZIO[Any, ZMQException, Message] = receiveMsgWait(
     new AtomicBoolean(false)
   )
 
-  def receive = receiveMsg.map(m => Chunk.fromArray(m.data()))
-
-  def receiveString =
-    receive.map(c => new String(c.toArray, StandardCharsets.UTF_8))
-
-  def receiveStringWithRoutingId =
-    receiveMsg.map(m => (RoutingId(m.getRoutingId), new String(m.data(), StandardCharsets.UTF_8)))
-
-  def receiveWithRoutingId =
-    receiveMsg.map(m => (RoutingId(m.getRoutingId), Chunk.fromArray(m.data())))
-
-  def receiveMsgImmediately: ZIO[Any, ZMQException, Option[Msg]] =
+  private def receiveMsgImmediately: ZIO[Any, ZMQException, Option[Msg]] =
     ZIO
       .attempt {
         val msg = socket.recv(ZMQ.ZMQ_DONTWAIT)
@@ -134,28 +89,13 @@ class ZSocket private (
       }
       .refineToOrDie[ZMQException]
 
-  def receiveImmediately =
-    receiveMsgImmediately.map(_.map(m => Chunk.fromArray(m.data())))
-
-  def receiveWithRoutingIdImmediately =
-    receiveMsgImmediately.map(
-      _.map(m => (RoutingId(m.getRoutingId), Chunk.fromArray(m.data())))
-    )
-
   def send(routingId: RoutingId, bytes: Array[Byte]) = {
     val msg = new Msg(bytes)
     msg.setRoutingId(routingId.value)
     sendMsg(msg)
   }
 
-  def sendString(routingId: RoutingId, s: String) = {
-    val bytes = s.getBytes(StandardCharsets.UTF_8)
-    val msg = new Msg(bytes)
-    msg.setRoutingId(routingId.value)
-    sendMsg(msg)
-  }
-
-  def sendMsg(msg: Msg): ZIO[Any, ZMQException, Unit] =
+  private def sendMsg(msg: Msg): ZIO[Any, ZMQException, Unit] =
     for {
       success <- ZIO
         .attempt {
@@ -181,17 +121,11 @@ class ZSocket private (
             }(ZIO.attempt(socket.cancel(canceled)).orDie)
             .refineToOrDie[ZMQException]
         }
-
     } yield msg
 
   def send(bytes: Array[Byte]) = sendMsg(new Msg(bytes))
 
-  def sendString(s: String) = {
-    val bytes = s.getBytes(StandardCharsets.UTF_8)
-    send(bytes)
-  }
-
-  def sendMsgImmediately(msg: Msg): ZIO[Any, ZMQException, Boolean] =
+  private def sendMsgImmediately(msg: Msg): ZIO[Any, ZMQException, Boolean] =
     ZIO
       .attempt {
         val success = socket.send(msg, ZMQ.ZMQ_DONTWAIT)
@@ -290,5 +224,4 @@ object ZSocket {
   def raw = createSocket(ZMQ.ZMQ_RAW, None)
 
   def peer = createSocket(ZMQ.ZMQ_PEER, None)
-
 }

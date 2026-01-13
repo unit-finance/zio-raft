@@ -1,0 +1,42 @@
+{
+  "name": "@zio-raft/kvstore-cli",
+  "version": "0.1.0",
+  "description": "KVStore CLI - interact with a distributed key-value store",
+  "main": "dist/index.js",
+  "bin": {
+    "kvstore": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest --coverage",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "kvstore",
+    "cli",
+    "zio-raft",
+    "distributed"
+  ],
+  "author": "ZIO Raft Team",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@zio-raft/typescript-client": "file:../typescript-client",
+    "commander": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.3",
+    "@vitest/coverage-v8": "^1.0.4",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.0.4"
+  }
+}

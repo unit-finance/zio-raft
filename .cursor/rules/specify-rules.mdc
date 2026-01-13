@@ -46,9 +46,9 @@ All code changes must adhere to ZIO Raft Constitution v1.0.0:
 - Functional programming patterns (no var, mutable collections)
 
 ## Recent Changes
+- 007-create-a-kvstore: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
 - 006-we-want-to: Added TypeScript 5.x (ES2022 target), Node.js 18+ runtime + zeromq (Node.js ZMQ bindings), @msgpack/msgpack (binary framing/serialization)
 - 006-we-want-to: Added TypeScript 5.0+, Node.js 18+ LTS + zeromq (Node.js ZMQ bindings), Buffer API for binary framing
-- 005-client-server-libraries: Added Scala 3 + ZIO 2, existing zio-raft client/server libraries
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

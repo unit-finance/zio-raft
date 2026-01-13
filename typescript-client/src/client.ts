@@ -123,8 +123,6 @@ export class RaftClient extends EventEmitter {
   
   private currentState: ClientState;
   private eventLoopPromise: Promise<void> | null = null;
-  private keepAliveTimer: NodeJS.Timeout | null = null;
-  private timeoutCheckTimer: NodeJS.Timeout | null = null;
   private isShuttingDown = false;
 
   /**
@@ -278,9 +276,6 @@ export class RaftClient extends EventEmitter {
    */
   private async runEventLoop(): Promise<void> {
     try {
-      // Start timers
-      this.startTimers();
-      
       // Create unified event stream
       const actionStream = this.createActionStream();
       const serverMessageStream = this.createServerMessageStream();
@@ -415,30 +410,7 @@ export class RaftClient extends EventEmitter {
   // Lifecycle Management (Private)
   // ==========================================================================
 
-  private startTimers(): void {
-    // Keep-alive timer
-    this.keepAliveTimer = setInterval(() => {
-      this.actionQueue.offer({ type: 'KeepAliveTick' } as any);
-    }, this.config.keepAliveInterval);
-    
-    // Timeout check timer (every 100ms)
-    this.timeoutCheckTimer = setInterval(() => {
-      this.actionQueue.offer({ type: 'TimeoutCheck' } as any);
-    }, 100);
-  }
-
-  private async cleanup(): Promise<void> {
-    // Stop timers
-    if (this.keepAliveTimer) {
-      clearInterval(this.keepAliveTimer);
-      this.keepAliveTimer = null;
-    }
-    
-    if (this.timeoutCheckTimer) {
-      clearInterval(this.timeoutCheckTimer);
-      this.timeoutCheckTimer = null;
-    }
-    
+  private async cleanup(): Promise<void> {    
     // Disconnect transport
     await this.transport.disconnect();
     

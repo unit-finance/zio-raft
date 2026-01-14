@@ -56,8 +56,9 @@ export function createSetCommand(): Command {
         if (client) {
           try {
             await client.disconnect();
-          } catch {
-            // Ignore cleanup errors
+          } catch (cleanupError) {
+            // Log cleanup errors for debugging
+            console.error('Warning: Failed to disconnect client during cleanup:', cleanupError);
           }
         }
 

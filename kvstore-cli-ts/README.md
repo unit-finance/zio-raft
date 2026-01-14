@@ -12,6 +12,11 @@ A command-line interface for interacting with the KVStore distributed key-value 
 - ✅ **Error Handling**: Clear error messages and appropriate exit codes
 - ✅ **Signal Handling**: Graceful shutdown on Ctrl+C
 
+## Prerequisites
+
+- **Node.js**: 18.0.0 or higher
+- **npm**: 8.0.0 or higher
+
 ## Installation
 
 ### From Source

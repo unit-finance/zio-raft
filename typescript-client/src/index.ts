@@ -48,6 +48,12 @@ export type {
   SessionCloseReason,
 } from './protocol/messages';
 
+// Transport interface (for testing / custom implementations)
+export type { ClientTransport } from './transport/transport';
+
+// Testing utilities
+export { MockTransport } from './testing/MockTransport';
+
 // Event types
 export type {
   ConnectionEvent,

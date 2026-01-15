@@ -129,15 +129,18 @@ export class RaftClient extends EventEmitter {
   /**
    * Constructor - validates config, initializes state machine
    * Does NOT initiate connection (lazy initialization)
+   * 
+   * @param configInput - Client configuration
+   * @param transport - Optional transport for testing (defaults to ZmqTransport)
    */
-  constructor(configInput: ClientConfigInput) {
+  constructor(configInput: ClientConfigInput, transport?: ClientTransport) {
     super();
     
     // Validate and apply defaults
     this.config = createConfig(configInput);
     
-    // Create transport
-    this.transport = new ZmqTransport();
+    // Use provided transport or default to production ZMQ transport
+    this.transport = transport ?? new ZmqTransport();
     
     // Initialize state machine
     this.stateManager = new StateManager();

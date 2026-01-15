@@ -79,9 +79,7 @@ describe('Server-Initiated Requests Integration', () => {
     // This test will FAIL until emitClientEvent() is fixed
     
     // 1. Connect client
-    console.log('[TEST] About to connect client');
     await client.connect();
-    console.log('[TEST] Client connected successfully');
     
     // 2. Register handler to capture server requests
     const receivedRequests: ServerRequest[] = [];
@@ -97,9 +95,7 @@ describe('Server-Initiated Requests Integration', () => {
       createdAt: new Date(),
     };
     
-    console.log('[TEST] About to inject ServerRequest');
     mockTransport.injectServerRequest(testRequest);
-    console.log('[TEST] Inject call completed');
     
     // 4. Wait for handler to be called
     // This will timeout because queue is never populated!

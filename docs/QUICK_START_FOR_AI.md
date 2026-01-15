@@ -85,6 +85,82 @@ for {
 } yield (now, uuid)
 ```
 
+### Pattern 4: Never Silently Swallow Errors ⭐⭐
+
+**CRITICAL**: Every error must be observable. Silent error swallowing creates production debugging nightmares.
+
+```typescript
+// ❌ WRONG: Silent swallowing
+try {
+  await client.disconnect();
+} catch (err) {
+  // Swallow disconnect errors
+}
+
+// ✅ CORRECT: Log with context
+try {
+  await client.disconnect();
+} catch (err) {
+  // Log disconnect errors for debugging, but don't throw
+  // Rationale: Disconnect is often called in cleanup paths (finally blocks)
+  // and we don't want cleanup failures to mask original errors
+  console.error('Warning: Failed to disconnect from cluster:', err);
+  this.isConnected = false; // Update state appropriately
+}
+```
+
+```scala
+// ❌ WRONG: Silent catchAll
+operation().catchAll(_ => ZIO.unit)
+
+// ✅ CORRECT: Log before ignoring
+operation()
+  .catchAll(err => 
+    ZIO.logError(s"Operation failed: $err") *> ZIO.unit
+  )
+
+// ✅ CORRECT: Use orDie for "shouldn't happen" cases
+// (This makes failures visible in crashes rather than silent)
+transport.disconnect(routingId).orDie
+```
+
+**Error Handling Rules**:
+1. **Default**: Let errors propagate - `throw` or `ZIO.fail`
+2. **Cleanup paths**: Log errors with full context, don't throw (would mask original error)
+3. **Non-critical operations**: Log as warning/error, continue
+4. **Stream items**: Log decode/parse errors, continue stream (one bad message shouldn't break everything)
+
+**Must Include in Error Logs**:
+- Operation that failed (`"Failed to disconnect"`)
+- Relevant parameters/IDs (`sessionId`, `payload.length`)
+- Original error object (`err`)
+- Why you're not throwing (`"Rationale: ..."` comment)
+
+**Examples of Valid Non-Throwing**:
+```typescript
+// Cleanup in finally block
+finally {
+  try {
+    await cleanup();
+  } catch (cleanupErr) {
+    console.error('Warning: Cleanup failed:', cleanupErr);
+  }
+}
+
+// Stream processing
+notifications().forEach(msg => {
+  try {
+    const decoded = decode(msg);
+    handle(decoded);
+  } catch (err) {
+    console.error('Warning: Failed to decode notification:', err);
+    console.error('  Payload length:', msg.length);
+    console.error('  First 20 bytes:', msg.subarray(0, 20).toString('hex'));
+    // Continue stream - one bad message shouldn't break watch
+  }
+});
+```
+
 ---
 
 ## 📦 Project Structure
@@ -240,7 +316,8 @@ Before starting implementation:
 6. ✅ List all resources and their cleanup requirements
 7. ✅ Identify any impure operations and plan replacements
 8. ✅ Verify changes go through stream (if stream architecture)
-9. ✅ **Keep it simple - one file is often better than many small files**
+9. ✅ **Never silently swallow errors** - always log with context
+10. ✅ **Keep it simple - one file is often better than many small files**
 
 ---
 

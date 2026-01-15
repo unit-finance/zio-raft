@@ -371,6 +371,12 @@ export class RaftClient extends EventEmitter {
           timestamp: new Date(),
         } as SessionExpiredEvent);
         break;
+      
+      case 'serverRequestReceived':
+        // Route ServerRequest to queue for onServerRequest() handlers
+        // This is the critical missing piece that connects state machine events to user handlers
+        this.serverRequestQueue.offer(evt.request);
+        break;
     }
   }
 

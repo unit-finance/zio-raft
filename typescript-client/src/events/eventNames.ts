@@ -24,6 +24,9 @@ export const ClientEvents = {
   /** Emitted when the session expires on the server */
   SESSION_EXPIRED: 'sessionExpired',
   
+  /** Emitted when server sends a request to the client (internal - routed to queue) */
+  SERVER_REQUEST_RECEIVED: 'serverRequestReceived',
+  
   /** Emitted when an error occurs */
   ERROR: 'error',
 } as const;

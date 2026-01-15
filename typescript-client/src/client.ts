@@ -10,6 +10,7 @@ import { AsyncQueue } from './utils/asyncQueue';
 import { mergeStreams } from './utils/streamMerger';
 import { ValidationError } from './errors';
 import { ServerRequest } from './protocol/messages';
+import { ClientEvents } from './events/eventNames';
 
 // ============================================================================
 // Event Types
@@ -258,11 +259,11 @@ export class RaftClient extends EventEmitter {
           handler(request);
         } catch (err) {
           // Swallow errors in user handler to prevent crash
-          this.emit('error', err instanceof Error ? err : new Error(String(err)));
+          this.emit(ClientEvents.ERROR, err instanceof Error ? err : new Error(String(err)));
         }
       }
     })().catch((err) => {
-      this.emit('error', err instanceof Error ? err : new Error(String(err)));
+      this.emit(ClientEvents.ERROR, err instanceof Error ? err : new Error(String(err)));
     });
   }
 
@@ -299,7 +300,7 @@ export class RaftClient extends EventEmitter {
         }
       }
     } catch (err) {
-      this.emit('error', err instanceof Error ? err : new Error(String(err)));
+      this.emit(ClientEvents.ERROR, err instanceof Error ? err : new Error(String(err)));
     } finally {
       await this.cleanup();
     }
@@ -332,7 +333,7 @@ export class RaftClient extends EventEmitter {
         }
       }
     } catch (err) {
-      this.emit('error', err instanceof Error ? err : new Error(String(err)));
+      this.emit(ClientEvents.ERROR, err instanceof Error ? err : new Error(String(err)));
     }
   }
 
@@ -342,7 +343,7 @@ export class RaftClient extends EventEmitter {
   private emitClientEvent(evt: any): void {
     switch (evt.type) {
       case 'connected':
-        this.emit('connected', {
+        this.emit(ClientEvents.CONNECTED, {
           sessionId: evt.sessionId,
           endpoint: evt.endpoint,
           timestamp: new Date(),
@@ -350,14 +351,14 @@ export class RaftClient extends EventEmitter {
         break;
       
       case 'disconnected':
-        this.emit('disconnected', {
+        this.emit(ClientEvents.DISCONNECTED, {
           reason: evt.reason,
           timestamp: new Date(),
         } as DisconnectedEvent);
         break;
       
       case 'reconnecting':
-        this.emit('reconnecting', {
+        this.emit(ClientEvents.RECONNECTING, {
           attempt: evt.attempt,
           endpoint: evt.endpoint,
           timestamp: new Date(),
@@ -365,7 +366,7 @@ export class RaftClient extends EventEmitter {
         break;
       
       case 'sessionExpired':
-        this.emit('sessionExpired', {
+        this.emit(ClientEvents.SESSION_EXPIRED, {
           sessionId: evt.sessionId,
           timestamp: new Date(),
         } as SessionExpiredEvent);
@@ -423,20 +424,20 @@ export class RaftClient extends EventEmitter {
   // TypeScript Event Emitter Type Overrides
   // ==========================================================================
 
-  on(event: 'connected', listener: (evt: ConnectedEvent) => void): this;
-  on(event: 'disconnected', listener: (evt: DisconnectedEvent) => void): this;
-  on(event: 'reconnecting', listener: (evt: ReconnectingEvent) => void): this;
-  on(event: 'sessionExpired', listener: (evt: SessionExpiredEvent) => void): this;
-  on(event: 'error', listener: (err: Error) => void): this;
+  on(event: typeof ClientEvents.CONNECTED, listener: (evt: ConnectedEvent) => void): this;
+  on(event: typeof ClientEvents.DISCONNECTED, listener: (evt: DisconnectedEvent) => void): this;
+  on(event: typeof ClientEvents.RECONNECTING, listener: (evt: ReconnectingEvent) => void): this;
+  on(event: typeof ClientEvents.SESSION_EXPIRED, listener: (evt: SessionExpiredEvent) => void): this;
+  on(event: typeof ClientEvents.ERROR, listener: (err: Error) => void): this;
   on(event: string, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
 
-  emit(event: 'connected', evt: ConnectedEvent): boolean;
-  emit(event: 'disconnected', evt: DisconnectedEvent): boolean;
-  emit(event: 'reconnecting', evt: ReconnectingEvent): boolean;
-  emit(event: 'sessionExpired', evt: SessionExpiredEvent): boolean;
-  emit(event: 'error', err: Error): boolean;
+  emit(event: typeof ClientEvents.CONNECTED, evt: ConnectedEvent): boolean;
+  emit(event: typeof ClientEvents.DISCONNECTED, evt: DisconnectedEvent): boolean;
+  emit(event: typeof ClientEvents.RECONNECTING, evt: ReconnectingEvent): boolean;
+  emit(event: typeof ClientEvents.SESSION_EXPIRED, evt: SessionExpiredEvent): boolean;
+  emit(event: typeof ClientEvents.ERROR, err: Error): boolean;
   emit(event: string, ...args: any[]): boolean {
     return super.emit(event, ...args);
   }

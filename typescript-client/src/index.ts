@@ -52,3 +52,7 @@ export type {
 export type {
   ConnectionEvent,
 } from './events/eventTypes';
+
+// Event name constants for type-safe event handling
+export { ClientEvents } from './events/eventNames';
+export type { ClientEventName } from './events/eventNames';

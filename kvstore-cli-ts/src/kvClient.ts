@@ -3,7 +3,7 @@
  * Provides typed API for KVStore operations
  */
 
-import { RaftClient } from '@zio-raft/typescript-client';
+import { RaftClient, ClientEvents } from '@zio-raft/typescript-client';
 import type { MemberId } from '@zio-raft/typescript-client';
 import {
   encodeSetRequest,
@@ -179,7 +179,7 @@ export class KVClient {
     });
 
     // Handle disconnection
-    this.raftClient.on('disconnected', () => {
+    this.raftClient.on(ClientEvents.DISCONNECTED, () => {
       done = true;
       if (resolveNext) {
         resolveNext({ value: undefined as any, done: true });

@@ -9,49 +9,9 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RaftClient } from '../../src/client';
+import { MockTransport } from '../../src/testing/MockTransport';
+import { RequestId, MemberId } from '../../src/types';
 import type { ServerRequest } from '../../src/protocol/messages';
-import { AsyncQueue } from '../../src/utils/asyncQueue';
-
-// Mock transport that allows us to inject messages
-class MockTransport {
-  public incomingMessages: AsyncQueue<any>;
-  private connected = false;
-  
-  constructor() {
-    this.incomingMessages = new AsyncQueue();
-  }
-  
-  async connect(): Promise<void> {
-    this.connected = true;
-  }
-  
-  async disconnect(): Promise<void> {
-    this.connected = false;
-    this.incomingMessages.close();
-  }
-  
-  async sendMessage(message: any): Promise<void> {
-    // Respond to CreateSession with SessionCreated
-    if (message.type === 'CreateSession') {
-      // Simulate server response
-      setTimeout(() => {
-        this.incomingMessages.offer({
-          type: 'SessionCreated',
-          sessionId: 'test-session-123',
-          nonce: message.nonce,
-        });
-      }, 10);
-    }
-  }
-  
-  // Test helper: inject a ServerRequest message
-  injectServerRequest(request: ServerRequest): void {
-    if (!this.connected) {
-      throw new Error('Cannot inject message - transport not connected');
-    }
-    this.incomingMessages.offer(request);
-  }
-}
 
 describe('Server-Initiated Requests Integration', () => {
   let client: RaftClient;
@@ -61,14 +21,11 @@ describe('Server-Initiated Requests Integration', () => {
     // Create mock transport
     mockTransport = new MockTransport();
     
-    // Create RaftClient
+    // Create RaftClient with injected transport
     client = new RaftClient({
-      clusterMembers: new Map([['node1', 'tcp://localhost:5555']]),
+      clusterMembers: new Map([[MemberId.fromString('node1'), 'tcp://localhost:5555']]),
       capabilities: new Map([['test', '1.0']]),
-    });
-    
-    // Replace transport with mock (hacky but necessary for testing)
-    (client as any).transport = mockTransport;
+    }, mockTransport);
   });
   
   afterEach(async () => {
@@ -90,12 +47,12 @@ describe('Server-Initiated Requests Integration', () => {
     // 3. Inject a ServerRequest message from "server"
     const testRequest: ServerRequest = {
       type: 'ServerRequest',
-      requestId: 'req-001',
+      requestId: RequestId.fromBigInt(1n),
       payload: Buffer.from('test-work-item'),
       createdAt: new Date(),
     };
     
-    mockTransport.injectServerRequest(testRequest);
+    mockTransport.injectMessage(testRequest);
     
     // 4. Wait for handler to be called
     // This will timeout because queue is never populated!
@@ -107,7 +64,7 @@ describe('Server-Initiated Requests Integration', () => {
     
     // 5. Verify handler received the request
     expect(receivedRequests).toHaveLength(1);
-    expect(receivedRequests[0].requestId).toBe('req-001');
+    expect(receivedRequests[0].requestId).toBe(RequestId.fromBigInt(1n));
     expect(receivedRequests[0].payload.toString()).toBe('test-work-item');
   }, 15000); // Increase timeout since we know it will fail
   
@@ -120,23 +77,23 @@ describe('Server-Initiated Requests Integration', () => {
     });
     
     // Inject multiple requests
-    mockTransport.injectServerRequest({
+    mockTransport.injectMessage({
       type: 'ServerRequest',
-      requestId: 'req-001',
+      requestId: RequestId.fromBigInt(1n),
       payload: Buffer.from('work-1'),
       createdAt: new Date(),
     });
     
-    mockTransport.injectServerRequest({
+    mockTransport.injectMessage({
       type: 'ServerRequest',
-      requestId: 'req-002',
+      requestId: RequestId.fromBigInt(2n),
       payload: Buffer.from('work-2'),
       createdAt: new Date(),
     });
     
-    mockTransport.injectServerRequest({
+    mockTransport.injectMessage({
       type: 'ServerRequest',
-      requestId: 'req-003',
+      requestId: RequestId.fromBigInt(3n),
       payload: Buffer.from('work-3'),
       createdAt: new Date(),
     });
@@ -150,9 +107,9 @@ describe('Server-Initiated Requests Integration', () => {
     
     expect(receivedRequests).toHaveLength(3);
     expect(receivedRequests.map(r => r.requestId)).toEqual([
-      'req-001',
-      'req-002',
-      'req-003',
+      RequestId.fromBigInt(1n),
+      RequestId.fromBigInt(2n),
+      RequestId.fromBigInt(3n),
     ]);
   }, 15000);
   
@@ -174,9 +131,9 @@ describe('Server-Initiated Requests Integration', () => {
     
     // Inject multiple requests
     for (let i = 1; i <= 10; i++) {
-      mockTransport.injectServerRequest({
+      mockTransport.injectMessage({
         type: 'ServerRequest',
-        requestId: `req-${i.toString().padStart(3, '0')}`,
+        requestId: RequestId.fromBigInt(BigInt(i)),
         payload: Buffer.from(`work-${i}`),
         createdAt: new Date(),
       });

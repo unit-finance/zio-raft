@@ -39,8 +39,10 @@ export class MockTransport implements ClientTransport {
   
   /**
    * Current connection state
+   * MockTransport starts connected (no real network layer to establish)
+   * Tests can use connect()/disconnect() for state tracking if needed
    */
-  private _connected = false;
+  private _connected = true;
   
   /**
    * Auto-respond to CreateSession with SessionCreated
@@ -74,25 +76,20 @@ export class MockTransport implements ClientTransport {
   
   /**
    * Send message (mock - records and optionally auto-responds)
+   * Note: MockTransport doesn't enforce connection state for testing convenience
    */
   async sendMessage(message: ClientMessage): Promise<void> {
-    if (!this._connected) {
-      throw new Error('MockTransport: Cannot send message - not connected');
-    }
-    
     // Record for assertions
     this.sentMessages.push(message);
     
     // Auto-respond to CreateSession for convenience
     if (this.autoRespondToCreateSession && message.type === 'CreateSession') {
       setTimeout(() => {
-        if (this._connected) {
-          this.incomingMessages.offer({
-            type: 'SessionCreated',
-            sessionId: `mock-session-${Date.now()}`,
-            nonce: message.nonce,
-          });
-        }
+        this.incomingMessages.offer({
+          type: 'SessionCreated',
+          sessionId: `mock-session-${Date.now()}`,
+          nonce: message.nonce,
+        });
       }, this.autoResponseDelay);
     }
   }
@@ -104,11 +101,9 @@ export class MockTransport implements ClientTransport {
   /**
    * Inject a server message into the incoming queue
    * This simulates the server sending a message to the client
+   * Note: MockTransport doesn't enforce connection state for testing convenience
    */
   injectMessage(message: ServerMessage): void {
-    if (!this._connected) {
-      throw new Error('MockTransport: Cannot inject message - not connected');
-    }
     this.incomingMessages.offer(message);
   }
   

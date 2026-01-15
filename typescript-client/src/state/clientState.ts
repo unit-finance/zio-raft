@@ -41,6 +41,9 @@ export interface ConnectingNewSessionState {
   readonly createdAt: Date;
   readonly pendingRequests: PendingRequests;
   readonly pendingQueries: PendingQueries;
+  // Connect action callbacks (to resolve/reject the connect() promise)
+  readonly connectResolve: () => void;
+  readonly connectReject: (err: Error) => void;
 }
 
 /**
@@ -258,7 +261,7 @@ export class DisconnectedStateHandler {
   ): Promise<StateTransitionResult> {
     switch (action.type) {
       case 'Connect':
-        return this.handleConnect(state);
+        return this.handleConnect(state, action);
       
       case 'SubmitCommand':
         // Reject command - not connected
@@ -279,7 +282,7 @@ export class DisconnectedStateHandler {
   /**
    * Handle Connect action: transition to ConnectingNewSession
    */
-  private async handleConnect(state: DisconnectedState): Promise<StateTransitionResult> {
+  private async handleConnect(state: DisconnectedState, action: ConnectAction): Promise<StateTransitionResult> {
     const { config } = state;
     
     // Get first cluster member to try
@@ -307,6 +310,9 @@ export class DisconnectedStateHandler {
       createdAt,
       pendingRequests: new PendingRequests(),
       pendingQueries: new PendingQueries(),
+      // Store connect callbacks to resolve/reject the connect() promise
+      connectResolve: action.resolve,
+      connectReject: action.reject,
     };
     
     // Create CreateSession message to send
@@ -409,6 +415,10 @@ export class ConnectingNewSessionStateHandler {
    */
   private async handleDisconnect(state: ConnectingNewSessionState): Promise<StateTransitionResult> {
     const error = new Error('Client disconnected');
+    
+    // Reject the connect() promise
+    state.connectReject(error);
+    
     state.pendingRequests.dieAll(error);
     state.pendingQueries.dieAll(error);
     
@@ -455,6 +465,9 @@ export class ConnectingNewSessionStateHandler {
       // Nonce mismatch - ignore (old/duplicate message)
       return { newState: state };
     }
+    
+    // Resolve the connect() promise
+    state.connectResolve();
     
     // Transition to Connected state
     const newState: ConnectedState = {

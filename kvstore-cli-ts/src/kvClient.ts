@@ -69,6 +69,9 @@ export class KVClient {
 
   /**
    * Disconnect from the cluster
+   * 
+   * Note: Disconnect errors are logged but not thrown to prevent
+   * cleanup failures from propagating. This is a best-effort operation.
    */
   async disconnect(): Promise<void> {
     if (!this.isConnected) {
@@ -79,7 +82,12 @@ export class KVClient {
       await this.raftClient.disconnect();
       this.isConnected = false;
     } catch (err) {
-      // Swallow disconnect errors
+      // Log disconnect errors for debugging, but don't throw
+      // Rationale: Disconnect is often called in cleanup paths (finally blocks)
+      // and we don't want cleanup failures to mask original errors
+      console.error('Warning: Failed to disconnect from cluster:', err);
+      // Mark as disconnected even if the call failed
+      this.isConnected = false;
     }
   }
 
@@ -162,7 +170,11 @@ export class KVClient {
           queue.push(notification);
         }
       } catch (err) {
-        // Ignore decode errors for now
+        // Log decode errors - malformed notifications should be visible for debugging
+        console.error('Warning: Failed to decode watch notification:', err);
+        console.error('  Payload length:', serverRequest.payload.length);
+        console.error('  First 20 bytes:', serverRequest.payload.subarray(0, 20).toString('hex'));
+        // Don't throw - one bad notification shouldn't break the watch stream
       }
     });
 

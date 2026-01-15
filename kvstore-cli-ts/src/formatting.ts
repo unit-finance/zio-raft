@@ -60,21 +60,37 @@ export function formatNotification(notification: WatchNotification): string {
 /**
  * Get appropriate exit code for error
  */
+/**
+ * Get appropriate exit code for error
+ * 
+ * Exit codes follow Unix conventions:
+ * - 0: Success (not handled here)
+ * - 1: Validation error (bad user input)
+ * - 2: Connection/timeout error (network issues)
+ * - 3: Operational error (server errors, protocol errors, unexpected failures)
+ * - 130: SIGINT (handled by watch command directly)
+ */
 export function getExitCode(error: unknown): number {
+  // Exit 1: User validation errors only (bad input)
   if (error instanceof ValidationError) {
-    return 1; // Validation error
+    return 1;
   }
 
+  // Exit 2: Network-related errors (connection, timeout)
   if (error instanceof OperationError) {
     if (error.reason === 'connection' || error.reason === 'timeout') {
-      return 2; // Connection/timeout error
+      return 2;
     }
-    return 3; // Operational error
+    return 3; // Other operational errors (server_error, protocol)
   }
 
+  // Exit 3: Protocol errors
   if (error instanceof ProtocolError) {
-    return 3; // Protocol error
+    return 3;
   }
 
-  return 1; // Unknown error
+  // Exit 3: Unknown/unexpected errors are operational, not validation
+  // Rationale: Exit 1 is reserved for user input mistakes. Unexpected errors
+  // (bugs, unhandled exceptions, etc.) are operational failures.
+  return 3;
 }

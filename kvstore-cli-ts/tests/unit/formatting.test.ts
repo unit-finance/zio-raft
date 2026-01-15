@@ -183,9 +183,10 @@ describe('Exit Code Mapping', () => {
     expect(getExitCode(error)).toBe(3);
   });
 
-  it('should return 1 for unknown errors', () => {
-    expect(getExitCode(new Error('Unknown'))).toBe(1);
-    expect(getExitCode('string error')).toBe(1);
-    expect(getExitCode(null)).toBe(1);
+  it('should return 3 for unknown errors (operational, not validation)', () => {
+    // Unknown errors are operational failures, not user input errors
+    expect(getExitCode(new Error('Unknown'))).toBe(3);
+    expect(getExitCode('string error')).toBe(3);
+    expect(getExitCode(null)).toBe(3);
   });
 });

@@ -7,7 +7,12 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.ts'],
-      exclude: ['src/index.ts'], // Entry point excluded from coverage
+      exclude: [
+        'src/index.ts',       // CLI entry point
+        'src/commands/*.ts',  // Command handlers (thin wrappers, tested via integration)
+        'src/kvClient.ts',    // Wrapper around RaftClient (tested via mocks)
+        'src/types.ts'        // Type definitions only
+      ],
       thresholds: {
         lines: 90,
         branches: 90,

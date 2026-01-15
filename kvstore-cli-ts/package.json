@@ -30,13 +30,13 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@zio-raft/typescript-client": "file:../typescript-client",
-    "commander": "^11.1.0"
+    "commander": "^13.1.0"
   },
   "devDependencies": {
-    "@types/node": "^18.19.3",
-    "@vitest/coverage-v8": "^1.0.4",
-    "tsx": "^4.7.0",
-    "typescript": "^5.3.3",
-    "vitest": "^1.0.4"
+    "@types/node": "^25.0.8",
+    "@vitest/coverage-v8": "^4.0.17",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.17"
   }
 }

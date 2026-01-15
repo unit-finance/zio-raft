@@ -42,15 +42,14 @@
     "zeromq": "^6.0.0"
   },
   "devDependencies": {
-    "@types/node": "^18.19.3",
+    "@types/node": "^20.19.29",
     "@typescript-eslint/eslint-plugin": "^6.18.0",
     "@typescript-eslint/parser": "^6.18.0",
-    "@vitest/ui": "^1.0.4",
-    "@vitest/coverage-v8": "^1.0.4",
+    "@vitest/coverage-v8": "^4.0.17",
+    "@vitest/ui": "^4.0.17",
     "eslint": "^8.56.0",
-    "prettier": "^3.1.1",
-    "typescript": "^5.3.3",
-    "vitest": "^1.0.4"
+    "prettier": "^3.8.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.17"
   }
 }
-

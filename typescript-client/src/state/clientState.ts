@@ -1,11 +1,12 @@
 // Client state machine types and state handlers
 // Implements idiomatic TypeScript state machine pattern with discriminated unions
 
-import { SessionId, MemberId, Nonce, RequestId } from '../types';
+import { SessionId, MemberId, Nonce, RequestId, CorrelationId } from '../types';
 import { ClientConfig } from '../config';
-import { PendingRequests } from './pendingRequests';
-import { PendingQueries } from './pendingQueries';
+import { PendingRequests, PendingRequestData } from './pendingRequests';
+import { PendingQueries, PendingQueryData } from './pendingQueries';
 import { ServerRequestTracker } from './serverRequestTracker';
+import { CreateSession, ContinueSession, CloseSession, ServerRequestAck, KeepAlive, ClientMessage, ClientRequest, Query } from '../protocol/messages';
 
 // ============================================================================
 // Client State (Discriminated Union)
@@ -58,6 +59,7 @@ export interface ConnectingExistingSessionState {
   readonly currentMemberId: MemberId;
   readonly createdAt: Date;
   readonly serverRequestTracker: ServerRequestTracker;
+  readonly nextRequestId: RequestId;
   readonly pendingRequests: PendingRequests;
   readonly pendingQueries: PendingQueries;
 }
@@ -72,6 +74,7 @@ export interface ConnectedState {
   readonly capabilities: Map<string, string>;
   readonly createdAt: Date;
   readonly serverRequestTracker: ServerRequestTracker;
+  readonly nextRequestId: RequestId;
   readonly pendingRequests: PendingRequests;
   readonly pendingQueries: PendingQueries;
   readonly currentMemberId: MemberId;
@@ -140,6 +143,8 @@ export type ClientAction =
 export interface ConnectAction {
   readonly type: 'Connect';
 }
+
+// TODO (eran): actions here are missing the resolve and reject callbacks - should take a closer look
 
 /**
  * Disconnect action: close session and disconnect
@@ -211,7 +216,7 @@ export type {
  */
 export interface StateTransitionResult {
   readonly newState: ClientState;
-  readonly messagesToSend?: Array<import('../protocol/messages').ClientMessage>;
+  readonly messagesToSend?: Array<ClientMessage>;
   readonly eventsToEmit?: Array<ClientEventData>;
 }
 
@@ -283,6 +288,7 @@ export class DisconnectedStateHandler {
    * Handle Connect action: transition to ConnectingNewSession
    */
   private async handleConnect(state: DisconnectedState, action: ConnectAction): Promise<StateTransitionResult> {
+    
     const { config } = state;
     
     // Get first cluster member to try
@@ -300,6 +306,7 @@ export class DisconnectedStateHandler {
     const nonce = Nonce.generate();
     const createdAt = new Date();
     
+    
     // Create new state
     const newState: ConnectingNewSessionState = {
       state: 'ConnectingNewSession',
@@ -310,13 +317,17 @@ export class DisconnectedStateHandler {
       createdAt,
       pendingRequests: new PendingRequests(),
       pendingQueries: new PendingQueries(),
+
+      // TODO (eran): "as any" is a code smell - need to go over the code and find where it is used, probably because the parent interface is not defined correctly
+      
       // Store connect callbacks to resolve/reject the connect() promise
-      connectResolve: action.resolve,
-      connectReject: action.reject,
+      connectResolve: (action as any).resolve, 
+      connectReject: (action as any).reject,
     };
     
+    
     // Create CreateSession message to send
-    const createSessionMsg: import('../protocol/messages').CreateSession = {
+    const createSessionMsg: CreateSession = {
       type: 'CreateSession',
       capabilities: config.capabilities,
       nonce,
@@ -419,8 +430,8 @@ export class ConnectingNewSessionStateHandler {
     // Reject the connect() promise
     state.connectReject(error);
     
-    state.pendingRequests.dieAll(error);
-    state.pendingQueries.dieAll(error);
+    state.pendingRequests.failAll(error);
+    state.pendingQueries.failAll(error);
     
     const newState: DisconnectedState = {
       state: 'Disconnected',
@@ -460,6 +471,7 @@ export class ConnectingNewSessionStateHandler {
     state: ConnectingNewSessionState,
     message: SessionCreated
   ): Promise<StateTransitionResult> {
+    
     // Verify nonce matches
     if (Nonce.unwrap(message.nonce) !== Nonce.unwrap(state.nonce)) {
       // Nonce mismatch - ignore (old/duplicate message)
@@ -477,6 +489,7 @@ export class ConnectingNewSessionStateHandler {
       capabilities: state.capabilities,
       createdAt: state.createdAt,
       serverRequestTracker: new ServerRequestTracker(),
+      nextRequestId: RequestId.zero,
       pendingRequests: state.pendingRequests,
       pendingQueries: state.pendingQueries,
       currentMemberId: state.currentMemberId,
@@ -546,7 +559,7 @@ export class ConnectingNewSessionStateHandler {
           createdAt: new Date(),
         };
         
-        const createSessionMsg: import('../protocol/messages').CreateSession = {
+        const createSessionMsg: CreateSession = {
           type: 'CreateSession',
           capabilities: state.capabilities,
           nonce,
@@ -573,8 +586,8 @@ export class ConnectingNewSessionStateHandler {
     state: ConnectingNewSessionState
   ): Promise<StateTransitionResult> {
     const error = new Error('Invalid capabilities');
-    state.pendingRequests.dieAll(error);
-    state.pendingQueries.dieAll(error);
+    state.pendingRequests.failAll(error);
+    state.pendingQueries.failAll(error);
     
     const newState: DisconnectedState = {
       state: 'Disconnected',
@@ -600,8 +613,8 @@ export class ConnectingNewSessionStateHandler {
     if (currentIndex === -1 || currentIndex === members.length - 1) {
       // No more members to try - fail
       const error = new Error('Failed to connect to any cluster member');
-      state.pendingRequests.dieAll(error);
-      state.pendingQueries.dieAll(error);
+      state.pendingRequests.failAll(error);
+      state.pendingQueries.failAll(error);
       
       const newState: DisconnectedState = {
         state: 'Disconnected',
@@ -634,7 +647,7 @@ export class ConnectingNewSessionStateHandler {
       createdAt: new Date(),
     };
     
-    const createSessionMsg: import('../protocol/messages').CreateSession = {
+    const createSessionMsg: CreateSession = {
       type: 'CreateSession',
       capabilities: state.capabilities,
       nonce,
@@ -728,8 +741,8 @@ export class ConnectingExistingSessionStateHandler {
     state: ConnectingExistingSessionState
   ): Promise<StateTransitionResult> {
     const error = new Error('Client disconnected');
-    state.pendingRequests.dieAll(error);
-    state.pendingQueries.dieAll(error);
+    state.pendingRequests.failAll(error);
+    state.pendingQueries.failAll(error);
     
     const newState: DisconnectedState = {
       state: 'Disconnected',
@@ -785,6 +798,7 @@ export class ConnectingExistingSessionStateHandler {
       capabilities: state.capabilities,
       createdAt: state.createdAt,
       serverRequestTracker: state.serverRequestTracker,
+      nextRequestId: state.nextRequestId,
       pendingRequests: state.pendingRequests,
       pendingQueries: state.pendingQueries,
       currentMemberId: state.currentMemberId,
@@ -841,8 +855,8 @@ export class ConnectingExistingSessionStateHandler {
     state: ConnectingExistingSessionState
   ): Promise<StateTransitionResult> {
     const error = new Error('Session expired');
-    state.pendingRequests.dieAll(error);
-    state.pendingQueries.dieAll(error);
+    state.pendingRequests.failAll(error);
+    state.pendingQueries.failAll(error);
     
     const newState: DisconnectedState = {
       state: 'Disconnected',
@@ -878,7 +892,7 @@ export class ConnectingExistingSessionStateHandler {
           createdAt: new Date(),
         };
         
-        const continueSessionMsg: import('../protocol/messages').ContinueSession = {
+        const continueSessionMsg: ContinueSession = {
           type: 'ContinueSession',
           sessionId: state.sessionId,
           nonce,
@@ -905,8 +919,8 @@ export class ConnectingExistingSessionStateHandler {
     state: ConnectingExistingSessionState
   ): Promise<StateTransitionResult> {
     const error = new Error('Invalid capabilities');
-    state.pendingRequests.dieAll(error);
-    state.pendingQueries.dieAll(error);
+    state.pendingRequests.failAll(error);
+    state.pendingQueries.failAll(error);
     
     const newState: DisconnectedState = {
       state: 'Disconnected',
@@ -936,8 +950,8 @@ export class ConnectingExistingSessionStateHandler {
     if (currentIndex === -1 || currentIndex === members.length - 1) {
       // No more members to try - fail
       const error = new Error('Failed to reconnect to any cluster member');
-      state.pendingRequests.dieAll(error);
-      state.pendingQueries.dieAll(error);
+      state.pendingRequests.failAll(error);
+      state.pendingQueries.failAll(error);
       
       const newState: DisconnectedState = {
         state: 'Disconnected',
@@ -970,7 +984,7 @@ export class ConnectingExistingSessionStateHandler {
       createdAt: new Date(),
     };
     
-    const continueSessionMsg: import('../protocol/messages').ContinueSession = {
+    const continueSessionMsg: ContinueSession = {
       type: 'ContinueSession',
       sessionId: state.sessionId,
       nonce,
@@ -1038,14 +1052,73 @@ export class ConnectedStateHandler {
         // Already connected, no-op
         return { newState: state };
       
-      case 'SubmitCommand':
-        // Commands are queued by RaftClient before calling state machine
-        // State machine doesn't directly handle queuing
-        return { newState: state };
+      case 'SubmitCommand': {
+        // Use current request ID and compute next one
+        const requestId = state.nextRequestId;
+        const nextId = RequestId.next(requestId);
+        const lowestPendingRequestId = state.pendingRequests.lowestPendingRequestIdOr(requestId);
+        const now = new Date();
+        
+        // Create ClientRequest protocol message
+        const clientRequest: ClientRequest = {
+          type: 'ClientRequest',
+          requestId,
+          lowestPendingRequestId,
+          payload: action.payload,
+          createdAt: now,
+        };
+        
+        // Track pending request with callbacks
+        const pendingData: PendingRequestData = {
+          payload: action.payload,
+          resolve: action.resolve,
+          reject: action.reject,
+          createdAt: now,
+          lastSentAt: now,
+        };
+        
+        state.pendingRequests.add(requestId, pendingData);
+        
+        // Return updated state with new nextRequestId and message to send
+        return {
+          newState: {
+            ...state,
+            nextRequestId: nextId,
+          },
+          messagesToSend: [clientRequest],
+        };
+      }
       
-      case 'SubmitQuery':
-        // Queries are queued by RaftClient before calling state machine
-        return { newState: state };
+      case 'SubmitQuery': {
+        // Generate correlation ID for query
+        const correlationId = CorrelationId.generate();
+        const now = new Date();
+        
+        // Create Query protocol message
+        const query: Query = {
+          type: 'Query',
+          correlationId,
+          payload: action.payload,
+          createdAt: now,
+        };
+        
+        // Track pending query with callbacks
+        const pendingData: PendingQueryData = {
+          payload: action.payload,
+          resolve: action.resolve,
+          reject: action.reject,
+          createdAt: now,
+          lastSentAt: now,
+        };
+        
+        state.pendingQueries.add(correlationId, pendingData);
+        
+        // Return message to send
+        return {
+          newState: state,
+          messagesToSend: [query],
+        };
+      }
       
       case 'Disconnect':
         return this.handleDisconnect(state);
@@ -1056,15 +1129,15 @@ export class ConnectedStateHandler {
    * Handle Disconnect: close session cleanly
    */
   private async handleDisconnect(state: ConnectedState): Promise<StateTransitionResult> {
-    const closeSessionMsg: import('../protocol/messages').CloseSession = {
+    const closeSessionMsg: CloseSession = {
       type: 'CloseSession',
       reason: 'ClientShutdown',
     };
     
     // Fail all pending requests/queries
     const error = new Error('Client disconnected');
-    state.pendingRequests.dieAll(error);
-    state.pendingQueries.dieAll(error);
+    state.pendingRequests.failAll(error);
+    state.pendingQueries.failAll(error);
     
     const newState: DisconnectedState = {
       state: 'Disconnected',
@@ -1147,13 +1220,13 @@ export class ConnectedStateHandler {
     switch (result.type) {
       case 'Process': {
         // New request - acknowledge and emit event
-        const newTracker = state.serverRequestTracker.acknowledge(message.requestId);
+        const newTracker = state.serverRequestTracker.withLastAcknowledged(message.requestId);
         const newState: ConnectedState = {
           ...state,
           serverRequestTracker: newTracker,
         };
         
-        const ackMsg: import('../protocol/messages').ServerRequestAck = {
+        const ackMsg: ServerRequestAck = {
           type: 'ServerRequestAck',
           requestId: message.requestId,
         };
@@ -1167,7 +1240,7 @@ export class ConnectedStateHandler {
       
       case 'OldRequest': {
         // Duplicate request - re-acknowledge without processing
-        const ackMsg: import('../protocol/messages').ServerRequestAck = {
+        const ackMsg: ServerRequestAck = {
           type: 'ServerRequestAck',
           requestId: message.requestId,
         };
@@ -1222,8 +1295,8 @@ export class ConnectedStateHandler {
    */
   private async handleSessionExpired(state: ConnectedState): Promise<StateTransitionResult> {
     const error = new Error('Session expired');
-    state.pendingRequests.dieAll(error);
-    state.pendingQueries.dieAll(error);
+    state.pendingRequests.failAll(error);
+    state.pendingQueries.failAll(error);
     
     const newState: DisconnectedState = {
       state: 'Disconnected',
@@ -1284,11 +1357,12 @@ export class ConnectedStateHandler {
       currentMemberId: targetMemberId,
       createdAt: new Date(),
       serverRequestTracker: state.serverRequestTracker,
+      nextRequestId: state.nextRequestId,
       pendingRequests: state.pendingRequests,
       pendingQueries: state.pendingQueries,
     };
     
-    const continueSessionMsg: import('../protocol/messages').ContinueSession = {
+    const continueSessionMsg: ContinueSession = {
       type: 'ContinueSession',
       sessionId: state.sessionId,
       nonce,
@@ -1312,8 +1386,8 @@ export class ConnectedStateHandler {
     reason: SessionCloseReason
   ): Promise<StateTransitionResult> {
     const error = new Error(`Session closed: ${reason}`);
-    state.pendingRequests.dieAll(error);
-    state.pendingQueries.dieAll(error);
+    state.pendingRequests.failAll(error);
+    state.pendingQueries.failAll(error);
     
     const newState: DisconnectedState = {
       state: 'Disconnected',
@@ -1330,7 +1404,7 @@ export class ConnectedStateHandler {
    * Handle KeepAliveTick: send keep-alive message
    */
   private async handleKeepAliveTick(state: ConnectedState): Promise<StateTransitionResult> {
-    const keepAliveMsg: import('../protocol/messages').KeepAlive = {
+    const keepAliveMsg: KeepAlive = {
       type: 'KeepAlive',
       timestamp: new Date(),
     };

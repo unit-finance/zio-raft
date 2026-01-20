@@ -91,14 +91,16 @@ export function decodeGetResult(buffer: Buffer): string | null {
   
   const hasValue = buffer[0];
   
-  if (hasValue === 0) {
-    return null; // None
+  if (hasValue === 0x00) {
+    return null; // None - scodec bool encodes false as 0x00
   }
   
-  if (hasValue === 1) {
+  if (hasValue === 0xFF) {
     const { value } = decodeUtf8_32(buffer, 1);
-    return value;
+    return value; // Some - scodec bool encodes true as 0xFF
   }
+  
+  throw new ProtocolError(`Invalid hasValue byte: ${hasValue} (expected 0x00 or 0xFF)`);
   
   throw new ProtocolError(`Invalid hasValue byte: ${hasValue} (expected 0 or 1)`);
 }

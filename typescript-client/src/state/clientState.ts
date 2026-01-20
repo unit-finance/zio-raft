@@ -7,6 +7,7 @@ import { PendingRequests, PendingRequestData } from './pendingRequests';
 import { PendingQueries, PendingQueryData } from './pendingQueries';
 import { ServerRequestTracker } from './serverRequestTracker';
 import { CreateSession, ContinueSession, CloseSession, ServerRequestAck, KeepAlive, ClientMessage, ClientRequest, Query } from '../protocol/messages';
+import { debugLog } from '../utils/debug';
 
 // ============================================================================
 // Client State (Discriminated Union)
@@ -1091,6 +1092,7 @@ export class ConnectedStateHandler {
       case 'SubmitQuery': {
         // Generate correlation ID for query
         const correlationId = CorrelationId.generate();
+        debugLog('SubmitQuery - generated correlationId:', correlationId);
         const now = new Date();
         
         // Create Query protocol message
@@ -1111,6 +1113,7 @@ export class ConnectedStateHandler {
         };
         
         state.pendingQueries.add(correlationId, pendingData);
+        debugLog('SubmitQuery - added to pending queries');
         
         // Return message to send
         return {
@@ -1157,6 +1160,8 @@ export class ConnectedStateHandler {
     state: ConnectedState,
     message: ServerMessage
   ): Promise<StateTransitionResult> {
+    debugLog('handleServerMessage - message.type:', message.type);
+    
     switch (message.type) {
       case 'ClientResponse':
         return this.handleClientResponse(state, message);
@@ -1179,6 +1184,7 @@ export class ConnectedStateHandler {
       
       default:
         // Ignore other message types (e.g., SessionCreated, SessionRejected)
+        debugLog('handleServerMessage - UNHANDLED message type in Connected state:', message.type);
         return { newState: state };
     }
   }
@@ -1202,8 +1208,12 @@ export class ConnectedStateHandler {
     state: ConnectedState,
     message: QueryResponse
   ): Promise<StateTransitionResult> {
+    debugLog('handleQueryResponse - correlationId:', message.correlationId, 'result size:', message.result.length);
+    
     // Complete the pending query
-    state.pendingQueries.complete(message.correlationId, message.result);
+    const completed = state.pendingQueries.complete(message.correlationId, message.result);
+    debugLog('handleQueryResponse - completed:', completed);
+    
     return { newState: state };
   }
 

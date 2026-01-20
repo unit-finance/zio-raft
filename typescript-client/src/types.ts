@@ -18,6 +18,7 @@ export const SessionId = {
 
 /**
  * Request identifier for commands (bigint-based, monotonically increasing)
+ * TODO (eran): Evaluate if branded type adds value for numeric IDs - unwrap() ceremony vs compile-time safety
  */
 export type RequestId = bigint & { readonly __brand: 'RequestId' };
 
@@ -45,6 +46,7 @@ export const MemberId = {
 
 /**
  * Nonce for request/response correlation (bigint-based, non-zero)
+ * TODO (eran): Evaluate if branded type adds value for numeric IDs - unwrap() ceremony vs compile-time safety
  */
 export type Nonce = bigint & { readonly __brand: 'Nonce' };
 

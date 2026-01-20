@@ -36,6 +36,7 @@ describe('Client Lifecycle Integration', () => {
       capabilities: new Map([['version', '1.0.0']]),
       connectionTimeout: 5000,
       requestTimeout: 10000,
+      keepAliveInterval: 50, // Short interval for fast test cleanup
     }, mockTransport);
   });
 

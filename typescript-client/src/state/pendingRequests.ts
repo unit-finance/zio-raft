@@ -119,7 +119,7 @@ export class PendingRequests {
   /**
    * Fail all pending requests (used on session termination)
    */
-  dieAll(error: Error): void {
+  failAll(error: Error): void {
     for (const [_requestId, data] of this.requests) {
       data.reject(error);
     }

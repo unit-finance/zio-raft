@@ -33,7 +33,7 @@
     "commander": "^13.1.0"
   },
   "devDependencies": {
-    "@types/node": "^25.0.8",
+    "@types/node": "^25.0.9",
     "@vitest/coverage-v8": "^4.0.17",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",

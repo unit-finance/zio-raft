@@ -117,7 +117,9 @@ object RaftServer:
 
       server = new RaftServer(transport, validatedConfig, actionQueue, raftActionsOut, stateRef)
 
-      _ <- startMainLoop(transport, validatedConfig, actionQueue, raftActionsOut, stateRef).forkScoped
+      _ <- startMainLoop(transport, validatedConfig, actionQueue, raftActionsOut, stateRef)
+        .tapError(error => ZIO.logError(s"Error in startMainLoop: $error"))
+        .forkScoped
 
       // Register finalizer to cleanly shutdown all sessions on scope exit
       _ <- ZIO.addFinalizer(
@@ -291,7 +293,8 @@ object RaftServer:
       ): UIO[ServerState] =
         event match
           case StreamEvent.IncomingClientMessage(routingId, message) =>
-            handleClientMessage(routingId, message, transport, raftActionsOut, config)
+            ZIO.logDebug(s"Received client message: $message at routingId: $routingId") *>
+              handleClientMessage(routingId, message, transport, raftActionsOut, config)
 
           case StreamEvent.Action(ServerAction.RejectSession(sessionId, reason)) =>
             sessions.rejectPending(sessionId) match

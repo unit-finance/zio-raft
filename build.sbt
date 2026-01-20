@@ -4,6 +4,7 @@ lazy val zioPreludeVersion = "1.0.0-RC41"
 
 lazy val zio1Version = "1.0.18"
 
+// TODO (Eran): update to the latest and perform the manual tests
 lazy val jeromqVersion = "0.5.3"
 
 lazy val scala3Version = "3.3.7"
@@ -325,8 +326,11 @@ lazy val kvstoreProtocol = project
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zio2Version,
       "org.scodec" %% "scodec-core" % "2.3.2",
-      "org.scodec" %% "scodec-bits" % "1.1.37"
-    )
+      "org.scodec" %% "scodec-bits" % "1.1.37",
+      "dev.zio" %% "zio-test" % zio2Version % Test,
+      "dev.zio" %% "zio-test-sbt" % zio2Version % Test
+    ),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
 
 lazy val kvstoreCli = project

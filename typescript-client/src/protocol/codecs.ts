@@ -32,7 +32,22 @@ import {
 // ============================================================================
 
 /**
- * Encode a string with uint16 length prefix
+ * Encode a string with uint8 length prefix (for SessionId)
+ * Matches Scala's variableSizeBytes(uint8, utf8)
+ */
+export function encodeString8(str: string): Buffer {
+  const utf8 = Buffer.from(str, 'utf8');
+  if (utf8.length > 255) {
+    throw new Error(`String too long for uint8 length prefix: ${utf8.length} bytes`);
+  }
+  const length = Buffer.allocUnsafe(1);
+  length.writeUInt8(utf8.length, 0);
+  return Buffer.concat([length, utf8]);
+}
+
+/**
+ * Encode a string with uint16 length prefix (for MemberId, CorrelationId)
+ * Matches Scala's variableSizeBytes(uint16, utf8)
  */
 export function encodeString(str: string): Buffer {
   const utf8 = Buffer.from(str, 'utf8');
@@ -95,10 +110,11 @@ export function encodeRequestId(id: RequestId): Buffer {
 }
 
 /**
- * Encode a SessionId as uint16 length + UTF-8 bytes
+ * Encode a SessionId as uint8 length + UTF-8 bytes
+ * Matches Scala's variableSizeBytes(uint8, utf8)
  */
 export function encodeSessionId(id: SessionId): Buffer {
-  return encodeString(SessionId.unwrap(id));
+  return encodeString8(SessionId.unwrap(id));
 }
 
 /**
@@ -125,7 +141,126 @@ export interface DecodeResult<T> {
 }
 
 /**
- * Decode a string with uint16 length prefix
+ * Decode optional field with bit-level boolean (scodec's optional(bool, codec))
+ * 
+ * Scala's scodec encodes optional(bool, codec) as:
+ * - 1 bit for presence (0 = None, 1 = Some)  
+ * - If present, remaining bits contain the value
+ * 
+ * Example: optional(bool, variableSizeBytes(uint16, utf8)) for "node-1"
+ * - Bit 0: 1 (present)
+ * - Bits 1-16: 0x0006 (length = 6)
+ * - Next 6 bytes: "node-1"
+ * 
+ * Hex: 80 03 37 37 b2 32 96 98 80
+ * - 0x80 = 10000000 (bit 0 = 1 for Some, bits 1-7 = 0000000)
+ * - 0x03 = 00000011 (bits 8-15, combined with bits 1-7 gives 0x0003... wait, that's wrong)
+ * 
+ * Actually: When bit-packed, after the 1 bit for Some, the next 16 bits are the uint16:
+ * - Byte 0: 10000000 (bit 0 = Some)
+ * - Byte 0 (bits 1-7) + Byte 1 (bits 0-7) + Byte 2 (bit 0) = 16 bits for length
+ * 
+ * Let me recalculate:
+ * Hex: 80 03 37 37 b2 32 96 98 80
+ * Binary:
+ * 10000000 00000011 00110111 00110111 10110010 00110010 10010110 10011000 10000000
+ * ^--1 bit for Some
+ *  ^^^^^^^----7 bits (part of uint16 length) 
+ *         ^^^^^^^^----8 bits (rest of uint16 length)
+ *                ^----1 bit (last bit of uint16)
+ * 
+ * This is too complex. Let me use a simpler approach: read byte-by-byte and reconstruct.
+ */
+/**
+ * Decode optional MemberId with bit-level boolean (scodec's optional(bool, memberIdCodec))
+ * 
+ * Scala's scodec encodes optional(bool, variableSizeBytes(uint16, utf8)) as:
+ * - 1 bit for presence (0 = None, 1 = Some)  
+ * - If present: uint16 length (16 bits) + UTF-8 string bytes
+ * 
+ * Example: MemberId("node-1")
+ * Hex: 80 03 37 37 b2 32 96 98 80
+ * Binary structure:
+ *   Byte 0: [1][0000000]  ← presence=1, first 7 bits of uint16
+ *   Byte 1: [00000011]    ← bits 7-14 of uint16
+ *   Byte 2: [0][0110111]  ← bit 15 of uint16, first 7 bits of 'n'
+ *   ... (6 string bytes, each straddling 2 buffer bytes)
+ * 
+ * Implementation Strategy:
+ * We use direct bit-math rather than buffer reconstruction for efficiency:
+ * - Alternative approach: Shift entire buffer left by 1 bit, then reuse decodeMemberId()
+ * - Problem: Requires allocating new buffer and shifting ALL remaining bytes
+ * - This approach: Only read the exact bytes we need (2-3 for uint16, length for string)
+ * - Trade-off: Duplicates uint16+UTF-8 decoding logic, but significantly more efficient
+ */
+function decodeOptionalMemberId(
+  buffer: Buffer,
+  offset: number
+): DecodeResult<MemberId | undefined> {
+  const firstByte = buffer.readUInt8(offset);
+  
+  // Check MSB (bit 0) for presence
+  const hasValue = (firstByte & 0x80) !== 0;
+  
+  if (!hasValue) {
+    // None case: bit is 0, value is absent
+    return {
+      value: undefined,
+      newOffset: offset + 1
+    };
+  }
+  
+  // Some case: read uint16 starting at bit 1
+  // Extract uint16 from bits 1-16 (spans bytes 0-2)
+  const byte0 = firstByte & 0x7F;           // bits 1-7 of uint16
+  const byte1 = buffer.readUInt8(offset + 1); // bits 8-15 of uint16
+  const byte2 = buffer.readUInt8(offset + 2); // bit 16 of uint16 (MSB)
+  
+  // Reconstruct uint16 from bit-shifted pieces
+  const length = (byte0 << 9) | (byte1 << 1) | (byte2 >> 7);
+  
+  // Read string bytes starting at bit 17
+  // Each character byte straddles two buffer bytes due to 1-bit shift
+  const stringBytes = Buffer.allocUnsafe(length);
+  let bitOffset = 17;
+  
+  for (let i = 0; i < length; i++) {
+    const byteIndex = Math.floor(bitOffset / 8);
+    const bitInByte = bitOffset % 8;
+    
+    const currentByte = buffer.readUInt8(offset + byteIndex);
+    const nextByte = buffer.readUInt8(offset + byteIndex + 1);
+    
+    // Extract 8 bits starting at bitOffset
+    stringBytes[i] = (currentByte << bitInByte) | (nextByte >> (8 - bitInByte));
+    bitOffset += 8;
+  }
+  
+  const memberId = MemberId.fromString(stringBytes.toString('utf8'));
+  
+  // Calculate bytes consumed: 1 bit + 16 bits + (length * 8) bits
+  const totalBits = 1 + 16 + (length * 8);
+  const bytesConsumed = Math.ceil(totalBits / 8);
+  
+  return {
+    value: memberId,
+    newOffset: offset + bytesConsumed
+  };
+}
+
+/**
+ * Decode a string with uint8 length prefix (for SessionId)
+ * Matches Scala's variableSizeBytes(uint8, utf8)
+ */
+export function decodeString8(buffer: Buffer, offset: number): DecodeResult<string> {
+  const length = buffer.readUInt8(offset);
+  const value = buffer.toString('utf8', offset + 1, offset + 1 + length);
+  return { value, newOffset: offset + 1 + length };
+}
+
+/**
+ * Decode a string with uint16 length prefix (for MemberId, CorrelationId)
+ * Matches Scala's variableSizeBytes(uint16, utf8)
  */
 export function decodeString(buffer: Buffer, offset: number): DecodeResult<string> {
   const length = buffer.readUInt16BE(offset);
@@ -191,10 +326,11 @@ export function decodeRequestId(buffer: Buffer, offset: number): DecodeResult<Re
 }
 
 /**
- * Decode a SessionId from uint16 length + UTF-8 bytes
+ * Decode a SessionId from uint8 length + UTF-8 bytes
+ * Matches Scala's variableSizeBytes(uint8, utf8)
  */
 export function decodeSessionId(buffer: Buffer, offset: number): DecodeResult<SessionId> {
-  const result = decodeString(buffer, offset);
+  const result = decodeString8(buffer, offset);
   return { value: SessionId.fromString(result.value), newOffset: result.newOffset };
 }
 
@@ -481,22 +617,14 @@ export function decodeServerMessage(buffer: Buffer): ServerMessage {
       const nonceResult = decodeNonce(buffer, offset);
       offset = nonceResult.newOffset;
       
-      // Check if leaderId is present (optional field)
-      let leaderId: MemberId | undefined;
-      if (offset < buffer.length) {
-        const hasLeader = buffer.readUInt8(offset);
-        offset += 1;
-        if (hasLeader === 1) {
-          const leaderIdResult = decodeMemberId(buffer, offset);
-          leaderId = leaderIdResult.value;
-        }
-      }
+      // Decode optional leaderId with bit-level boolean (scodec's optional(bool, memberIdCodec))
+      const leaderIdResult = decodeOptionalMemberId(buffer, offset);
       
       return {
         type: 'SessionRejected',
         reason: reasonResult.value,
         nonce: nonceResult.value,
-        leaderId,
+        leaderId: leaderIdResult.value,
       };
     }
     
@@ -504,21 +632,13 @@ export function decodeServerMessage(buffer: Buffer): ServerMessage {
       const reasonResult = decodeSessionCloseReason(buffer, offset);
       offset = reasonResult.newOffset;
       
-      // Check if leaderId is present (optional field)
-      let leaderId: MemberId | undefined;
-      if (offset < buffer.length) {
-        const hasLeader = buffer.readUInt8(offset);
-        offset += 1;
-        if (hasLeader === 1) {
-          const leaderIdResult = decodeMemberId(buffer, offset);
-          leaderId = leaderIdResult.value;
-        }
-      }
+      // Decode optional leaderId with bit-level boolean (scodec's optional(bool, memberIdCodec))
+      const leaderIdResult = decodeOptionalMemberId(buffer, offset);
       
       return {
         type: 'SessionClosed',
         reason: reasonResult.value,
-        leaderId,
+        leaderId: leaderIdResult.value,
       };
     }
     

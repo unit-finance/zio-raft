@@ -2,7 +2,7 @@
 // Uses discriminated unions for type-safe event handling
 
 import { MemberId, RequestId, CorrelationId, SessionId } from '../types';
-import type { ServerRequest } from '../protocol/messages';
+import type { ServerRequest, ServerMessage, ClientMessage } from '../protocol/messages';
 import type { ClientState } from '../state/clientState';
 
 /**
@@ -105,7 +105,7 @@ export interface ConnectionFailureEvent {
  */
 export interface MessageReceivedEvent {
   readonly type: 'messageReceived';
-  readonly message: import('../protocol/messages').ServerMessage;
+  readonly message: ServerMessage;
   readonly timestamp: Date;
 }
 
@@ -115,7 +115,7 @@ export interface MessageReceivedEvent {
  */
 export interface MessageSentEvent {
   readonly type: 'messageSent';
-  readonly message: import('../protocol/messages').ClientMessage;
+  readonly message: ClientMessage;
   readonly timestamp: Date;
 }
 
@@ -189,13 +189,13 @@ export const EventFactory = {
     timestamp: new Date(),
   }),
 
-  messageReceived: (message: import('../protocol/messages').ServerMessage): MessageReceivedEvent => ({
+  messageReceived: (message: ServerMessage): MessageReceivedEvent => ({
     type: 'messageReceived',
     message,
     timestamp: new Date(),
   }),
 
-  messageSent: (message: import('../protocol/messages').ClientMessage): MessageSentEvent => ({
+  messageSent: (message: ClientMessage): MessageSentEvent => ({
     type: 'messageSent',
     message,
     timestamp: new Date(),

@@ -24,7 +24,9 @@
 import { AsyncQueue } from '../utils/asyncQueue';
 import type { ClientTransport } from '../transport/transport';
 import type { ClientMessage, ServerMessage } from '../protocol/messages';
+import { SessionId } from '../types';
 
+// TODO (Eran): I don't like MockTransport, implement E2E tests and remove it
 export class MockTransport implements ClientTransport {
   /**
    * Incoming messages queue - messages flow to RaftClient from here
@@ -62,7 +64,7 @@ export class MockTransport implements ClientTransport {
   /**
    * Connect (mock - just sets flag)
    */
-  async connect(address: string): Promise<void> {
+  async connect(_address: string): Promise<void> {
     this._connected = true;
   }
   
@@ -87,7 +89,7 @@ export class MockTransport implements ClientTransport {
       setTimeout(() => {
         this.incomingMessages.offer({
           type: 'SessionCreated',
-          sessionId: `mock-session-${Date.now()}`,
+          sessionId: SessionId.fromString(`mock-session-${Date.now()}`),
           nonce: message.nonce,
         });
       }, this.autoResponseDelay);

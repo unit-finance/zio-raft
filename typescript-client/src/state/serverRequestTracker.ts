@@ -40,12 +40,10 @@ export class ServerRequestTracker {
   }
 
   /**
-   * Acknowledge a request ID (update last acknowledged)
-   * Returns a new ServerRequestTracker with updated state
+   * Create a copy with a new last acknowledged ID (immutable update)
    */
-  acknowledge(requestId: RequestId): ServerRequestTracker {
-    const tracker = new ServerRequestTracker(requestId);
-    return tracker;
+  withLastAcknowledged(requestId: RequestId): ServerRequestTracker {
+    return new ServerRequestTracker(requestId);
   }
 
   /**
@@ -53,13 +51,6 @@ export class ServerRequestTracker {
    */
   getLastAcknowledgedRequestId(): RequestId {
     return this.lastAcknowledgedRequestId;
-  }
-
-  /**
-   * Create a copy with a new last acknowledged ID (immutable update)
-   */
-  withLastAcknowledged(requestId: RequestId): ServerRequestTracker {
-    return new ServerRequestTracker(requestId);
   }
 }
 

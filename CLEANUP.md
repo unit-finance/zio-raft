@@ -3,11 +3,16 @@
 This document tracks temporary files, debug code, and other artifacts that should be removed once debugging is complete.
 
 ## Status: IN PROGRESS
-Last updated: 2026-01-20 18:45
+Last updated: 2026-01-20 19:05
 
 ### Latest Updates:
+- ✅ COMPLETED: Extracted all debug logs to centralized utility with switch (commit 83e2851)
+  - Created `typescript-client/src/utils/debug.ts` with `debugLog()` function
+  - Replaced ~67 debug log statements across 3 files
+  - Default: OFF (clean production output)
+  - Can be easily enabled by setting `DEBUG_ENABLED = true`
 - Added missing test file: `test-handshake-fix.js`
-- Added Section 4: Debug logging cleanup needed in `client.ts` (~30+ log statements)
+- Added Section 4: Debug logging cleanup needed in `client.ts` (~30+ log statements) [NOW COMPLETE]
 - Added Section 5: Server log files need to be added to `.gitignore`
 - Added Section 9: Pending reconnection test from implementation plan
 - Updated "What We Fixed" to reflect completed command submission implementation
@@ -41,11 +46,15 @@ rm LIBZMQ_JEROMQ_INCOMPATIBILITY.md
 
 ---
 
-## 3. Debug Logging in zmqTransport.ts (CLEAN UP)
+## 3. Debug Logging in zmqTransport.ts (✅ COMPLETED)
+
+**Status**: COMPLETED in commit 83e2851
 
 File: `typescript-client/src/transport/zmqTransport.ts`
 
-Remove excessive debug logging added during investigation:
+~~Remove excessive debug logging added during investigation:~~
+
+**Solution**: All debug logs extracted to centralized `debugLog()` utility in `typescript-client/src/utils/debug.ts`
 
 ### Constructor debug logs (lines ~46-51):
 ```typescript
@@ -106,20 +115,15 @@ this.socket.events.on('end', () => {
 
 ---
 
-## 4. Debug Logging in client.ts (CLEAN UP)
+## 4. Debug Logging in client.ts (✅ COMPLETED)
+
+**Status**: COMPLETED in commit 83e2851
 
 File: `typescript-client/src/client.ts`
 
-Remove debug logging added during investigation:
+~~Remove debug logging added during investigation.~~
 
-- [ ] Line ~164: `console.log('[DEBUG] RaftClient.connect() called, currentState:', this.currentState.state);`
-- [ ] Line ~168: `console.log('[DEBUG] Already connected/connecting, returning early');`
-- [ ] Line ~174: `console.log('[DEBUG] Starting event loop...');`
-- [ ] Line ~179: `console.log('[DEBUG] Enqueuing Connect action to action queue');`
-
-Plus many more debug logs in the `runEventLoop()` method that were useful for debugging but should be removed for production.
-
-**Total**: ~30+ debug log statements in client.ts
+**Solution**: All ~31 debug log statements converted to `debugLog()` calls (default: OFF)
 
 ---
 

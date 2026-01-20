@@ -500,6 +500,14 @@ export class ConnectingNewSessionStateHandler {
     state.pendingRequests.resendAll(now);
     state.pendingQueries.resendAll(now);
     
+    // TODO (eran): POTENTIAL BUG - Incomplete resend logic. This comment says the client will
+    // handle resending, but looking at client.ts there's no code that checks for pending
+    // requests needing resend after reconnection. Requests queued during reconnection might
+    // not actually get sent. Need to either implement resend in client.ts or generate the
+    // messages here and return them in messagesToSend.
+    // SCALA COMPARISON: BUG - Scala's resendAll() takes transport as parameter and sends
+    // messages directly via transport.sendMessage(). TypeScript just marks for resend but
+    // never sends. See PendingRequests.scala:37-47.
     // Note: The actual ClientRequest and Query messages will be constructed by the RaftClient
     // because they need requestId allocation. The client will check pendingRequests/pendingQueries and send them.
     
@@ -607,6 +615,12 @@ export class ConnectingNewSessionStateHandler {
    * Try connecting to the next member in the cluster
    */
   private async tryNextMember(state: ConnectingNewSessionState): Promise<StateTransitionResult> {
+    // TODO (eran): No connection retry with backoff - tries each member once sequentially,
+    // then gives up. Should implement: (1) exponential backoff between attempts,
+    // (2) retry the whole cluster multiple times before giving up, (3) configurable
+    // max retry count and backoff parameters.
+    // SCALA COMPARISON: MISSING - Scala uses ROUND-ROBIN with wrap-around (nextIndex + 1) % size
+    // in RaftClient.scala:126-127. TypeScript fails after one pass through all members.
     const members = Array.from(state.config.clusterMembers.entries());
     const currentIndex = members.findIndex(([id]) => MemberId.unwrap(id) === MemberId.unwrap(state.currentMemberId));
     
@@ -683,6 +697,12 @@ export class ConnectingNewSessionStateHandler {
  * Handler for ConnectingExistingSession state
  * Handles session resumption after reconnection
  */
+// TODO (eran): Session resumption appears untested - this handler covers leader failover
+// and session continue flow, but I didn't see integration tests exercising this path.
+// Should add tests for: (1) NotLeaderAnymore → redirect → SessionContinued,
+// (2) SessionExpired during reconnect, (3) multiple member failovers in sequence.
+// SCALA COMPARISON: SAME - Both have full implementation. Testing coverage is project-specific.
+// See RaftClient.scala:336-490 for Scala's ConnectingExistingSession.
 export class ConnectingExistingSessionStateHandler {
   /**
    * Handle an event in the ConnectingExistingSession state
@@ -1179,6 +1199,11 @@ export class ConnectedStateHandler {
         return this.handleSessionClosed(state, message);
       
       case 'KeepAliveResponse':
+        // TODO (eran): KeepAlive validation incomplete - we receive KeepAliveResponse with
+        // timestamp but don't validate it (e.g., check for clock drift, measure round-trip
+        // latency, detect stale responses). Consider tracking last keepalive RTT and
+        // emitting warnings if it exceeds threshold.
+        // SCALA COMPARISON: SAME - Scala also ignores timestamp (RaftClient.scala:587-588).
         // Acknowledge keep-alive, no state change
         return { newState: state };
       
@@ -1428,6 +1453,12 @@ export class ConnectedStateHandler {
    * Handle TimeoutCheck: resend expired requests and queries
    */
   private async handleTimeoutCheck(state: ConnectedState): Promise<StateTransitionResult> {
+    // TODO (eran): No maximum retry count - requests retry forever until they succeed or
+    // session terminates. Should implement a max retry limit and fail requests with
+    // TimeoutError after N retries or M total seconds. Currently requests could hang
+    // indefinitely if server never responds.
+    // SCALA COMPARISON: SAME - Scala also retries indefinitely (PendingRequests.scala:51-66).
+    // This is BY DESIGN for Raft - eventual consistency means infinite retries are acceptable.
     const now = new Date();
     const expiredRequests = state.pendingRequests.resendExpired(now, state.config.requestTimeout);
     state.pendingQueries.resendExpired(now, state.config.requestTimeout);

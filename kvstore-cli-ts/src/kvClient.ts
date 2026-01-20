@@ -82,6 +82,11 @@ export class KVClient {
       await this.raftClient.disconnect();
       this.isConnected = false;
     } catch (err) {
+      // TODO (eran): Disconnect errors are swallowed - callers can't know if disconnect
+      // actually succeeded. This is intentional for cleanup paths but may hide real issues.
+      // Consider adding an optional throwOnError parameter or returning a result type.
+      // SCALA COMPARISON: DIFFERENT DESIGN - Scala uses ZIO Scope for automatic cleanup
+      // (Main.scala uses .provideSomeLayer with Scope). No explicit disconnect in user code.
       // Log disconnect errors for debugging, but don't throw
       // Rationale: Disconnect is often called in cleanup paths (finally blocks)
       // and we don't want cleanup failures to mask original errors
@@ -153,6 +158,13 @@ export class KVClient {
    * Yields WatchNotification objects decoded from server requests
    */
   async *notifications(): AsyncIterableIterator<WatchNotification> {
+    // TODO (eran): Potential memory leak - event handlers registered below (onServerRequest,
+    // on(DISCONNECTED)) are never unregistered if the iterator is abandoned early (e.g., break
+    // from for-await loop, or error thrown). Could accumulate handlers over time. Consider
+    // using a cleanup pattern with try/finally or AbortController.
+    // SCALA COMPARISON: NOT APPLICABLE - Scala exposes notifications as ZStream which handles
+    // lifecycle automatically (KVClient.scala:34-37). No event handler registration pattern.
+    
     // Create a promise-based queue for server requests
     const queue: WatchNotification[] = [];
     let resolveNext: ((value: IteratorResult<WatchNotification>) => void) | null = null;

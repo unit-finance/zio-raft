@@ -102,6 +102,9 @@ export function decodeGetResult(buffer: Buffer): string | null {
   
   throw new ProtocolError(`Invalid hasValue byte: ${hasValue} (expected 0x00 or 0xFF)`);
   
+  // TODO (eran): Dead code - this line is unreachable after the throw above. Remove it.
+  // SCALA COMPARISON: NOT APPLICABLE - Scala uses scodec for type-safe encoding/decoding
+  // at compile time. No manual codec implementation, so no dead code possible.
   throw new ProtocolError(`Invalid hasValue byte: ${hasValue} (expected 0 or 1)`);
 }
 

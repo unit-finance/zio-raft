@@ -117,6 +117,14 @@ interface DisconnectAction {
  * await client.disconnect();
  * ```
  */
+// TODO (eran): No metrics/observability hooks - consider adding instrumentation for:
+// - Request latency (time from submit to response)
+// - Retry counts per request
+// - Connection state changes with timestamps
+// - Message send/receive counts
+// Could expose via EventEmitter events or a separate metrics interface.
+// SCALA COMPARISON: SAME - Scala uses ZIO.logDebug/logInfo/logWarning for logging only,
+// no structured metrics. Both lack latency histograms, counters, etc.
 export class RaftClient extends EventEmitter {
   private readonly config: ClientConfig;
   private readonly transport: ClientTransport;
@@ -272,6 +280,12 @@ export class RaftClient extends EventEmitter {
         try {
           handler(request);
         } catch (err) {
+          // TODO (eran): Error swallowing issue - user handler errors are only emitted as events.
+          // If nobody listens to ERROR, bugs are silently swallowed. Consider requiring error
+          // handler registration or using a different error propagation strategy.
+          // SCALA COMPARISON: DIFFERENT DESIGN - Scala exposes serverRequests as ZStream
+          // (RaftClient.scala:77-78). Errors propagate naturally through the stream. TypeScript
+          // uses callback registration which is less safe.
           // Swallow errors in user handler to prevent crash
           this.emit(ClientEvents.ERROR, err instanceof Error ? err : new Error(String(err)));
         }

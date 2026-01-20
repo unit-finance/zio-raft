@@ -1,4 +1,9 @@
 // ZeroMQ transport implementation for client-server communication
+// TODO (eran): Heavy debug logging - this file has 20+ debugLog() calls which adds overhead
+// in production even if debug is disabled (unless debugLog short-circuits early). Consider
+// adding log levels or making debug logging conditional on a build flag.
+// SCALA COMPARISON: SAME - Scala also uses debug logging (ZIO.logDebug) but ZIO's logging
+// can be filtered at runtime via log level configuration.
 
 import { Client as ZmqClient } from 'zeromq/draft';
 import { ClientTransport } from './transport';

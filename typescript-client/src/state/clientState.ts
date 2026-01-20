@@ -402,9 +402,8 @@ export class ConnectingNewSessionStateHandler {
     state: ConnectingNewSessionState,
     action: SubmitCommandAction
   ): Promise<StateTransitionResult> {
-    // Queue command as pending - will be sent after connection
-    // Note: We'll need requestId allocation here, but that's done by RaftClient
-    // For now, just reject - the client will handle queueing
+    // Reject command - session not yet established
+    // (Could queue for later, but rejecting is simpler for now)
     action.reject(new Error('Session not yet established'));
     return { newState: state };
   }

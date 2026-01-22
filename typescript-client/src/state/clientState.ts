@@ -10,6 +10,49 @@ import { CreateSession, ContinueSession, CloseSession, ServerRequestAck, KeepAli
 import { debugLog } from '../utils/debug';
 
 // ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Build ClientRequest and Query messages from pending items for resend.
+ * Used after reconnection (resendAll) and on timeout (resendExpired).
+ */
+function buildResendMessages(
+  requestsToResend: Array<{ requestId: RequestId; payload: Buffer }>,
+  queriesToResend: Array<{ correlationId: CorrelationId; payload: Buffer }>,
+  pendingRequests: PendingRequests,
+  now: Date
+): ClientMessage[] {
+  const messages: ClientMessage[] = [];
+  
+  // Build ClientRequest messages for pending commands
+  for (const { requestId, payload } of requestsToResend) {
+    const lowestPendingRequestId = pendingRequests.lowestPendingRequestIdOr(requestId);
+    const clientRequest: ClientRequest = {
+      type: 'ClientRequest',
+      requestId,
+      lowestPendingRequestId,
+      payload,
+      createdAt: now,
+    };
+    messages.push(clientRequest);
+  }
+  
+  // Build Query messages for pending queries
+  for (const { correlationId, payload } of queriesToResend) {
+    const query: Query = {
+      type: 'Query',
+      correlationId,
+      payload,
+      createdAt: now,
+    };
+    messages.push(query);
+  }
+  
+  return messages;
+}
+
+// ============================================================================
 // Client State (Discriminated Union)
 // ============================================================================
 
@@ -495,25 +538,22 @@ export class ConnectingNewSessionStateHandler {
       currentMemberId: state.currentMemberId,
     };
     
-    // Mark pending requests for resend (client will handle actual sending)
+    // Resend all pending requests and queries
     const now = new Date();
-    state.pendingRequests.resendAll(now);
-    state.pendingQueries.resendAll(now);
+    const requestsToResend = state.pendingRequests.resendAll(now);
+    const queriesToResend = state.pendingQueries.resendAll(now);
     
-    // TODO (eran): POTENTIAL BUG - Incomplete resend logic. This comment says the client will
-    // handle resending, but looking at client.ts there's no code that checks for pending
-    // requests needing resend after reconnection. Requests queued during reconnection might
-    // not actually get sent. Need to either implement resend in client.ts or generate the
-    // messages here and return them in messagesToSend.
-    // SCALA COMPARISON: BUG - Scala's resendAll() takes transport as parameter and sends
-    // messages directly via transport.sendMessage(). TypeScript just marks for resend but
-    // never sends. See PendingRequests.scala:37-47.
-    // Note: The actual ClientRequest and Query messages will be constructed by the RaftClient
-    // because they need requestId allocation. The client will check pendingRequests/pendingQueries and send them.
+    // Build messages for pending requests and queries
+    const messagesToSend = buildResendMessages(
+      requestsToResend,
+      queriesToResend,
+      state.pendingRequests,
+      now
+    );
     
     return {
       newState,
-      messagesToSend: [],
+      messagesToSend,
       eventsToEmit: [
         { type: 'stateChange', oldState: 'ConnectingNewSession', newState: 'Connected' },
         { type: 'connectionSuccess', memberId: state.currentMemberId },
@@ -824,14 +864,22 @@ export class ConnectingExistingSessionStateHandler {
       currentMemberId: state.currentMemberId,
     };
     
-    // Mark pending requests for resend (client will handle actual sending)
+    // Resend all pending requests and queries
     const now = new Date();
-    state.pendingRequests.resendAll(now);
-    state.pendingQueries.resendAll(now);
+    const requestsToResend = state.pendingRequests.resendAll(now);
+    const queriesToResend = state.pendingQueries.resendAll(now);
+    
+    // Build messages for pending requests and queries
+    const messagesToSend = buildResendMessages(
+      requestsToResend,
+      queriesToResend,
+      state.pendingRequests,
+      now
+    );
     
     return {
       newState,
-      messagesToSend: [],
+      messagesToSend,
       eventsToEmit: [
         { type: 'stateChange', oldState: 'ConnectingExistingSession', newState: 'Connected' },
         { type: 'connectionSuccess', memberId: state.currentMemberId },
@@ -1461,7 +1509,7 @@ export class ConnectedStateHandler {
     // This is BY DESIGN for Raft - eventual consistency means infinite retries are acceptable.
     const now = new Date();
     const expiredRequests = state.pendingRequests.resendExpired(now, state.config.requestTimeout);
-    state.pendingQueries.resendExpired(now, state.config.requestTimeout);
+    const expiredQueries = state.pendingQueries.resendExpired(now, state.config.requestTimeout);
     
     // Emit timeout events for each expired request
     const timeoutEvents: ClientEventData[] = [];
@@ -1469,12 +1517,17 @@ export class ConnectedStateHandler {
       timeoutEvents.push({ type: 'requestTimeout', requestId });
     }
     
-    // Note: The actual resending will be handled by RaftClient
-    // It will check pending requests/queries and send them
+    // Build messages for expired requests and queries
+    const messagesToSend = buildResendMessages(
+      expiredRequests,
+      expiredQueries,
+      state.pendingRequests,
+      now
+    );
     
     return {
       newState: state,
-      messagesToSend: [],
+      messagesToSend,
       eventsToEmit: timeoutEvents,
     };
   }

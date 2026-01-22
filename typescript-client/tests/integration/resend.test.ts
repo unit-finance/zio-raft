@@ -53,6 +53,9 @@ describe('GAP-001: Resend Logic After Reconnection', () => {
         // Ignore errors during cleanup
       }
     }
+    if (mockTransport) {
+      mockTransport.closeQueues();
+    }
   });
 
   describe('TC-RESEND-001: Command resend after NotLeaderAnymore', () => {
@@ -228,6 +231,10 @@ describe('GAP-001: Resend Logic After Reconnection', () => {
 
   describe('TC-RESEND-003: Command resend on timeout', () => {
     it('should resend command when request timeout elapses without response', async () => {
+      // This test uses its own client with shorter timeout, not the shared one
+      // Mark the shared client as null so afterEach doesn't try to disconnect it
+      (client as any) = null;
+      
       // Use a very short request timeout for this test
       const shortTimeoutTransport = new MockTransport();
       shortTimeoutTransport.autoRespondToCreateSession = false;
@@ -297,7 +304,13 @@ describe('GAP-001: Resend Logic After Reconnection', () => {
         expect(result.toString()).toBe('timeout-result');
         
       } finally {
-        await shortTimeoutClient.disconnect();
+        // Clean up the test-specific client
+        try {
+          await shortTimeoutClient.disconnect();
+        } catch {
+          // Ignore disconnect errors during cleanup
+        }
+        shortTimeoutTransport.closeQueues();
       }
     });
   });

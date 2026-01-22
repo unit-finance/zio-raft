@@ -150,32 +150,67 @@ async function runCliExpectError(...args: string[]): Promise<CliResult> {
  */
 async function startWatch(key: string): Promise<WatchHandle> {
   const output: string[] = [];
+  let stopped = false;
 
-  const process = spawn('node', [CLI_PATH, 'watch', key]);
+  const childProcess = spawn('node', [CLI_PATH, 'watch', key], {
+    detached: false,  // Don't let it outlive parent
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 
-  process.stdout.on('data', (data) => {
+  childProcess.stdout.on('data', (data) => {
     const lines = data.toString().split('\n').filter((l: string) => l.trim());
     output.push(...lines.filter((l: string) => !l.includes('Warning:')));
   });
 
-  process.stderr.on('data', (data) => {
+  childProcess.stderr.on('data', (data) => {
     // Ignore stderr (usually just warnings)
+  });
+
+  // Track when process exits naturally
+  childProcess.on('exit', () => {
+    stopped = true;
   });
 
   // Wait for watch to start
   await sleep(WATCH_STARTUP_DELAY);
 
   const stop = async (): Promise<string[]> => {
-    try {
-      process.kill('SIGINT');
-    } catch {
-      // Ignore kill errors (can happen in sandboxed environments)
+    if (stopped || !childProcess.pid) {
+      return output;
     }
-    await sleep(500); // Give it time to clean up
+
+    // Try multiple signals to ensure process dies
+    const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGKILL'];
+    
+    for (const signal of signals) {
+      if (stopped) break;
+      
+      try {
+        childProcess.kill(signal);
+        await sleep(200);
+        
+        // Check if process is still running
+        try {
+          process.kill(childProcess.pid, 0); // Signal 0 = check if alive
+        } catch {
+          // Process is dead
+          stopped = true;
+          break;
+        }
+      } catch {
+        // Kill failed, try next signal
+      }
+    }
+
+    // If still not stopped after all signals, log warning
+    if (!stopped) {
+      console.warn(`Warning: Could not kill watch process ${childProcess.pid}`);
+    }
+
     return output;
   };
 
-  return { process, output, stop };
+  return { process: childProcess, output, stop };
 }
 
 /**
@@ -235,8 +270,19 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  // Final cleanup - kill any remaining node processes from tests
-  // (This is a safety net, not primary cleanup)
+  // Final cleanup - give any remaining processes time to die
+  await sleep(500);
+  
+  // Force kill any remaining watches (safety net)
+  for (const watch of activeWatches) {
+    try {
+      if (watch.process.pid) {
+        watch.process.kill('SIGKILL');
+      }
+    } catch {
+      // Ignore
+    }
+  }
 });
 
 // =============================================================================

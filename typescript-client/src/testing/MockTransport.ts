@@ -69,10 +69,21 @@ export class MockTransport implements ClientTransport {
   }
   
   /**
-   * Disconnect and close incoming message queue
+   * Disconnect (mock - just sets flag)
+   * Note: Does NOT close the incoming message queue to support reconnection testing.
+   * Call closeQueues() explicitly for full cleanup.
    */
   async disconnect(): Promise<void> {
     this._connected = false;
+    // Note: We intentionally don't close incomingMessages here to support
+    // reconnection scenarios in tests. The queue can still receive messages
+    // after "disconnect" for simulating server-side events during reconnection.
+  }
+  
+  /**
+   * Close all queues - call this for final cleanup
+   */
+  closeQueues(): void {
     this.incomingMessages.close();
   }
   

@@ -5,11 +5,20 @@ import { EventEmitter } from 'events';
 import { ClientConfig, createConfig, ClientConfigInput } from './config';
 import { ClientTransport } from './transport/transport';
 import { ZmqTransport } from './transport/zmqTransport';
-import { ClientState, StateManager, StateTransitionResult } from './state/clientState';
+import {
+  ClientState,
+  StateManager,
+  StateTransitionResult,
+  StreamEvent,
+  ClientAction,
+  ClientEventData,
+  ConnectedState,
+  ConnectingExistingSessionState,
+} from './state/clientState';
 import { AsyncQueue } from './utils/asyncQueue';
 import { mergeStreams } from './utils/streamMerger';
 import { ValidationError } from './errors';
-import { ServerRequest, ServerMessage } from './protocol/messages';
+import { ServerRequest } from './protocol/messages';
 import { ClientEvents } from './events/eventNames';
 import { MemberId } from './types';
 import { debugLog } from './utils/debug';
@@ -41,102 +50,20 @@ export interface SessionExpiredEvent {
 }
 
 // ============================================================================
-// Stream Events (internal)
+// Event Listener Types (for type-safe EventEmitter overloads)
 // ============================================================================
 
-type StreamEvent = ServerMessageEvent | KeepAliveTickEvent | TimeoutCheckEvent | ActionEvent;
+type EventListener =
+  | { event: typeof ClientEvents.CONNECTED; listener: (evt: ConnectedEvent) => void }
+  | { event: typeof ClientEvents.DISCONNECTED; listener: (evt: DisconnectedEvent) => void }
+  | { event: typeof ClientEvents.RECONNECTING; listener: (evt: ReconnectingEvent) => void }
+  | { event: typeof ClientEvents.SESSION_EXPIRED; listener: (evt: SessionExpiredEvent) => void }
+  | { event: typeof ClientEvents.ERROR; listener: (err: Error) => void };
 
-interface ServerMessageEvent {
-  readonly type: 'ServerMsg';
-  readonly message: ServerMessage;
-}
+type EventListenerFunction = EventListener['listener'];
 
-interface KeepAliveTickEvent {
-  readonly type: 'KeepAliveTick';
-}
-
-interface TimeoutCheckEvent {
-  readonly type: 'TimeoutCheck';
-}
-
-interface ActionEvent {
-  readonly type: 'Action';
-  readonly action: ClientAction;
-}
-
-// ============================================================================
-// Client Actions (internal)
-// ============================================================================
-
-type ClientAction = ConnectAction | SubmitCommandAction | SubmitQueryAction | DisconnectAction;
-
-interface ConnectAction {
-  readonly type: 'Connect';
-  readonly resolve: () => void;
-  readonly reject: (err: Error) => void;
-}
-
-interface SubmitCommandAction {
-  readonly type: 'SubmitCommand';
-  readonly payload: Buffer;
-  readonly resolve: (result: Buffer) => void;
-  readonly reject: (err: Error) => void;
-}
-
-interface SubmitQueryAction {
-  readonly type: 'SubmitQuery';
-  readonly payload: Buffer;
-  readonly resolve: (result: Buffer) => void;
-  readonly reject: (err: Error) => void;
-}
-
-interface DisconnectAction {
-  readonly type: 'Disconnect';
-  readonly resolve: () => void;
-  readonly reject: (err: Error) => void;
-}
-
-// ============================================================================
-// Internal Client Events (emitted by state machine)
-// ============================================================================
-
-/**
- * Internal event types emitted by the state machine to client
- * These are transformed to public EventEmitter events
- */
-type InternalClientEvent =
-  | InternalConnectedEvent
-  | InternalDisconnectedEvent
-  | InternalReconnectingEvent
-  | InternalSessionExpiredEvent
-  | InternalServerRequestEvent;
-
-interface InternalConnectedEvent {
-  readonly type: 'connected';
-  readonly sessionId: string;
-  readonly endpoint: string;
-}
-
-interface InternalDisconnectedEvent {
-  readonly type: 'disconnected';
-  readonly reason: 'network' | 'server-closed' | 'client-shutdown';
-}
-
-interface InternalReconnectingEvent {
-  readonly type: 'reconnecting';
-  readonly attempt: number;
-  readonly endpoint: string;
-}
-
-interface InternalSessionExpiredEvent {
-  readonly type: 'sessionExpired';
-  readonly sessionId: string;
-}
-
-interface InternalServerRequestEvent {
-  readonly type: 'serverRequestReceived';
-  readonly request: ServerRequest;
-}
+// Union of all possible event argument types
+type EventArgs = ConnectedEvent | DisconnectedEvent | ReconnectingEvent | SessionExpiredEvent | Error;
 
 // ============================================================================
 // RaftClient - Main Public API
@@ -178,6 +105,7 @@ export class RaftClient extends EventEmitter {
   private eventLoopPromise: Promise<void> | null = null;
   private isShuttingDown = false;
   private disconnectResolve: (() => void) | null = null;
+  private reconnectAttempt = 0; // Tracks reconnection attempts for RECONNECTING event
 
   /**
    * Constructor - validates config, initializes state machine
@@ -496,45 +424,112 @@ export class RaftClient extends EventEmitter {
 
   /**
    * Emit typed client event
+   * Translates low-level state machine events (ClientEventData) to public API events
    */
-  private emitClientEvent(evt: InternalClientEvent): void {
+  private emitClientEvent(evt: ClientEventData): void {
     switch (evt.type) {
-      case 'connected':
-        this.emit(ClientEvents.CONNECTED, {
-          sessionId: evt.sessionId,
-          endpoint: evt.endpoint,
-          timestamp: new Date(),
-        } as ConnectedEvent);
+      case 'stateChange':
+        this.handleStateChangeEvent(evt.oldState, evt.newState);
         break;
 
-      case 'disconnected':
-        this.emit(ClientEvents.DISCONNECTED, {
-          reason: evt.reason,
-          timestamp: new Date(),
-        } as DisconnectedEvent);
-        break;
-
-      case 'reconnecting':
-        this.emit(ClientEvents.RECONNECTING, {
-          attempt: evt.attempt,
-          endpoint: evt.endpoint,
-          timestamp: new Date(),
-        } as ReconnectingEvent);
-        break;
-
-      case 'sessionExpired':
+      case 'sessionExpired': {
+        // Get sessionId from current state if available
+        const sessionId = this.getSessionIdFromCurrentState();
         this.emit(ClientEvents.SESSION_EXPIRED, {
-          sessionId: evt.sessionId,
+          sessionId,
           timestamp: new Date(),
         } as SessionExpiredEvent);
         break;
+      }
 
       case 'serverRequestReceived':
         // Route ServerRequest to queue for onServerRequest() handlers
-        // This is the critical missing piece that connects state machine events to user handlers
         this.serverRequestQueue.offer(evt.request);
         break;
+
+      case 'connectionAttempt':
+        // Track endpoint for reconnection events (used in handleStateChangeEvent)
+        debugLog('Connection attempt to:', evt.address);
+        break;
+
+      case 'connectionSuccess':
+      case 'connectionFailure':
+      case 'requestTimeout':
+        // Internal observability events - could add metrics/logging here
+        debugLog('Internal event:', evt.type);
+        break;
     }
+  }
+
+  /**
+   * Handle state change events and emit appropriate public events
+   *
+   * // TODO (Eran): Issue 1 - Missing DISCONNECTED for failed reconnections
+   * Currently only emits DISCONNECTED when going from Connected → Disconnected.
+   * But ConnectingExistingSession → Disconnected (reconnection failed completely)
+   * should probably also emit DISCONNECTED since the user was previously connected.
+   *
+   * // TODO (Eran): Issue 2 - RECONNECTING only fires once per cycle
+   * Currently only emits RECONNECTING on stateChange (Connected → ConnectingExistingSession).
+   * But when retrying to the next member, state stays ConnectingExistingSession and only
+   * 'connectionAttempt' event is emitted. Should track connectionAttempt events and emit
+   * RECONNECTING for each retry attempt, not just the first one.
+   *
+   * // TODO (Eran): Issue 3 - Type assertions could mask bugs
+   * The 'as ConnectedState' and 'as ConnectingExistingSessionState' assertions are necessary
+   * because we check event strings (oldState/newState) not this.currentState.state.
+   * Consider adding defensive checks like: if (this.currentState.state !== 'Connected') return;
+   */
+  private handleStateChangeEvent(oldState: ClientState['state'], newState: ClientState['state']): void {
+    debugLog('State change:', oldState, '->', newState);
+
+    // Emit CONNECTED when transitioning to Connected state
+    if (newState === 'Connected' && oldState !== 'Connected') {
+      this.reconnectAttempt = 0; // Reset reconnect counter on successful connection
+      const state = this.currentState as ConnectedState;
+      const endpoint = state.config.clusterMembers.get(state.currentMemberId) ?? '';
+      this.emit(ClientEvents.CONNECTED, {
+        sessionId: state.sessionId,
+        endpoint,
+        timestamp: new Date(),
+      } as ConnectedEvent);
+    }
+
+    // Emit DISCONNECTED when transitioning from Connected to Disconnected
+    // TODO (Eran): Also handle ConnectingExistingSession → Disconnected?
+    if (newState === 'Disconnected' && oldState === 'Connected') {
+      const reason = this.isShuttingDown ? 'client-shutdown' : 'network';
+      this.emit(ClientEvents.DISCONNECTED, {
+        reason,
+        timestamp: new Date(),
+      } as DisconnectedEvent);
+    }
+
+    // Emit RECONNECTING when transitioning from Connected to ConnectingExistingSession
+    // TODO (Eran): Also emit for subsequent connectionAttempt events during reconnection?
+    if (newState === 'ConnectingExistingSession' && oldState === 'Connected') {
+      this.reconnectAttempt++;
+      const state = this.currentState as ConnectingExistingSessionState;
+      const endpoint = state.config.clusterMembers.get(state.currentMemberId) ?? '';
+      this.emit(ClientEvents.RECONNECTING, {
+        attempt: this.reconnectAttempt,
+        endpoint,
+        timestamp: new Date(),
+      } as ReconnectingEvent);
+    }
+  }
+
+  /**
+   * Get session ID from current state if available
+   */
+  private getSessionIdFromCurrentState(): string {
+    if (this.currentState.state === 'Connected') {
+      return this.currentState.sessionId;
+    }
+    if (this.currentState.state === 'ConnectingExistingSession') {
+      return this.currentState.sessionId;
+    }
+    return '';
   }
 
   // ==========================================================================
@@ -605,9 +600,8 @@ export class RaftClient extends EventEmitter {
   on(event: typeof ClientEvents.RECONNECTING, listener: (evt: ReconnectingEvent) => void): this;
   on(event: typeof ClientEvents.SESSION_EXPIRED, listener: (evt: SessionExpiredEvent) => void): this;
   on(event: typeof ClientEvents.ERROR, listener: (err: Error) => void): this;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  on(event: string, listener: (...args: unknown[]) => void): this {
-    return super.on(event, listener as (...args: unknown[]) => void);
+  on(event: string | symbol, listener: EventListenerFunction): this {
+    return super.on(event, listener);
   }
 
   emit(event: typeof ClientEvents.CONNECTED, evt: ConnectedEvent): boolean;
@@ -615,7 +609,7 @@ export class RaftClient extends EventEmitter {
   emit(event: typeof ClientEvents.RECONNECTING, evt: ReconnectingEvent): boolean;
   emit(event: typeof ClientEvents.SESSION_EXPIRED, evt: SessionExpiredEvent): boolean;
   emit(event: typeof ClientEvents.ERROR, err: Error): boolean;
-  emit(event: string, ...args: unknown[]): boolean {
+  emit(event: string | symbol, ...args: EventArgs[]): boolean {
     return super.emit(event, ...args);
   }
 }

@@ -232,7 +232,6 @@ describe('GAP-001: Resend Logic After Reconnection', () => {
     it('should resend command when request timeout elapses without response', async () => {
       // This test uses its own client with shorter timeout, not the shared one
       // Mark the shared client as null so afterEach doesn't try to disconnect it
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (client as unknown) = null;
 
       // Use a very short request timeout for this test

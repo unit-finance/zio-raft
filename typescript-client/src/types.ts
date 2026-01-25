@@ -1,6 +1,8 @@
 // Branded types for type-safe identifiers
 // These provide newtype-like safety similar to Scala's Newtype pattern
 
+import { randomUUID } from 'crypto';
+
 /**
  * Session identifier (string-based)
  */
@@ -76,10 +78,7 @@ export type CorrelationId = string & { readonly __brand: 'CorrelationId' };
 
 export const CorrelationId = {
   generate: (): CorrelationId => {
-    // Node.js 18+ has built-in crypto.randomUUID()
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const crypto = require('crypto') as { randomUUID: () => string };
-    const uuid = crypto.randomUUID();
+    const uuid = randomUUID();
     return uuid as CorrelationId;
   },
   fromString: (value: string): CorrelationId => {

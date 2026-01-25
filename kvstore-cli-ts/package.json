@@ -13,7 +13,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc --project tsconfig.json",
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
@@ -22,6 +22,8 @@
     "format": "prettier --write 'src/**/*.ts' 'tests/**/*.ts'",
     "format:check": "prettier --check 'src/**/*.ts' 'tests/**/*.ts'",
     "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "clean:tests": "find tests -type f \\( -name '*.js' -o -name '*.d.ts' -o -name '*.map' \\) -delete",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

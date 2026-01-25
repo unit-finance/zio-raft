@@ -131,8 +131,8 @@ export class MockTransport implements ClientTransport {
    * Get all sent messages of a specific type
    */
   getSentMessagesOfType<T extends ClientMessage['type']>(type: T): Extract<ClientMessage, { type: T }>[] {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any
-    return this.sentMessages.filter((m) => m.type === type) as any;
+    type MatchingMessage = Extract<ClientMessage, { type: T }>;
+    return this.sentMessages.filter((m): m is MatchingMessage => m.type === type);
   }
 
   /**
@@ -153,17 +153,17 @@ export class MockTransport implements ClientTransport {
    * Wait for a specific message type to be sent
    * Useful for async assertions
    */
-  async waitForMessageType(
-    type: ClientMessage['type'],
+  async waitForMessageType<T extends ClientMessage['type']>(
+    type: T,
     timeoutMs = 1000
-  ): Promise<Extract<ClientMessage, { type: typeof type }>> {
+  ): Promise<Extract<ClientMessage, { type: T }>> {
+    type MatchingMessage = Extract<ClientMessage, { type: T }>;
     const startTime = Date.now();
 
     while (Date.now() - startTime < timeoutMs) {
-      const message = this.sentMessages.find((m) => m.type === type);
-      if (message) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any
-        return message as any;
+      const message = this.sentMessages.find((m): m is MatchingMessage => m.type === type);
+      if (message !== undefined) {
+        return message;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }

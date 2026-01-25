@@ -6,6 +6,17 @@ dist/
 build/
 *.tsbuildinfo
 
+# Compiled JavaScript files (should only be in dist/)
+*.js
+*.d.ts
+*.d.ts.map
+*.js.map
+
+# But allow config files
+!*.config.js
+!.eslintrc.js
+!vitest.config.js
+
 # Test coverage
 coverage/
 .nyc_output/

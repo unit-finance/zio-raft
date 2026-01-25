@@ -141,7 +141,9 @@ export class KVClient {
 
     // Create a promise-based queue for server requests
     const queue: WatchNotification[] = [];
-    let resolveNext: ((value: IteratorResult<WatchNotification>) => void) | null = null;
+    // Use explicit union type for proper done/value typing
+    type WatchIteratorResult = { value: WatchNotification; done: false } | { value: undefined; done: true };
+    let resolveNext: ((value: WatchIteratorResult) => void) | null = null;
     let done = false;
 
     // Register handler for server requests
@@ -168,7 +170,7 @@ export class KVClient {
     this.raftClient.on(ClientEvents.DISCONNECTED, () => {
       done = true;
       if (resolveNext) {
-        resolveNext({ value: undefined as WatchNotification | undefined, done: true });
+        resolveNext({ value: undefined, done: true });
         resolveNext = null;
       }
     });
@@ -180,7 +182,7 @@ export class KVClient {
         yield notification;
       } else {
         // Wait for next notification
-        const result = await new Promise<IteratorResult<WatchNotification>>((resolve) => {
+        const result = await new Promise<WatchIteratorResult>((resolve) => {
           resolveNext = resolve;
         });
 

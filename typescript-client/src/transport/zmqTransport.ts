@@ -132,12 +132,10 @@ export class ZmqTransport implements ClientTransport {
    */
   get incomingMessages(): AsyncIterable<ServerMessage> {
     debugLog('ZmqTransport.incomingMessages getter called');
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const self = this;
     return {
-      [Symbol.asyncIterator]() {
+      [Symbol.asyncIterator]: (): AsyncIterator<ServerMessage> => {
         debugLog('ZmqTransport.incomingMessages Symbol.asyncIterator called');
-        return self.createMessageStream();
+        return this.createMessageStream();
       },
     };
   }

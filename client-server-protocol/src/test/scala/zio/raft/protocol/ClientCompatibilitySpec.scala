@@ -16,7 +16,7 @@ import scala.io.Source
   * Fixture files are simple hex strings (one per message type). Both Scala and TypeScript tests
   * read from these files to ensure alignment.
   */
-object ClientCompatibilitySpec extends ZIOSpecDefault:
+object ClientCompatibilitySpec extends ZIOSpecDefault {
 
   /** Convert ByteVector to hex string for comparison */
   private def toHex(bytes: ByteVector): String =
@@ -36,7 +36,7 @@ object ClientCompatibilitySpec extends ZIOSpecDefault:
   private val testPayload = ByteVector("test-payload".getBytes("UTF-8"))
   private val testCapabilities = Map("capability1" -> "value1", "capability2" -> "value2")
 
-  def spec = suite("ClientCompatibilitySpec")(
+  def spec: Spec[Any, Nothing] = suite("ClientCompatibilitySpec")(
     suite("typescript compatibility - client messages")(
       test("CreateSession encodes correctly") {
         val message = CreateSession(
@@ -274,4 +274,4 @@ object ClientCompatibilitySpec extends ZIOSpecDefault:
     )
   )
 
-end ClientCompatibilitySpec
+}

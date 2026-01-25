@@ -14,7 +14,7 @@ export type ServerRequestResult =
  * Tracker for server-initiated requests to handle deduplication
  */
 export class ServerRequestTracker {
-  private lastAcknowledgedRequestId: RequestId;
+  private readonly lastAcknowledgedRequestId: RequestId;
 
   constructor(initialRequestId: RequestId = RequestId.zero) {
     this.lastAcknowledgedRequestId = initialRequestId;
@@ -53,4 +53,3 @@ export class ServerRequestTracker {
     return this.lastAcknowledgedRequestId;
   }
 }
-

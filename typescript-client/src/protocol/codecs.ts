@@ -1,13 +1,7 @@
 // Binary protocol codecs for ZIO Raft client-server communication
 // These must match the Scala scodec implementation exactly
 
-import {
-  SessionId,
-  RequestId,
-  MemberId,
-  Nonce,
-  CorrelationId,
-} from '../types';
+import { SessionId, RequestId, MemberId, Nonce, CorrelationId } from '../types';
 import {
   ClientMessage,
   ServerMessage,
@@ -71,13 +65,13 @@ export function encodePayload(payload: Buffer): Buffer {
 export function encodeMap(map: Map<string, string>): Buffer {
   const count = Buffer.allocUnsafe(2);
   count.writeUInt16BE(map.size, 0);
-  
+
   const entries: Buffer[] = [count];
   for (const [key, value] of map) {
     entries.push(encodeString(key));
     entries.push(encodeString(value));
   }
-  
+
   return Buffer.concat(entries);
 }
 
@@ -142,42 +136,42 @@ export interface DecodeResult<T> {
 
 /**
  * Decode optional field with bit-level boolean (scodec's optional(bool, codec))
- * 
+ *
  * Scala's scodec encodes optional(bool, codec) as:
- * - 1 bit for presence (0 = None, 1 = Some)  
+ * - 1 bit for presence (0 = None, 1 = Some)
  * - If present, remaining bits contain the value
- * 
+ *
  * Example: optional(bool, variableSizeBytes(uint16, utf8)) for "node-1"
  * - Bit 0: 1 (present)
  * - Bits 1-16: 0x0006 (length = 6)
  * - Next 6 bytes: "node-1"
- * 
+ *
  * Hex: 80 03 37 37 b2 32 96 98 80
  * - 0x80 = 10000000 (bit 0 = 1 for Some, bits 1-7 = 0000000)
  * - 0x03 = 00000011 (bits 8-15, combined with bits 1-7 gives 0x0003... wait, that's wrong)
- * 
+ *
  * Actually: When bit-packed, after the 1 bit for Some, the next 16 bits are the uint16:
  * - Byte 0: 10000000 (bit 0 = Some)
  * - Byte 0 (bits 1-7) + Byte 1 (bits 0-7) + Byte 2 (bit 0) = 16 bits for length
- * 
+ *
  * Let me recalculate:
  * Hex: 80 03 37 37 b2 32 96 98 80
  * Binary:
  * 10000000 00000011 00110111 00110111 10110010 00110010 10010110 10011000 10000000
  * ^--1 bit for Some
- *  ^^^^^^^----7 bits (part of uint16 length) 
+ *  ^^^^^^^----7 bits (part of uint16 length)
  *         ^^^^^^^^----8 bits (rest of uint16 length)
  *                ^----1 bit (last bit of uint16)
- * 
+ *
  * This is too complex. Let me use a simpler approach: read byte-by-byte and reconstruct.
  */
 /**
  * Decode optional MemberId with bit-level boolean (scodec's optional(bool, memberIdCodec))
- * 
+ *
  * Scala's scodec encodes optional(bool, variableSizeBytes(uint16, utf8)) as:
- * - 1 bit for presence (0 = None, 1 = Some)  
+ * - 1 bit for presence (0 = None, 1 = Some)
  * - If present: uint16 length (16 bits) + UTF-8 string bytes
- * 
+ *
  * Example: MemberId("node-1")
  * Hex: 80 03 37 37 b2 32 96 98 80
  * Binary structure:
@@ -185,7 +179,7 @@ export interface DecodeResult<T> {
  *   Byte 1: [00000011]    ← bits 7-14 of uint16
  *   Byte 2: [0][0110111]  ← bit 15 of uint16, first 7 bits of 'n'
  *   ... (6 string bytes, each straddling 2 buffer bytes)
- * 
+ *
  * Implementation Strategy:
  * We use direct bit-math rather than buffer reconstruction for efficiency:
  * - Alternative approach: Shift entire buffer left by 1 bit, then reuse decodeMemberId()
@@ -193,58 +187,55 @@ export interface DecodeResult<T> {
  * - This approach: Only read the exact bytes we need (2-3 for uint16, length for string)
  * - Trade-off: Duplicates uint16+UTF-8 decoding logic, but significantly more efficient
  */
-function decodeOptionalMemberId(
-  buffer: Buffer,
-  offset: number
-): DecodeResult<MemberId | undefined> {
+function decodeOptionalMemberId(buffer: Buffer, offset: number): DecodeResult<MemberId | undefined> {
   const firstByte = buffer.readUInt8(offset);
-  
+
   // Check MSB (bit 0) for presence
   const hasValue = (firstByte & 0x80) !== 0;
-  
+
   if (!hasValue) {
     // None case: bit is 0, value is absent
     return {
       value: undefined,
-      newOffset: offset + 1
+      newOffset: offset + 1,
     };
   }
-  
+
   // Some case: read uint16 starting at bit 1
   // Extract uint16 from bits 1-16 (spans bytes 0-2)
-  const byte0 = firstByte & 0x7F;           // bits 1-7 of uint16
+  const byte0 = firstByte & 0x7f; // bits 1-7 of uint16
   const byte1 = buffer.readUInt8(offset + 1); // bits 8-15 of uint16
   const byte2 = buffer.readUInt8(offset + 2); // bit 16 of uint16 (MSB)
-  
+
   // Reconstruct uint16 from bit-shifted pieces
   const length = (byte0 << 9) | (byte1 << 1) | (byte2 >> 7);
-  
+
   // Read string bytes starting at bit 17
   // Each character byte straddles two buffer bytes due to 1-bit shift
   const stringBytes = Buffer.allocUnsafe(length);
   let bitOffset = 17;
-  
+
   for (let i = 0; i < length; i++) {
     const byteIndex = Math.floor(bitOffset / 8);
     const bitInByte = bitOffset % 8;
-    
+
     const currentByte = buffer.readUInt8(offset + byteIndex);
     const nextByte = buffer.readUInt8(offset + byteIndex + 1);
-    
+
     // Extract 8 bits starting at bitOffset
     stringBytes[i] = (currentByte << bitInByte) | (nextByte >> (8 - bitInByte));
     bitOffset += 8;
   }
-  
+
   const memberId = MemberId.fromString(stringBytes.toString('utf8'));
-  
+
   // Calculate bytes consumed: 1 bit + 16 bits + (length * 8) bits
-  const totalBits = 1 + 16 + (length * 8);
+  const totalBits = 1 + 16 + length * 8;
   const bytesConsumed = Math.ceil(totalBits / 8);
-  
+
   return {
     value: memberId,
-    newOffset: offset + bytesConsumed
+    newOffset: offset + bytesConsumed,
   };
 }
 
@@ -284,17 +275,17 @@ export function decodeMap(buffer: Buffer, offset: number): DecodeResult<Map<stri
   const count = buffer.readUInt16BE(offset);
   let currentOffset = offset + 2;
   const map = new Map<string, string>();
-  
+
   for (let i = 0; i < count; i++) {
     const keyResult = decodeString(buffer, currentOffset);
     currentOffset = keyResult.newOffset;
-    
+
     const valueResult = decodeString(buffer, currentOffset);
     currentOffset = valueResult.newOffset;
-    
+
     map.set(keyResult.value, valueResult.value);
   }
-  
+
   return { value: map, newOffset: currentOffset };
 }
 
@@ -376,13 +367,13 @@ export function decodeProtocolHeader(buffer: Buffer, offset: number): number {
       );
     }
   }
-  
+
   // Verify version (1 byte)
   const version = buffer.readUInt8(offset + 5);
   if (version !== PROTOCOL_VERSION) {
     throw new Error(`Unsupported protocol version: ${version}, expected ${PROTOCOL_VERSION}`);
   }
-  
+
   return offset + 6; // 5 bytes signature + 1 byte version
 }
 
@@ -512,9 +503,9 @@ function decodeRequestErrorReason(buffer: Buffer, offset: number): DecodeResult<
 export function encodeClientMessage(message: ClientMessage): Buffer {
   const header = encodeProtocolHeader();
   const parts: Buffer[] = [header];
-  
+
   const typeBuffer = Buffer.allocUnsafe(1);
-  
+
   switch (message.type) {
     case 'CreateSession':
       typeBuffer.writeUInt8(ClientMessageType.CreateSession, 0);
@@ -522,20 +513,20 @@ export function encodeClientMessage(message: ClientMessage): Buffer {
       parts.push(encodeMap(message.capabilities));
       parts.push(encodeNonce(message.nonce));
       break;
-      
+
     case 'ContinueSession':
       typeBuffer.writeUInt8(ClientMessageType.ContinueSession, 0);
       parts.push(typeBuffer);
       parts.push(encodeSessionId(message.sessionId));
       parts.push(encodeNonce(message.nonce));
       break;
-      
+
     case 'KeepAlive':
       typeBuffer.writeUInt8(ClientMessageType.KeepAlive, 0);
       parts.push(typeBuffer);
       parts.push(encodeTimestamp(message.timestamp));
       break;
-      
+
     case 'ClientRequest':
       typeBuffer.writeUInt8(ClientMessageType.ClientRequest, 0);
       parts.push(typeBuffer);
@@ -544,7 +535,7 @@ export function encodeClientMessage(message: ClientMessage): Buffer {
       parts.push(encodePayload(message.payload));
       parts.push(encodeTimestamp(message.createdAt));
       break;
-      
+
     case 'Query':
       typeBuffer.writeUInt8(ClientMessageType.Query, 0);
       parts.push(typeBuffer);
@@ -552,25 +543,25 @@ export function encodeClientMessage(message: ClientMessage): Buffer {
       parts.push(encodePayload(message.payload));
       parts.push(encodeTimestamp(message.createdAt));
       break;
-      
+
     case 'ServerRequestAck':
       typeBuffer.writeUInt8(ClientMessageType.ServerRequestAck, 0);
       parts.push(typeBuffer);
       parts.push(encodeRequestId(message.requestId));
       break;
-      
+
     case 'CloseSession':
       typeBuffer.writeUInt8(ClientMessageType.CloseSession, 0);
       parts.push(typeBuffer);
       parts.push(encodeCloseReason(message.reason));
       break;
-      
+
     case 'ConnectionClosed':
       typeBuffer.writeUInt8(ClientMessageType.ConnectionClosed, 0);
       parts.push(typeBuffer);
       break;
   }
-  
+
   return Buffer.concat(parts);
 }
 
@@ -583,14 +574,14 @@ export function encodeClientMessage(message: ClientMessage): Buffer {
  */
 export function decodeServerMessage(buffer: Buffer): ServerMessage {
   let offset = 0;
-  
+
   // Decode and verify protocol header
   offset = decodeProtocolHeader(buffer, offset);
-  
+
   // Read message type discriminator
   const messageType = buffer.readUInt8(offset);
   offset += 1;
-  
+
   switch (messageType) {
     case ServerMessageType.SessionCreated: {
       const sessionIdResult = decodeSessionId(buffer, offset);
@@ -602,7 +593,7 @@ export function decodeServerMessage(buffer: Buffer): ServerMessage {
         nonce: nonceResult.value,
       };
     }
-    
+
     case ServerMessageType.SessionContinued: {
       const nonceResult = decodeNonce(buffer, offset);
       return {
@@ -610,16 +601,16 @@ export function decodeServerMessage(buffer: Buffer): ServerMessage {
         nonce: nonceResult.value,
       };
     }
-    
+
     case ServerMessageType.SessionRejected: {
       const reasonResult = decodeRejectionReason(buffer, offset);
       offset = reasonResult.newOffset;
       const nonceResult = decodeNonce(buffer, offset);
       offset = nonceResult.newOffset;
-      
+
       // Decode optional leaderId with bit-level boolean (scodec's optional(bool, memberIdCodec))
       const leaderIdResult = decodeOptionalMemberId(buffer, offset);
-      
+
       return {
         type: 'SessionRejected',
         reason: reasonResult.value,
@@ -627,21 +618,21 @@ export function decodeServerMessage(buffer: Buffer): ServerMessage {
         leaderId: leaderIdResult.value,
       };
     }
-    
+
     case ServerMessageType.SessionClosed: {
       const reasonResult = decodeSessionCloseReason(buffer, offset);
       offset = reasonResult.newOffset;
-      
+
       // Decode optional leaderId with bit-level boolean (scodec's optional(bool, memberIdCodec))
       const leaderIdResult = decodeOptionalMemberId(buffer, offset);
-      
+
       return {
         type: 'SessionClosed',
         reason: reasonResult.value,
         leaderId: leaderIdResult.value,
       };
     }
-    
+
     case ServerMessageType.KeepAliveResponse: {
       const timestampResult = decodeTimestamp(buffer, offset);
       return {
@@ -649,7 +640,7 @@ export function decodeServerMessage(buffer: Buffer): ServerMessage {
         timestamp: timestampResult.value,
       };
     }
-    
+
     case ServerMessageType.ClientResponse: {
       const requestIdResult = decodeRequestId(buffer, offset);
       offset = requestIdResult.newOffset;
@@ -660,7 +651,7 @@ export function decodeServerMessage(buffer: Buffer): ServerMessage {
         result: resultBuffer.value,
       };
     }
-    
+
     case ServerMessageType.QueryResponse: {
       const correlationIdResult = decodeCorrelationId(buffer, offset);
       offset = correlationIdResult.newOffset;
@@ -671,7 +662,7 @@ export function decodeServerMessage(buffer: Buffer): ServerMessage {
         result: resultBuffer.value,
       };
     }
-    
+
     case ServerMessageType.ServerRequest: {
       const requestIdResult = decodeRequestId(buffer, offset);
       offset = requestIdResult.newOffset;
@@ -685,7 +676,7 @@ export function decodeServerMessage(buffer: Buffer): ServerMessage {
         createdAt: createdAtResult.value,
       };
     }
-    
+
     case ServerMessageType.RequestError: {
       const requestIdResult = decodeRequestId(buffer, offset);
       offset = requestIdResult.newOffset;
@@ -696,9 +687,8 @@ export function decodeServerMessage(buffer: Buffer): ServerMessage {
         reason: reasonResult.value,
       };
     }
-    
+
     default:
       throw new Error(`Unknown server message type: ${messageType}`);
   }
 }
-

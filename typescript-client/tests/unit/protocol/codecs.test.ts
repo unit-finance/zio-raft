@@ -11,29 +11,17 @@ import {
   encodeTimestamp,
   encodeNonce,
   encodeRequestId,
-  encodeSessionId,
 } from '../../../src/protocol/codecs';
-import {
-  CreateSession,
-  ClientRequest,
-  Query,
-  KeepAlive,
-  ServerMessage,
-} from '../../../src/protocol/messages';
-import {
-  SessionId,
-  RequestId,
-  Nonce,
-  CorrelationId,
-} from '../../../src/types';
-import { PROTOCOL_SIGNATURE, PROTOCOL_VERSION } from '../../../src/protocol/constants';
+import { CreateSession, ClientRequest, Query, KeepAlive } from '../../../src/protocol/messages';
+import { RequestId, Nonce, CorrelationId } from '../../../src/types';
+import { PROTOCOL_VERSION } from '../../../src/protocol/constants';
 
 describe('Protocol Codecs', () => {
   describe('Field Encoding', () => {
     it('TC-PROTO-001: should encode strings with length prefix', () => {
       const str = 'hello';
       const encoded = encodeString(str);
-      
+
       // Check length prefix (2 bytes, big-endian)
       expect(encoded.readUInt16BE(0)).toBe(5);
       // Check UTF-8 content
@@ -43,7 +31,7 @@ describe('Protocol Codecs', () => {
     it('TC-PROTO-002: should encode timestamps as int64 epoch millis', () => {
       const date = new Date('2025-01-01T00:00:00.000Z');
       const encoded = encodeTimestamp(date);
-      
+
       expect(encoded.length).toBe(8);
       expect(encoded.readBigInt64BE(0)).toBe(BigInt(date.getTime()));
     });
@@ -51,7 +39,7 @@ describe('Protocol Codecs', () => {
     it('TC-PROTO-003: should encode nonces as 8-byte bigint', () => {
       const nonce = Nonce.fromBigInt(12345n);
       const encoded = encodeNonce(nonce);
-      
+
       expect(encoded.length).toBe(8);
       expect(encoded.readBigInt64BE(0)).toBe(12345n);
     });
@@ -59,7 +47,7 @@ describe('Protocol Codecs', () => {
     it('TC-PROTO-004: should encode request IDs as 8-byte bigint', () => {
       const requestId = RequestId.fromBigInt(9876n);
       const encoded = encodeRequestId(requestId);
-      
+
       expect(encoded.length).toBe(8);
       expect(encoded.readBigInt64BE(0)).toBe(9876n);
     });
@@ -70,7 +58,7 @@ describe('Protocol Codecs', () => {
         ['client', 'typescript'],
       ]);
       const encoded = encodeMap(caps);
-      
+
       // Check count (2 bytes)
       expect(encoded.readUInt16BE(0)).toBe(2);
       // Full decoding tested in round-trip test
@@ -79,7 +67,7 @@ describe('Protocol Codecs', () => {
     it('TC-PROTO-006: should encode payload with length prefix', () => {
       const payload = Buffer.from('test payload');
       const encoded = encodePayload(payload);
-      
+
       // Check length prefix (4 bytes, big-endian)
       expect(encoded.readInt32BE(0)).toBe(12);
       // Check payload content
@@ -96,7 +84,7 @@ describe('Protocol Codecs', () => {
       };
 
       const encoded = encodeClientMessage(message);
-      
+
       // Check protocol signature
       expect(encoded.toString('latin1', 0, 5)).toBe('zraft');
       // Check protocol version
@@ -115,7 +103,7 @@ describe('Protocol Codecs', () => {
       };
 
       const encoded = encodeClientMessage(message);
-      
+
       // Check protocol header
       expect(encoded.toString('latin1', 0, 5)).toBe('zraft');
       expect(encoded.readUInt8(5)).toBe(PROTOCOL_VERSION);
@@ -132,7 +120,7 @@ describe('Protocol Codecs', () => {
       };
 
       const encoded = encodeClientMessage(message);
-      
+
       // Check protocol header
       expect(encoded.toString('latin1', 0, 5)).toBe('zraft');
       // Check discriminator (Query = 0x08)
@@ -146,7 +134,7 @@ describe('Protocol Codecs', () => {
       };
 
       const encoded = encodeClientMessage(message);
-      
+
       // Check protocol header
       expect(encoded.toString('latin1', 0, 5)).toBe('zraft');
       // Check discriminator (KeepAlive = 0x03)
@@ -159,23 +147,23 @@ describe('Protocol Codecs', () => {
       // This test requires a properly encoded SessionCreated message
       // For now, this is a placeholder - full implementation requires
       // either mock data or encoding from Scala server
-      
+
       // TODO: Implement when we have reference encodings
       expect(true).toBe(true);
     });
 
     it('TC-PROTO-012: should reject invalid protocol signature', () => {
       const invalidBuffer = Buffer.from('wrong signature');
-      
+
       expect(() => decodeServerMessage(invalidBuffer)).toThrow('Invalid protocol signature');
     });
 
     it('TC-PROTO-013: should reject unsupported protocol version', () => {
       const buffer = Buffer.allocUnsafe(7);
       buffer.write('zraft', 0, 'latin1');
-      buffer.writeUInt8(0xFF, 5); // Invalid version
+      buffer.writeUInt8(0xff, 5); // Invalid version
       buffer.writeUInt8(0x01, 6);
-      
+
       expect(() => decodeServerMessage(buffer)).toThrow('Unsupported protocol version');
     });
   });
@@ -192,14 +180,13 @@ describe('Protocol Codecs', () => {
       };
 
       const encoded = encodeClientMessage(original);
-      
+
       // Verify encoding structure
       expect(encoded.length).toBeGreaterThan(7);
       expect(encoded.toString('latin1', 0, 5)).toBe('zraft');
-      
+
       // Full round-trip test requires server message decoding
       // which depends on having reference data from Scala server
     });
   });
 });
-

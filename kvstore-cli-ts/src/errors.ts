@@ -7,7 +7,7 @@
  */
 export class ValidationError extends Error {
   public readonly name = 'ValidationError';
-  
+
   constructor(
     public readonly field: 'key' | 'value' | 'endpoints',
     message: string,
@@ -24,7 +24,7 @@ export class ValidationError extends Error {
  */
 export class OperationError extends Error {
   public readonly name = 'OperationError';
-  
+
   constructor(
     public readonly operation: 'set' | 'get' | 'watch' | 'connect',
     public readonly reason: 'timeout' | 'connection' | 'protocol' | 'server_error',
@@ -41,7 +41,7 @@ export class OperationError extends Error {
  */
 export class ProtocolError extends Error {
   public readonly name = 'ProtocolError';
-  
+
   constructor(
     message: string,
     public readonly details?: unknown

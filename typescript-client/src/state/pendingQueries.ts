@@ -17,7 +17,7 @@ export interface PendingQueryData {
  * Tracker for pending queries (read-only operations)
  */
 export class PendingQueries {
-  private queries: Map<CorrelationId, PendingQueryData> = new Map();
+  private readonly queries: Map<CorrelationId, PendingQueryData> = new Map();
 
   /**
    * Add a new pending query
@@ -34,7 +34,7 @@ export class PendingQueries {
     if (data === undefined) {
       return false;
     }
-    
+
     this.queries.delete(correlationId);
     data.resolve(result);
     return true;
@@ -48,7 +48,7 @@ export class PendingQueries {
     if (data === undefined) {
       return false;
     }
-    
+
     this.queries.delete(correlationId);
     data.reject(error);
     return true;
@@ -73,12 +73,12 @@ export class PendingQueries {
    */
   resendAll(currentTime: Date): Array<{ correlationId: CorrelationId; payload: Buffer }> {
     const toResend: Array<{ correlationId: CorrelationId; payload: Buffer }> = [];
-    
+
     for (const [correlationId, data] of this.queries) {
       data.lastSentAt = currentTime;
       toResend.push({ correlationId, payload: data.payload });
     }
-    
+
     return toResend;
   }
 
@@ -87,7 +87,7 @@ export class PendingQueries {
    */
   resendExpired(currentTime: Date, timeoutMs: number): Array<{ correlationId: CorrelationId; payload: Buffer }> {
     const toResend: Array<{ correlationId: CorrelationId; payload: Buffer }> = [];
-    
+
     for (const [correlationId, data] of this.queries) {
       const elapsed = currentTime.getTime() - data.lastSentAt.getTime();
       if (elapsed >= timeoutMs) {
@@ -95,7 +95,7 @@ export class PendingQueries {
         toResend.push({ correlationId, payload: data.payload });
       }
     }
-    
+
     return toResend;
   }
 
@@ -123,4 +123,3 @@ export class PendingQueries {
     this.queries.clear();
   }
 }
-

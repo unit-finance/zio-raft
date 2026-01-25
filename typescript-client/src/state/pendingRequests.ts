@@ -17,7 +17,7 @@ export interface PendingRequestData {
  * Tracker for pending client requests (commands)
  */
 export class PendingRequests {
-  private requests: Map<RequestId, PendingRequestData> = new Map();
+  private readonly requests: Map<RequestId, PendingRequestData> = new Map();
 
   /**
    * Add a new pending request
@@ -34,7 +34,7 @@ export class PendingRequests {
     if (data === undefined) {
       return false;
     }
-    
+
     this.requests.delete(requestId);
     data.resolve(result);
     return true;
@@ -48,7 +48,7 @@ export class PendingRequests {
     if (data === undefined) {
       return false;
     }
-    
+
     this.requests.delete(requestId);
     data.reject(error);
     return true;
@@ -68,7 +68,7 @@ export class PendingRequests {
     if (this.requests.size === 0) {
       return defaultId;
     }
-    
+
     let lowest = defaultId;
     for (const [requestId] of this.requests) {
       if (RequestId.unwrap(requestId) < RequestId.unwrap(lowest)) {
@@ -90,12 +90,12 @@ export class PendingRequests {
    */
   resendAll(currentTime: Date): Array<{ requestId: RequestId; payload: Buffer }> {
     const toResend: Array<{ requestId: RequestId; payload: Buffer }> = [];
-    
+
     for (const [requestId, data] of this.requests) {
       data.lastSentAt = currentTime;
       toResend.push({ requestId, payload: data.payload });
     }
-    
+
     return toResend;
   }
 
@@ -104,7 +104,7 @@ export class PendingRequests {
    */
   resendExpired(currentTime: Date, timeoutMs: number): Array<{ requestId: RequestId; payload: Buffer }> {
     const toResend: Array<{ requestId: RequestId; payload: Buffer }> = [];
-    
+
     for (const [requestId, data] of this.requests) {
       const elapsed = currentTime.getTime() - data.lastSentAt.getTime();
       if (elapsed >= timeoutMs) {
@@ -112,7 +112,7 @@ export class PendingRequests {
         toResend.push({ requestId, payload: data.payload });
       }
     }
-    
+
     return toResend;
   }
 
@@ -140,4 +140,3 @@ export class PendingRequests {
     this.requests.clear();
   }
 }
-

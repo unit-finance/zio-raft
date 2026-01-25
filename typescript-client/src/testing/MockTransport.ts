@@ -1,13 +1,13 @@
 /**
  * Mock transport for testing RaftClient without network dependencies
- * 
+ *
  * Provides precise control over message flow and timing for reliable testing.
- * 
+ *
  * Usage:
  * ```typescript
  * const mockTransport = new MockTransport();
  * const client = new RaftClient(config, mockTransport);
- * 
+ *
  * // Test can now inject server messages
  * mockTransport.injectMessage({
  *   type: 'ServerRequest',
@@ -15,7 +15,7 @@
  *   payload: Buffer.from('work'),
  *   createdAt: new Date(),
  * });
- * 
+ *
  * // And assert on messages client sent
  * const sentMessages = mockTransport.getSentMessagesOfType('ClientRequest');
  * ```
@@ -33,41 +33,41 @@ export class MockTransport implements ClientTransport {
    * Exposed publicly so tests can observe queue state if needed
    */
   public readonly incomingMessages: AsyncQueue<ServerMessage>;
-  
+
   /**
    * Track all messages sent by RaftClient for test assertions
    */
   public readonly sentMessages: ClientMessage[] = [];
-  
+
   /**
    * Current connection state
    * MockTransport starts connected (no real network layer to establish)
    * Tests can use connect()/disconnect() for state tracking if needed
    */
   private _connected = true;
-  
+
   /**
    * Auto-respond to CreateSession with SessionCreated
    * Set to false to manually control session creation in tests
    */
   public autoRespondToCreateSession = true;
-  
+
   /**
    * Delay for auto-responses (milliseconds)
    */
   public autoResponseDelay = 10;
-  
+
   constructor() {
     this.incomingMessages = new AsyncQueue();
   }
-  
+
   /**
    * Connect (mock - just sets flag)
    */
   async connect(_address: string): Promise<void> {
     this._connected = true;
   }
-  
+
   /**
    * Disconnect (mock - just sets flag)
    * Note: Does NOT close the incoming message queue to support reconnection testing.
@@ -79,14 +79,14 @@ export class MockTransport implements ClientTransport {
     // reconnection scenarios in tests. The queue can still receive messages
     // after "disconnect" for simulating server-side events during reconnection.
   }
-  
+
   /**
    * Close all queues - call this for final cleanup
    */
   closeQueues(): void {
     this.incomingMessages.close();
   }
-  
+
   /**
    * Send message (mock - records and optionally auto-responds)
    * Note: MockTransport doesn't enforce connection state for testing convenience
@@ -94,7 +94,7 @@ export class MockTransport implements ClientTransport {
   async sendMessage(message: ClientMessage): Promise<void> {
     // Record for assertions
     this.sentMessages.push(message);
-    
+
     // Auto-respond to CreateSession for convenience
     if (this.autoRespondToCreateSession && message.type === 'CreateSession') {
       setTimeout(() => {
@@ -106,11 +106,11 @@ export class MockTransport implements ClientTransport {
       }, this.autoResponseDelay);
     }
   }
-  
+
   // ==========================================================================
   // Test Helper Methods
   // ==========================================================================
-  
+
   /**
    * Inject a server message into the incoming queue
    * This simulates the server sending a message to the client
@@ -119,37 +119,36 @@ export class MockTransport implements ClientTransport {
   injectMessage(message: ServerMessage): void {
     this.incomingMessages.offer(message);
   }
-  
+
   /**
    * Get the last message sent by the client
    */
   getLastSentMessage(): ClientMessage | undefined {
     return this.sentMessages[this.sentMessages.length - 1];
   }
-  
+
   /**
    * Get all sent messages of a specific type
    */
-  getSentMessagesOfType<T extends ClientMessage['type']>(
-    type: T
-  ): Extract<ClientMessage, { type: T }>[] {
-    return this.sentMessages.filter(m => m.type === type) as any;
+  getSentMessagesOfType<T extends ClientMessage['type']>(type: T): Extract<ClientMessage, { type: T }>[] {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any
+    return this.sentMessages.filter((m) => m.type === type) as any;
   }
-  
+
   /**
    * Clear all sent messages (useful for multi-phase tests)
    */
   clearSentMessages(): void {
     this.sentMessages.length = 0;
   }
-  
+
   /**
    * Check if transport is connected
    */
   isConnected(): boolean {
     return this._connected;
   }
-  
+
   /**
    * Wait for a specific message type to be sent
    * Useful for async assertions
@@ -159,15 +158,16 @@ export class MockTransport implements ClientTransport {
     timeoutMs = 1000
   ): Promise<Extract<ClientMessage, { type: typeof type }>> {
     const startTime = Date.now();
-    
+
     while (Date.now() - startTime < timeoutMs) {
-      const message = this.sentMessages.find(m => m.type === type);
+      const message = this.sentMessages.find((m) => m.type === type);
       if (message) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any
         return message as any;
       }
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    
+
     throw new Error(`MockTransport: No message of type '${type}' sent within ${timeoutMs}ms`);
   }
 }

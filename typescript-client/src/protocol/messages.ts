@@ -217,4 +217,3 @@ export type SessionCloseReason =
  * Request error reason (discriminated union)
  */
 export type RequestErrorReason = 'ResponseEvicted';
-

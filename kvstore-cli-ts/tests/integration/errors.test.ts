@@ -22,11 +22,7 @@ describe('Error Handling Scenarios', () => {
     });
 
     // Configure mock to simulate connection timeout
-    const timeoutError = new OperationError(
-      'connect',
-      'connection',
-      'Could not connect to cluster (timeout after 5s)'
-    );
+    const timeoutError = new OperationError('connect', 'connection', 'Could not connect to cluster (timeout after 5s)');
     client.setConnectError(timeoutError);
 
     await expect(client.connect()).rejects.toThrow();
@@ -36,11 +32,11 @@ describe('Error Handling Scenarios', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(OperationError);
       expect((error as OperationError).reason).toBe('connection');
-      
+
       const formatted = formatError(error);
       expect(formatted).toContain('Could not connect to cluster');
       expect(formatted).toContain('timeout after 5s');
-      
+
       const exitCode = getExitCode(error);
       expect(exitCode).toBe(2); // Connection error
     }
@@ -62,11 +58,7 @@ describe('Error Handling Scenarios', () => {
     await client.connect();
 
     // Configure mock to simulate timeout during operation
-    const timeoutError = new OperationError(
-      'set',
-      'timeout',
-      'Operation timed out after 5s'
-    );
+    const timeoutError = new OperationError('set', 'timeout', 'Operation timed out after 5s');
     client.setSetError(timeoutError);
 
     await expect(client.set(key, value)).rejects.toThrow();
@@ -76,10 +68,10 @@ describe('Error Handling Scenarios', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(OperationError);
       expect((error as OperationError).reason).toBe('timeout');
-      
+
       const formatted = formatError(error);
       expect(formatted).toBe('Error: Operation timed out after 5s');
-      
+
       const exitCode = getExitCode(error);
       expect(exitCode).toBe(2); // Timeout error
     }
@@ -134,11 +126,11 @@ describe('Error Handling Scenarios', () => {
       await client.get(key);
     } catch (error) {
       expect(error).toBeInstanceOf(ProtocolError);
-      
+
       const formatted = formatError(error);
       expect(formatted).toContain('Protocol error');
       expect(formatted).toContain('Invalid buffer format');
-      
+
       const exitCode = getExitCode(error);
       expect(exitCode).toBe(3); // Protocol error
     }
@@ -150,11 +142,24 @@ describe('Error Handling Scenarios', () => {
   it('should throw protocol error for invalid notification discriminator', () => {
     // Create a buffer with invalid discriminator
     const invalidBuffer = Buffer.from([
-      0xFF, // Invalid discriminator (not 0x4E 'N')
-      0x00, 0x00, 0x00, 0x04, // Length: 4
-      0x74, 0x65, 0x73, 0x74, // "test"
-      0x00, 0x00, 0x00, 0x05, // Length: 5
-      0x76, 0x61, 0x6c, 0x75, 0x65, // "value"
+      0xff, // Invalid discriminator (not 0x4E 'N')
+      0x00,
+      0x00,
+      0x00,
+      0x04, // Length: 4
+      0x74,
+      0x65,
+      0x73,
+      0x74, // "test"
+      0x00,
+      0x00,
+      0x00,
+      0x05, // Length: 5
+      0x76,
+      0x61,
+      0x6c,
+      0x75,
+      0x65, // "value"
     ]);
 
     expect(() => decodeNotification(invalidBuffer)).toThrow(ProtocolError);
@@ -169,7 +174,7 @@ describe('Error Handling Scenarios', () => {
   });
 
   it('should handle buffer too short for notification', () => {
-    const shortBuffer = Buffer.from([0x4E, 0x00]); // Only discriminator and partial length
+    const shortBuffer = Buffer.from([0x4e, 0x00]); // Only discriminator and partial length
 
     expect(() => decodeNotification(shortBuffer)).toThrow(ProtocolError);
 
@@ -220,10 +225,10 @@ describe('Error Handling Scenarios', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(OperationError);
       expect((error as OperationError).reason).toBe('connection');
-      
+
       const formatted = formatError(error);
       expect(formatted).toBe('Error: Could not connect to cluster (timeout after 5s)');
-      
+
       const exitCode = getExitCode(error);
       expect(exitCode).toBe(2);
     }
@@ -240,11 +245,7 @@ describe('Error Handling Scenarios', () => {
 
     await client.connect();
 
-    const serverError = new OperationError(
-      'set',
-      'server_error',
-      'Server rejected command: invalid session'
-    );
+    const serverError = new OperationError('set', 'server_error', 'Server rejected command: invalid session');
     client.setSetError(serverError);
 
     await expect(client.set(key, value)).rejects.toThrow();
@@ -254,10 +255,10 @@ describe('Error Handling Scenarios', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(OperationError);
       expect((error as OperationError).reason).toBe('server_error');
-      
+
       const formatted = formatError(error);
       expect(formatted).toContain('Server rejected command');
-      
+
       const exitCode = getExitCode(error);
       expect(exitCode).toBe(3); // Operational error
     }

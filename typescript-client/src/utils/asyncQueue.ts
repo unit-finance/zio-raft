@@ -92,12 +92,12 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
         const result = await new Promise<T | IteratorResult<T>>((resolve) => {
           this.waiting.push(resolve);
         });
-        
+
         if (typeof result === 'object' && result !== null && 'done' in result && result.done) {
           // IteratorResult with done=true - stop iteration
           return;
         }
-        
+
         yield result as T;
       }
     }
@@ -132,7 +132,7 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
    */
   close(): void {
     this.closed = true;
-    
+
     // Signal all waiting consumers that queue is closed
     const doneResult: IteratorResult<T> = { done: true, value: undefined };
     for (const waiter of this.waiting) {
@@ -155,4 +155,3 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     this.queue = [];
   }
 }
-

@@ -15,10 +15,7 @@ import { createWatchCommand } from './commands/watch.js';
 function main() {
   const program = new Command();
 
-  program
-    .name('kvstore')
-    .version('0.1.0')
-    .description('KVStore CLI - interact with a distributed key-value store');
+  program.name('kvstore').version('0.1.0').description('KVStore CLI - interact with a distributed key-value store');
 
   // Register commands
   program.addCommand(createSetCommand());
@@ -29,7 +26,7 @@ function main() {
   program.parse(process.argv);
 
   // Show help if no command provided
-  if (!process.argv.slice(2).length) {
+  if (process.argv.slice(2).length === 0) {
     program.outputHelp();
   }
 }

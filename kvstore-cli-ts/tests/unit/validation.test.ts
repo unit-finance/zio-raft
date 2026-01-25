@@ -30,7 +30,7 @@ describe('Key Validation', () => {
   it('should reject key exceeding 256 bytes', () => {
     const longKey = 'a'.repeat(257);
     expect(() => validateKey(longKey)).toThrow(ValidationError);
-    
+
     try {
       validateKey(longKey);
     } catch (error) {
@@ -54,7 +54,7 @@ describe('Key Validation', () => {
     // Emoji takes 4 bytes in UTF-8
     const unicodeKey = 'key🔑'; // 'key' (3 bytes) + emoji (4 bytes) = 7 bytes
     expect(() => validateKey(unicodeKey)).not.toThrow();
-    
+
     // Create a key that's under 256 chars but over 256 bytes
     const manyEmojis = '🔑'.repeat(65); // 65 * 4 = 260 bytes
     expect(() => validateKey(manyEmojis)).toThrow(ValidationError);
@@ -81,7 +81,7 @@ describe('Value Validation', () => {
   // TC-008: Empty value is rejected
   it('should reject empty value', () => {
     expect(() => validateValue('')).toThrow(ValidationError);
-    
+
     try {
       validateValue('');
     } catch (error) {
@@ -95,7 +95,7 @@ describe('Value Validation', () => {
   it('should reject value exceeding 1MB', () => {
     const largeValue = 'a'.repeat(1024 * 1024 + 1); // 1MB + 1 byte
     expect(() => validateValue(largeValue)).toThrow(ValidationError);
-    
+
     try {
       validateValue(largeValue);
     } catch (error) {
@@ -119,7 +119,7 @@ describe('Value Validation', () => {
     // Multi-byte characters
     const unicodeValue = '値🎉'.repeat(100); // Japanese + emoji
     const byteLength = Buffer.from(unicodeValue).length;
-    
+
     if (byteLength <= 1024 * 1024) {
       expect(() => validateValue(unicodeValue)).not.toThrow();
     } else {
@@ -140,7 +140,7 @@ describe('Endpoint Parsing', () => {
   // TC-013: Valid single endpoint is parsed
   it('should parse single endpoint correctly', () => {
     const result = parseEndpoints('node-1=tcp://127.0.0.1:7001');
-    
+
     expect(result.endpoints.size).toBe(1);
     expect(result.endpoints.get('node-1')).toBe('tcp://127.0.0.1:7001');
   });
@@ -148,7 +148,7 @@ describe('Endpoint Parsing', () => {
   // TC-014: Multiple endpoints are parsed
   it('should parse multiple endpoints correctly', () => {
     const result = parseEndpoints('node-1=tcp://127.0.0.1:7001,node-2=tcp://192.168.1.10:7002');
-    
+
     expect(result.endpoints.size).toBe(2);
     expect(result.endpoints.get('node-1')).toBe('tcp://127.0.0.1:7001');
     expect(result.endpoints.get('node-2')).toBe('tcp://192.168.1.10:7002');
@@ -157,7 +157,7 @@ describe('Endpoint Parsing', () => {
   // TC-015: Default endpoint is used when empty
   it('should use default endpoint when empty string provided', () => {
     const result = parseEndpoints('');
-    
+
     expect(result.endpoints.size).toBe(1);
     expect(result.endpoints.get('node-1')).toBe('tcp://127.0.0.1:7001');
   });
@@ -165,7 +165,7 @@ describe('Endpoint Parsing', () => {
   // TC-016: Invalid endpoint format is rejected
   it('should reject invalid endpoint format', () => {
     expect(() => parseEndpoints('node-1=invalid-format')).toThrow(ValidationError);
-    
+
     try {
       parseEndpoints('node-1=invalid-format');
     } catch (error) {
@@ -180,7 +180,7 @@ describe('Endpoint Parsing', () => {
   it('should reject invalid port numbers', () => {
     // Port too high
     expect(() => parseEndpoints('node-1=tcp://127.0.0.1:99999')).toThrow(ValidationError);
-    
+
     try {
       parseEndpoints('node-1=tcp://127.0.0.1:99999');
     } catch (error) {
@@ -189,7 +189,7 @@ describe('Endpoint Parsing', () => {
       expect(ve.message).toContain('Invalid port');
       expect(ve.message).toContain('99999');
     }
-    
+
     // Port zero
     expect(() => parseEndpoints('node-1=tcp://127.0.0.1:0')).toThrow(ValidationError);
   });
@@ -197,7 +197,7 @@ describe('Endpoint Parsing', () => {
   // TC-018: Missing member ID is rejected
   it('should reject missing member ID', () => {
     expect(() => parseEndpoints('=tcp://127.0.0.1:7001')).toThrow(ValidationError);
-    
+
     try {
       parseEndpoints('=tcp://127.0.0.1:7001');
     } catch (error) {
@@ -211,7 +211,7 @@ describe('Endpoint Parsing', () => {
   // TC-019: Whitespace is trimmed
   it('should trim whitespace from member IDs and endpoints', () => {
     const result = parseEndpoints('  node-1 = tcp://127.0.0.1:7001  ,  node-2 = tcp://host:7002  ');
-    
+
     expect(result.endpoints.size).toBe(2);
     expect(result.endpoints.get('node-1')).toBe('tcp://127.0.0.1:7001');
     expect(result.endpoints.get('node-2')).toBe('tcp://host:7002');

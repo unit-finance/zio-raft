@@ -18,7 +18,7 @@ describe('Output Formatting', () => {
   it('should format validation error with actual/expected values', () => {
     const error = new ValidationError('key', 'Key exceeds maximum size', 300, 256);
     const formatted = formatError(error);
-    
+
     expect(formatted).toContain('Error:');
     expect(formatted).toContain('actual: 300');
     expect(formatted).toContain('expected: 256');
@@ -27,7 +27,7 @@ describe('Output Formatting', () => {
   it('should format validation error without actual/expected', () => {
     const error = new ValidationError('key', 'Key cannot be empty');
     const formatted = formatError(error);
-    
+
     expect(formatted).toBe('Error: Key cannot be empty');
   });
 
@@ -35,28 +35,28 @@ describe('Output Formatting', () => {
   it('should format connection error clearly', () => {
     const error = new OperationError('connect', 'connection', 'Connection failed');
     const formatted = formatError(error);
-    
+
     expect(formatted).toBe('Error: Could not connect to cluster (timeout after 5s)');
   });
 
   it('should format timeout error clearly', () => {
     const error = new OperationError('set', 'timeout', 'Operation timeout');
     const formatted = formatError(error);
-    
+
     expect(formatted).toBe('Error: Operation timed out after 5s');
   });
 
   it('should format other operation errors', () => {
     const error = new OperationError('set', 'server_error', 'Server rejected command');
     const formatted = formatError(error);
-    
+
     expect(formatted).toBe('Error: Server rejected command');
   });
 
   it('should format protocol error', () => {
     const error = new ProtocolError('Invalid discriminator');
     const formatted = formatError(error);
-    
+
     expect(formatted).toContain('Error: Protocol error');
     expect(formatted).toContain('Invalid discriminator');
   });
@@ -65,7 +65,7 @@ describe('Output Formatting', () => {
   it('should format generic Error safely', () => {
     const error = new Error('Something went wrong');
     const formatted = formatError(error);
-    
+
     expect(formatted).toBe('Error: Something went wrong');
   });
 
@@ -89,9 +89,9 @@ describe('Notification Formatting', () => {
       key: 'mykey',
       value: 'myvalue',
     };
-    
+
     const formatted = formatNotification(notification);
-    
+
     expect(formatted).toBe('[2026-01-13T10:15:23.456Z] seq=42 key=mykey value=myvalue');
   });
 
@@ -104,10 +104,10 @@ describe('Notification Formatting', () => {
       key: 'key',
       value: 'value',
     };
-    
+
     const formatted = formatNotification(notification);
     const isoTimestamp = now.toISOString();
-    
+
     expect(formatted).toContain(`[${isoTimestamp}]`);
     // Verify ISO 8601 format pattern
     expect(isoTimestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
@@ -122,9 +122,9 @@ describe('Notification Formatting', () => {
       key: 'key',
       value: longValue,
     };
-    
+
     const formatted = formatNotification(notification);
-    
+
     expect(formatted).toContain(longValue);
     expect(formatted.length).toBeGreaterThan(1000);
   });
@@ -136,9 +136,9 @@ describe('Notification Formatting', () => {
       key: 'key',
       value: 'value',
     };
-    
+
     const formatted = formatNotification(notification);
-    
+
     expect(formatted).toContain('seq=9007199254740991');
   });
 
@@ -149,9 +149,9 @@ describe('Notification Formatting', () => {
       key: '键🔑',
       value: '值🎉',
     };
-    
+
     const formatted = formatNotification(notification);
-    
+
     expect(formatted).toContain('key=键🔑');
     expect(formatted).toContain('value=值🎉');
   });

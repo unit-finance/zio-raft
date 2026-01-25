@@ -39,9 +39,9 @@ export class TimeoutError extends RaftClientError {
     // Distinguish between RequestId (bigint) and CorrelationId (string)
     if (id !== undefined) {
       if (typeof id === 'bigint') {
-        this.requestId = id as RequestId;
+        this.requestId = id;
       } else if (typeof id === 'string') {
-        this.correlationId = id as CorrelationId;
+        this.correlationId = id;
       }
     }
   }
@@ -84,4 +84,3 @@ export class ProtocolError extends RaftClientError {
     this.name = 'ProtocolError';
   }
 }
-

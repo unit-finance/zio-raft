@@ -27,7 +27,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
-import { spawn, execSync, ChildProcess } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import { join } from 'path';
 import { existsSync } from 'fs';
 
@@ -127,7 +127,7 @@ async function runCliExpectSuccess(...args: string[]): Promise<string> {
  * Run CLI command expecting failure (exit code != 0)
  * Throws if command succeeds.
  */
-async function runCliExpectError(...args: string[]): Promise<CliResult> {
+async function _runCliExpectError(...args: string[]): Promise<CliResult> {
   const result = await runCli(...args);
   if (result.exitCode === 0) {
     throw new Error(`Expected CLI to fail, but it succeeded: ${result.stdout}`);
@@ -153,16 +153,19 @@ async function startWatch(key: string): Promise<WatchHandle> {
   let stopped = false;
 
   const childProcess = spawn('node', [CLI_PATH, 'watch', key], {
-    detached: false,  // Don't let it outlive parent
+    detached: false, // Don't let it outlive parent
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
   childProcess.stdout.on('data', (data) => {
-    const lines = data.toString().split('\n').filter((l: string) => l.trim());
+    const lines = data
+      .toString()
+      .split('\n')
+      .filter((l: string) => l.trim());
     output.push(...lines.filter((l: string) => !l.includes('Warning:')));
   });
 
-  childProcess.stderr.on('data', (data) => {
+  childProcess.stderr.on('data', (_data) => {
     // Ignore stderr (usually just warnings)
   });
 
@@ -181,14 +184,14 @@ async function startWatch(key: string): Promise<WatchHandle> {
 
     // Try multiple signals to ensure process dies
     const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGKILL'];
-    
+
     for (const signal of signals) {
       if (stopped) break;
-      
+
       try {
         childProcess.kill(signal);
         await sleep(200);
-        
+
         // Check if process is still running
         try {
           process.kill(childProcess.pid, 0); // Signal 0 = check if alive
@@ -272,7 +275,7 @@ afterEach(async () => {
 afterAll(async () => {
   // Final cleanup - give any remaining processes time to die
   await sleep(500);
-  
+
   // Force kill any remaining watches (safety net)
   for (const watch of activeWatches) {
     try {

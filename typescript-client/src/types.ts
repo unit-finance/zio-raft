@@ -77,8 +77,9 @@ export type CorrelationId = string & { readonly __brand: 'CorrelationId' };
 export const CorrelationId = {
   generate: (): CorrelationId => {
     // Node.js 18+ has built-in crypto.randomUUID()
-    const crypto = require('crypto');
-    const uuid = crypto.randomUUID() as string;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const crypto = require('crypto') as { randomUUID: () => string };
+    const uuid = crypto.randomUUID();
     return uuid as CorrelationId;
   },
   fromString: (value: string): CorrelationId => {
@@ -89,4 +90,3 @@ export const CorrelationId = {
   },
   unwrap: (id: CorrelationId): string => id as string,
 };
-

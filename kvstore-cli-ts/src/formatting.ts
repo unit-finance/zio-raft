@@ -62,7 +62,7 @@ export function formatNotification(notification: WatchNotification): string {
  */
 /**
  * Get appropriate exit code for error
- * 
+ *
  * Exit codes follow Unix conventions:
  * - 0: Success (not handled here)
  * - 1: Validation error (bad user input)

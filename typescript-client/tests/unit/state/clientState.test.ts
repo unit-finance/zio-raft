@@ -2,12 +2,7 @@
 // Tests state transitions with mock transport
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import {
-  ClientState,
-  DisconnectedState,
-  StateManager,
-  StreamEvent,
-} from '../../../src/state/clientState';
+import { DisconnectedState, StateManager, StreamEvent } from '../../../src/state/clientState';
 import { ClientConfig } from '../../../src/config';
 import { MemberId } from '../../../src/types';
 
@@ -79,7 +74,7 @@ describe('State Machine', () => {
 
   // More test cases would follow similar pattern...
   // TC-STATE-003 through TC-STATE-016 testing other transitions
-  
+
   describe('Placeholder for remaining tests', () => {
     it('TC-STATE-003: ConnectingNew handles SessionCreated', () => {
       // TODO: Implement full test
@@ -102,4 +97,3 @@ describe('State Machine', () => {
     });
   });
 });
-

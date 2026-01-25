@@ -5,13 +5,7 @@
 
 import { RaftClient, ClientEvents } from '@zio-raft/typescript-client';
 import type { MemberId } from '@zio-raft/typescript-client';
-import {
-  encodeSetRequest,
-  encodeGetQuery,
-  encodeWatchRequest,
-  decodeGetResult,
-  decodeNotification,
-} from './codecs.js';
+import { encodeSetRequest, encodeGetQuery, encodeWatchRequest, decodeGetResult, decodeNotification } from './codecs.js';
 import { WatchNotification } from './types.js';
 import { OperationError } from './errors.js';
 
@@ -58,18 +52,13 @@ export class KVClient {
       await this.raftClient.connect();
       this.isConnected = true;
     } catch (err) {
-      throw new OperationError(
-        'connect',
-        'timeout',
-        'Could not connect to cluster (timeout after 5s)',
-        err
-      );
+      throw new OperationError('connect', 'timeout', 'Could not connect to cluster (timeout after 5s)', err);
     }
   }
 
   /**
    * Disconnect from the cluster
-   * 
+   *
    * Note: Disconnect errors are logged but not thrown to prevent
    * cleanup failures from propagating. This is a best-effort operation.
    */
@@ -106,12 +95,7 @@ export class KVClient {
       await this.raftClient.submitCommand(payload);
       // Result is Unit, no decoding needed
     } catch (err) {
-      throw new OperationError(
-        'set',
-        'timeout',
-        'Operation timed out after 5s',
-        err
-      );
+      throw new OperationError('set', 'timeout', 'Operation timed out after 5s', err);
     }
   }
 
@@ -125,12 +109,7 @@ export class KVClient {
       const resultBuffer = await this.raftClient.submitQuery(payload);
       return decodeGetResult(resultBuffer);
     } catch (err) {
-      throw new OperationError(
-        'get',
-        'timeout',
-        'Operation timed out after 5s',
-        err
-      );
+      throw new OperationError('get', 'timeout', 'Operation timed out after 5s', err);
     }
   }
 
@@ -144,12 +123,7 @@ export class KVClient {
       await this.raftClient.submitCommand(payload);
       // Watch is registered, notifications will arrive via notifications()
     } catch (err) {
-      throw new OperationError(
-        'watch',
-        'timeout',
-        'Operation timed out after 5s',
-        err
-      );
+      throw new OperationError('watch', 'timeout', 'Operation timed out after 5s', err);
     }
   }
 
@@ -164,7 +138,7 @@ export class KVClient {
     // using a cleanup pattern with try/finally or AbortController.
     // SCALA COMPARISON: NOT APPLICABLE - Scala exposes notifications as ZStream which handles
     // lifecycle automatically (KVClient.scala:34-37). No event handler registration pattern.
-    
+
     // Create a promise-based queue for server requests
     const queue: WatchNotification[] = [];
     let resolveNext: ((value: IteratorResult<WatchNotification>) => void) | null = null;

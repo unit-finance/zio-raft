@@ -3,7 +3,7 @@
 
 /**
  * Event name constants for RaftClient events
- * 
+ *
  * Usage:
  * ```typescript
  * client.on(ClientEvents.CONNECTED, (evt) => {
@@ -14,19 +14,19 @@
 export const ClientEvents = {
   /** Emitted when client successfully connects and establishes a session */
   CONNECTED: 'connected',
-  
+
   /** Emitted when client disconnects from the cluster */
   DISCONNECTED: 'disconnected',
-  
+
   /** Emitted when client is attempting to reconnect */
   RECONNECTING: 'reconnecting',
-  
+
   /** Emitted when the session expires on the server */
   SESSION_EXPIRED: 'sessionExpired',
-  
+
   /** Emitted when server sends a request to the client (internal - routed to queue) */
   SERVER_REQUEST_RECEIVED: 'serverRequestReceived',
-  
+
   /** Emitted when an error occurs */
   ERROR: 'error',
 } as const;
@@ -34,7 +34,7 @@ export const ClientEvents = {
 /**
  * Type representing all valid client event names
  */
-export type ClientEventName = typeof ClientEvents[keyof typeof ClientEvents];
+export type ClientEventName = (typeof ClientEvents)[keyof typeof ClientEvents];
 
 /**
  * Type guard to check if a string is a valid client event name

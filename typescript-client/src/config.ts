@@ -91,4 +91,3 @@ export function createConfig(input: ClientConfigInput): ClientConfig {
 
   return config;
 }
-

@@ -73,4 +73,3 @@ export enum CloseReasonCode {
 export enum RequestErrorReasonCode {
   ResponseEvicted = 1,
 }
-

@@ -28,4 +28,3 @@ export interface ClientTransport {
    */
   incomingMessages: AsyncIterable<ServerMessage>;
 }
-

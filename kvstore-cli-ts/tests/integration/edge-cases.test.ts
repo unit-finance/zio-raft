@@ -163,9 +163,7 @@ describe('Edge Cases', () => {
 
   it('should handle complex endpoint configurations', () => {
     const complexEndpoints =
-      'node-1=tcp://127.0.0.1:7001,' +
-      'node-2=tcp://192.168.1.10:7002,' +
-      'node-3=tcp://prod.example.com:7003';
+      'node-1=tcp://127.0.0.1:7001,' + 'node-2=tcp://192.168.1.10:7002,' + 'node-3=tcp://prod.example.com:7003';
 
     const endpointConfig = parseEndpoints(complexEndpoints);
 

@@ -42,7 +42,7 @@ describe('Set Command Integration', () => {
   // TC-039: Set command fails with invalid key
   it('should fail validation before client creation with invalid key', async () => {
     const longKey = 'a'.repeat(257); // Exceeds 256 bytes
-    const value = 'myvalue';
+    const _value = 'myvalue';
 
     // Validation should fail
     expect(() => validateKey(longKey)).toThrow(ValidationError);

@@ -6,7 +6,16 @@ import { ClientConfig } from '../config';
 import { PendingRequests, PendingRequestData } from './pendingRequests';
 import { PendingQueries, PendingQueryData } from './pendingQueries';
 import { ServerRequestTracker } from './serverRequestTracker';
-import { CreateSession, ContinueSession, CloseSession, ServerRequestAck, KeepAlive, ClientMessage, ClientRequest, Query } from '../protocol/messages';
+import {
+  CreateSession,
+  ContinueSession,
+  CloseSession,
+  ServerRequestAck,
+  KeepAlive,
+  ClientMessage,
+  ClientRequest,
+  Query,
+} from '../protocol/messages';
 import { debugLog } from '../utils/debug';
 
 // ============================================================================
@@ -24,7 +33,7 @@ function buildResendMessages(
   now: Date
 ): ClientMessage[] {
   const messages: ClientMessage[] = [];
-  
+
   // Build ClientRequest messages for pending commands
   for (const { requestId, payload } of requestsToResend) {
     const lowestPendingRequestId = pendingRequests.lowestPendingRequestIdOr(requestId);
@@ -37,7 +46,7 @@ function buildResendMessages(
     };
     messages.push(clientRequest);
   }
-  
+
   // Build Query messages for pending queries
   for (const { correlationId, payload } of queriesToResend) {
     const query: Query = {
@@ -48,7 +57,7 @@ function buildResendMessages(
     };
     messages.push(query);
   }
-  
+
   return messages;
 }
 
@@ -132,11 +141,7 @@ export interface ConnectedState {
  * Unified event stream events (internal to state machine)
  * Combines action commands, server messages, timers into single stream
  */
-export type StreamEvent =
-  | ActionEvent
-  | ServerMessageEvent
-  | KeepAliveTickEvent
-  | TimeoutCheckEvent;
+export type StreamEvent = ActionEvent | ServerMessageEvent | KeepAliveTickEvent | TimeoutCheckEvent;
 
 /**
  * User action event (from API calls)
@@ -175,11 +180,7 @@ export interface TimeoutCheckEvent {
 /**
  * Internal actions from user API calls
  */
-export type ClientAction =
-  | ConnectAction
-  | DisconnectAction
-  | SubmitCommandAction
-  | SubmitQueryAction;
+export type ClientAction = ConnectAction | DisconnectAction | SubmitCommandAction | SubmitQueryAction;
 
 /**
  * Connect action: initiate connection to cluster
@@ -292,7 +293,7 @@ export class DisconnectedStateHandler {
     switch (event.type) {
       case 'Action':
         return this.handleAction(state, event.action);
-      
+
       case 'ServerMsg':
       case 'KeepAliveTick':
       case 'TimeoutCheck':
@@ -304,24 +305,21 @@ export class DisconnectedStateHandler {
   /**
    * Handle user actions in Disconnected state
    */
-  private async handleAction(
-    state: DisconnectedState,
-    action: ClientAction
-  ): Promise<StateTransitionResult> {
+  private async handleAction(state: DisconnectedState, action: ClientAction): Promise<StateTransitionResult> {
     switch (action.type) {
       case 'Connect':
         return this.handleConnect(state, action);
-      
+
       case 'SubmitCommand':
         // Reject command - not connected
         action.reject(new Error('Not connected to cluster'));
         return { newState: state };
-      
+
       case 'SubmitQuery':
         // Reject query - not connected
         action.reject(new Error('Not connected to cluster'));
         return { newState: state };
-      
+
       case 'Disconnect':
         // Already disconnected, no-op
         return { newState: state };
@@ -332,25 +330,23 @@ export class DisconnectedStateHandler {
    * Handle Connect action: transition to ConnectingNewSession
    */
   private async handleConnect(state: DisconnectedState, action: ConnectAction): Promise<StateTransitionResult> {
-    
     const { config } = state;
-    
+
     // Get first cluster member to try
     const members = Array.from(config.clusterMembers.entries());
     if (members.length === 0) {
       throw new Error('No cluster members configured');
     }
-    
+
     const firstMember = members[0];
     if (!firstMember) {
       throw new Error('No cluster members configured');
     }
-    
+
     const [firstMemberId, firstAddress] = firstMember;
     const nonce = Nonce.generate();
     const createdAt = new Date();
-    
-    
+
     // Create new state
     const newState: ConnectingNewSessionState = {
       state: 'ConnectingNewSession',
@@ -363,20 +359,19 @@ export class DisconnectedStateHandler {
       pendingQueries: new PendingQueries(),
 
       // TODO (eran): "as any" is a code smell - need to go over the code and find where it is used, probably because the parent interface is not defined correctly
-      
+
       // Store connect callbacks to resolve/reject the connect() promise
-      connectResolve: (action as any).resolve, 
+      connectResolve: (action as any).resolve,
       connectReject: (action as any).reject,
     };
-    
-    
+
     // Create CreateSession message to send
     const createSessionMsg: CreateSession = {
       type: 'CreateSession',
       capabilities: config.capabilities,
       nonce,
     };
-    
+
     return {
       newState,
       messagesToSend: [createSessionMsg],
@@ -396,21 +391,18 @@ export class ConnectingNewSessionStateHandler {
   /**
    * Handle an event in the ConnectingNewSession state
    */
-  async handle(
-    state: ConnectingNewSessionState,
-    event: StreamEvent
-  ): Promise<StateTransitionResult> {
+  async handle(state: ConnectingNewSessionState, event: StreamEvent): Promise<StateTransitionResult> {
     switch (event.type) {
       case 'Action':
         return this.handleAction(state, event.action);
-      
+
       case 'ServerMsg':
         return this.handleServerMessage(state, event.message);
-      
+
       case 'KeepAliveTick':
         // Don't send keep-alive until connected
         return { newState: state };
-      
+
       case 'TimeoutCheck':
         return this.handleTimeoutCheck(state);
     }
@@ -419,21 +411,18 @@ export class ConnectingNewSessionStateHandler {
   /**
    * Handle user actions in ConnectingNewSession state
    */
-  private async handleAction(
-    state: ConnectingNewSessionState,
-    action: ClientAction
-  ): Promise<StateTransitionResult> {
+  private async handleAction(state: ConnectingNewSessionState, action: ClientAction): Promise<StateTransitionResult> {
     switch (action.type) {
       case 'Connect':
         // Already connecting, no-op
         return { newState: state };
-      
+
       case 'SubmitCommand':
         return this.handleSubmitCommand(state, action);
-      
+
       case 'SubmitQuery':
         return this.handleSubmitQuery(state, action);
-      
+
       case 'Disconnect':
         return this.handleDisconnect(state);
     }
@@ -469,18 +458,18 @@ export class ConnectingNewSessionStateHandler {
    */
   private async handleDisconnect(state: ConnectingNewSessionState): Promise<StateTransitionResult> {
     const error = new Error('Client disconnected');
-    
+
     // Reject the connect() promise
     state.connectReject(error);
-    
+
     state.pendingRequests.failAll(error);
     state.pendingQueries.failAll(error);
-    
+
     const newState: DisconnectedState = {
       state: 'Disconnected',
       config: state.config,
     };
-    
+
     return {
       newState,
       eventsToEmit: [{ type: 'stateChange', oldState: 'ConnectingNewSession', newState: 'Disconnected' }],
@@ -497,10 +486,10 @@ export class ConnectingNewSessionStateHandler {
     switch (message.type) {
       case 'SessionCreated':
         return this.handleSessionCreated(state, message);
-      
+
       case 'SessionRejected':
         return this.handleSessionRejected(state, message);
-      
+
       default:
         // Ignore other message types during connection
         return { newState: state };
@@ -514,16 +503,15 @@ export class ConnectingNewSessionStateHandler {
     state: ConnectingNewSessionState,
     message: SessionCreated
   ): Promise<StateTransitionResult> {
-    
     // Verify nonce matches
     if (Nonce.unwrap(message.nonce) !== Nonce.unwrap(state.nonce)) {
       // Nonce mismatch - ignore (old/duplicate message)
       return { newState: state };
     }
-    
+
     // Resolve the connect() promise
     state.connectResolve();
-    
+
     // Transition to Connected state
     const newState: ConnectedState = {
       state: 'Connected',
@@ -537,20 +525,15 @@ export class ConnectingNewSessionStateHandler {
       pendingQueries: state.pendingQueries,
       currentMemberId: state.currentMemberId,
     };
-    
+
     // Resend all pending requests and queries
     const now = new Date();
     const requestsToResend = state.pendingRequests.resendAll(now);
     const queriesToResend = state.pendingQueries.resendAll(now);
-    
+
     // Build messages for pending requests and queries
-    const messagesToSend = buildResendMessages(
-      requestsToResend,
-      queriesToResend,
-      state.pendingRequests,
-      now
-    );
-    
+    const messagesToSend = buildResendMessages(requestsToResend, queriesToResend, state.pendingRequests, now);
+
     return {
       newState,
       messagesToSend,
@@ -573,14 +556,14 @@ export class ConnectingNewSessionStateHandler {
       // Nonce mismatch - ignore (old/duplicate message)
       return { newState: state };
     }
-    
+
     switch (message.reason) {
       case 'NotLeader':
         return this.handleNotLeader(state, message.leaderId);
-      
+
       case 'InvalidCapabilities':
         return this.handleInvalidCapabilities(state);
-      
+
       case 'SessionExpired':
       case 'Other':
         // Try next member
@@ -591,10 +574,7 @@ export class ConnectingNewSessionStateHandler {
   /**
    * Handle NotLeader rejection: try to connect to leader if known
    */
-  private async handleNotLeader(
-    state: ConnectingNewSessionState,
-    leaderId?: MemberId
-  ): Promise<StateTransitionResult> {
+  private async handleNotLeader(state: ConnectingNewSessionState, leaderId?: MemberId): Promise<StateTransitionResult> {
     if (leaderId) {
       const leaderAddress = state.config.clusterMembers.get(leaderId);
       if (leaderAddress) {
@@ -606,23 +586,21 @@ export class ConnectingNewSessionStateHandler {
           currentMemberId: leaderId,
           createdAt: new Date(),
         };
-        
+
         const createSessionMsg: CreateSession = {
           type: 'CreateSession',
           capabilities: state.capabilities,
           nonce,
         };
-        
+
         return {
           newState,
           messagesToSend: [createSessionMsg],
-          eventsToEmit: [
-            { type: 'connectionAttempt', memberId: leaderId, address: leaderAddress },
-          ],
+          eventsToEmit: [{ type: 'connectionAttempt', memberId: leaderId, address: leaderAddress }],
         };
       }
     }
-    
+
     // Leader unknown or not in our cluster config - try next member
     return this.tryNextMember(state);
   }
@@ -630,18 +608,16 @@ export class ConnectingNewSessionStateHandler {
   /**
    * Handle InvalidCapabilities rejection: fail immediately
    */
-  private async handleInvalidCapabilities(
-    state: ConnectingNewSessionState
-  ): Promise<StateTransitionResult> {
+  private async handleInvalidCapabilities(state: ConnectingNewSessionState): Promise<StateTransitionResult> {
     const error = new Error('Invalid capabilities');
     state.pendingRequests.failAll(error);
     state.pendingQueries.failAll(error);
-    
+
     const newState: DisconnectedState = {
       state: 'Disconnected',
       config: state.config,
     };
-    
+
     return {
       newState,
       eventsToEmit: [
@@ -663,18 +639,18 @@ export class ConnectingNewSessionStateHandler {
     // in RaftClient.scala:126-127. TypeScript fails after one pass through all members.
     const members = Array.from(state.config.clusterMembers.entries());
     const currentIndex = members.findIndex(([id]) => MemberId.unwrap(id) === MemberId.unwrap(state.currentMemberId));
-    
+
     if (currentIndex === -1 || currentIndex === members.length - 1) {
       // No more members to try - fail
       const error = new Error('Failed to connect to any cluster member');
       state.pendingRequests.failAll(error);
       state.pendingQueries.failAll(error);
-      
+
       const newState: DisconnectedState = {
         state: 'Disconnected',
         config: state.config,
       };
-      
+
       return {
         newState,
         eventsToEmit: [
@@ -683,52 +659,48 @@ export class ConnectingNewSessionStateHandler {
         ],
       };
     }
-    
+
     // Try next member
     const nextMember = members[currentIndex + 1];
     if (!nextMember) {
       // Should not happen due to check above
       throw new Error('Unexpected: next member not found');
     }
-    
+
     const [nextMemberId, nextAddress] = nextMember;
     const nonce = Nonce.generate();
-    
+
     const newState: ConnectingNewSessionState = {
       ...state,
       nonce,
       currentMemberId: nextMemberId,
       createdAt: new Date(),
     };
-    
+
     const createSessionMsg: CreateSession = {
       type: 'CreateSession',
       capabilities: state.capabilities,
       nonce,
     };
-    
+
     return {
       newState,
       messagesToSend: [createSessionMsg],
-      eventsToEmit: [
-        { type: 'connectionAttempt', memberId: nextMemberId, address: nextAddress },
-      ],
+      eventsToEmit: [{ type: 'connectionAttempt', memberId: nextMemberId, address: nextAddress }],
     };
   }
 
   /**
    * Handle timeout: check if connection attempt has timed out
    */
-  private async handleTimeoutCheck(
-    state: ConnectingNewSessionState
-  ): Promise<StateTransitionResult> {
+  private async handleTimeoutCheck(state: ConnectingNewSessionState): Promise<StateTransitionResult> {
     const elapsed = Date.now() - state.createdAt.getTime();
-    
+
     if (elapsed >= state.config.connectionTimeout) {
       // Connection timeout - try next member
       return this.tryNextMember(state);
     }
-    
+
     return { newState: state };
   }
 }
@@ -747,21 +719,18 @@ export class ConnectingExistingSessionStateHandler {
   /**
    * Handle an event in the ConnectingExistingSession state
    */
-  async handle(
-    state: ConnectingExistingSessionState,
-    event: StreamEvent
-  ): Promise<StateTransitionResult> {
+  async handle(state: ConnectingExistingSessionState, event: StreamEvent): Promise<StateTransitionResult> {
     switch (event.type) {
       case 'Action':
         return this.handleAction(state, event.action);
-      
+
       case 'ServerMsg':
         return this.handleServerMessage(state, event.message);
-      
+
       case 'KeepAliveTick':
         // Don't send keep-alive until connected
         return { newState: state };
-      
+
       case 'TimeoutCheck':
         return this.handleTimeoutCheck(state);
     }
@@ -778,17 +747,17 @@ export class ConnectingExistingSessionStateHandler {
       case 'Connect':
         // Already connecting, no-op
         return { newState: state };
-      
+
       case 'SubmitCommand':
         // Queue command - will be sent after connection
         action.reject(new Error('Session reconnection in progress'));
         return { newState: state };
-      
+
       case 'SubmitQuery':
         // Queue query - will be sent after connection
         action.reject(new Error('Session reconnection in progress'));
         return { newState: state };
-      
+
       case 'Disconnect':
         return this.handleDisconnect(state);
     }
@@ -797,23 +766,19 @@ export class ConnectingExistingSessionStateHandler {
   /**
    * Handle Disconnect: fail all pending, return to Disconnected
    */
-  private async handleDisconnect(
-    state: ConnectingExistingSessionState
-  ): Promise<StateTransitionResult> {
+  private async handleDisconnect(state: ConnectingExistingSessionState): Promise<StateTransitionResult> {
     const error = new Error('Client disconnected');
     state.pendingRequests.failAll(error);
     state.pendingQueries.failAll(error);
-    
+
     const newState: DisconnectedState = {
       state: 'Disconnected',
       config: state.config,
     };
-    
+
     return {
       newState,
-      eventsToEmit: [
-        { type: 'stateChange', oldState: 'ConnectingExistingSession', newState: 'Disconnected' },
-      ],
+      eventsToEmit: [{ type: 'stateChange', oldState: 'ConnectingExistingSession', newState: 'Disconnected' }],
     };
   }
 
@@ -827,10 +792,10 @@ export class ConnectingExistingSessionStateHandler {
     switch (message.type) {
       case 'SessionContinued':
         return this.handleSessionContinued(state, message);
-      
+
       case 'SessionRejected':
         return this.handleSessionRejected(state, message);
-      
+
       default:
         // Ignore other message types during connection
         return { newState: state };
@@ -849,7 +814,7 @@ export class ConnectingExistingSessionStateHandler {
       // Nonce mismatch - ignore (old/duplicate message)
       return { newState: state };
     }
-    
+
     // Transition to Connected state
     const newState: ConnectedState = {
       state: 'Connected',
@@ -863,20 +828,15 @@ export class ConnectingExistingSessionStateHandler {
       pendingQueries: state.pendingQueries,
       currentMemberId: state.currentMemberId,
     };
-    
+
     // Resend all pending requests and queries
     const now = new Date();
     const requestsToResend = state.pendingRequests.resendAll(now);
     const queriesToResend = state.pendingQueries.resendAll(now);
-    
+
     // Build messages for pending requests and queries
-    const messagesToSend = buildResendMessages(
-      requestsToResend,
-      queriesToResend,
-      state.pendingRequests,
-      now
-    );
-    
+    const messagesToSend = buildResendMessages(requestsToResend, queriesToResend, state.pendingRequests, now);
+
     return {
       newState,
       messagesToSend,
@@ -899,17 +859,17 @@ export class ConnectingExistingSessionStateHandler {
       // Nonce mismatch - ignore (old/duplicate message)
       return { newState: state };
     }
-    
+
     switch (message.reason) {
       case 'SessionExpired':
         return this.handleSessionExpired(state);
-      
+
       case 'NotLeader':
         return this.handleNotLeader(state, message.leaderId);
-      
+
       case 'InvalidCapabilities':
         return this.handleInvalidCapabilities(state);
-      
+
       case 'Other':
         // Try next member
         return this.tryNextMember(state);
@@ -919,18 +879,16 @@ export class ConnectingExistingSessionStateHandler {
   /**
    * Handle SessionExpired: fail all pending, return to Disconnected (terminal)
    */
-  private async handleSessionExpired(
-    state: ConnectingExistingSessionState
-  ): Promise<StateTransitionResult> {
+  private async handleSessionExpired(state: ConnectingExistingSessionState): Promise<StateTransitionResult> {
     const error = new Error('Session expired');
     state.pendingRequests.failAll(error);
     state.pendingQueries.failAll(error);
-    
+
     const newState: DisconnectedState = {
       state: 'Disconnected',
       config: state.config,
     };
-    
+
     return {
       newState,
       eventsToEmit: [
@@ -959,23 +917,21 @@ export class ConnectingExistingSessionStateHandler {
           currentMemberId: leaderId,
           createdAt: new Date(),
         };
-        
+
         const continueSessionMsg: ContinueSession = {
           type: 'ContinueSession',
           sessionId: state.sessionId,
           nonce,
         };
-        
+
         return {
           newState,
           messagesToSend: [continueSessionMsg],
-          eventsToEmit: [
-            { type: 'connectionAttempt', memberId: leaderId, address: leaderAddress },
-          ],
+          eventsToEmit: [{ type: 'connectionAttempt', memberId: leaderId, address: leaderAddress }],
         };
       }
     }
-    
+
     // Leader unknown or not in our cluster config - try next member
     return this.tryNextMember(state);
   }
@@ -983,18 +939,16 @@ export class ConnectingExistingSessionStateHandler {
   /**
    * Handle InvalidCapabilities rejection: fail immediately
    */
-  private async handleInvalidCapabilities(
-    state: ConnectingExistingSessionState
-  ): Promise<StateTransitionResult> {
+  private async handleInvalidCapabilities(state: ConnectingExistingSessionState): Promise<StateTransitionResult> {
     const error = new Error('Invalid capabilities');
     state.pendingRequests.failAll(error);
     state.pendingQueries.failAll(error);
-    
+
     const newState: DisconnectedState = {
       state: 'Disconnected',
       config: state.config,
     };
-    
+
     return {
       newState,
       eventsToEmit: [
@@ -1007,25 +961,21 @@ export class ConnectingExistingSessionStateHandler {
   /**
    * Try connecting to the next member in the cluster
    */
-  private async tryNextMember(
-    state: ConnectingExistingSessionState
-  ): Promise<StateTransitionResult> {
+  private async tryNextMember(state: ConnectingExistingSessionState): Promise<StateTransitionResult> {
     const members = Array.from(state.config.clusterMembers.entries());
-    const currentIndex = members.findIndex(
-      ([id]) => MemberId.unwrap(id) === MemberId.unwrap(state.currentMemberId)
-    );
-    
+    const currentIndex = members.findIndex(([id]) => MemberId.unwrap(id) === MemberId.unwrap(state.currentMemberId));
+
     if (currentIndex === -1 || currentIndex === members.length - 1) {
       // No more members to try - fail
       const error = new Error('Failed to reconnect to any cluster member');
       state.pendingRequests.failAll(error);
       state.pendingQueries.failAll(error);
-      
+
       const newState: DisconnectedState = {
         state: 'Disconnected',
         config: state.config,
       };
-      
+
       return {
         newState,
         eventsToEmit: [
@@ -1034,52 +984,48 @@ export class ConnectingExistingSessionStateHandler {
         ],
       };
     }
-    
+
     // Try next member
     const nextMember = members[currentIndex + 1];
     if (!nextMember) {
       // Should not happen due to check above
       throw new Error('Unexpected: next member not found');
     }
-    
+
     const [nextMemberId, nextAddress] = nextMember;
     const nonce = Nonce.generate();
-    
+
     const newState: ConnectingExistingSessionState = {
       ...state,
       nonce,
       currentMemberId: nextMemberId,
       createdAt: new Date(),
     };
-    
+
     const continueSessionMsg: ContinueSession = {
       type: 'ContinueSession',
       sessionId: state.sessionId,
       nonce,
     };
-    
+
     return {
       newState,
       messagesToSend: [continueSessionMsg],
-      eventsToEmit: [
-        { type: 'connectionAttempt', memberId: nextMemberId, address: nextAddress },
-      ],
+      eventsToEmit: [{ type: 'connectionAttempt', memberId: nextMemberId, address: nextAddress }],
     };
   }
 
   /**
    * Handle timeout: check if connection attempt has timed out
    */
-  private async handleTimeoutCheck(
-    state: ConnectingExistingSessionState
-  ): Promise<StateTransitionResult> {
+  private async handleTimeoutCheck(state: ConnectingExistingSessionState): Promise<StateTransitionResult> {
     const elapsed = Date.now() - state.createdAt.getTime();
-    
+
     if (elapsed >= state.config.connectionTimeout) {
       // Connection timeout - try next member
       return this.tryNextMember(state);
     }
-    
+
     return { newState: state };
   }
 }
@@ -1096,13 +1042,13 @@ export class ConnectedStateHandler {
     switch (event.type) {
       case 'Action':
         return this.handleAction(state, event.action);
-      
+
       case 'ServerMsg':
         return this.handleServerMessage(state, event.message);
-      
+
       case 'KeepAliveTick':
         return this.handleKeepAliveTick(state);
-      
+
       case 'TimeoutCheck':
         return this.handleTimeoutCheck(state);
     }
@@ -1111,22 +1057,19 @@ export class ConnectedStateHandler {
   /**
    * Handle user actions in Connected state
    */
-  private async handleAction(
-    state: ConnectedState,
-    action: ClientAction
-  ): Promise<StateTransitionResult> {
+  private async handleAction(state: ConnectedState, action: ClientAction): Promise<StateTransitionResult> {
     switch (action.type) {
       case 'Connect':
         // Already connected, no-op
         return { newState: state };
-      
+
       case 'SubmitCommand': {
         // Use current request ID and compute next one
         const requestId = state.nextRequestId;
         const nextId = RequestId.next(requestId);
         const lowestPendingRequestId = state.pendingRequests.lowestPendingRequestIdOr(requestId);
         const now = new Date();
-        
+
         // Create ClientRequest protocol message
         const clientRequest: ClientRequest = {
           type: 'ClientRequest',
@@ -1135,7 +1078,7 @@ export class ConnectedStateHandler {
           payload: action.payload,
           createdAt: now,
         };
-        
+
         // Track pending request with callbacks
         const pendingData: PendingRequestData = {
           payload: action.payload,
@@ -1144,9 +1087,9 @@ export class ConnectedStateHandler {
           createdAt: now,
           lastSentAt: now,
         };
-        
+
         state.pendingRequests.add(requestId, pendingData);
-        
+
         // Return updated state with new nextRequestId and message to send
         return {
           newState: {
@@ -1156,13 +1099,13 @@ export class ConnectedStateHandler {
           messagesToSend: [clientRequest],
         };
       }
-      
+
       case 'SubmitQuery': {
         // Generate correlation ID for query
         const correlationId = CorrelationId.generate();
         debugLog('SubmitQuery - generated correlationId:', correlationId);
         const now = new Date();
-        
+
         // Create Query protocol message
         const query: Query = {
           type: 'Query',
@@ -1170,7 +1113,7 @@ export class ConnectedStateHandler {
           payload: action.payload,
           createdAt: now,
         };
-        
+
         // Track pending query with callbacks
         const pendingData: PendingQueryData = {
           payload: action.payload,
@@ -1179,17 +1122,17 @@ export class ConnectedStateHandler {
           createdAt: now,
           lastSentAt: now,
         };
-        
+
         state.pendingQueries.add(correlationId, pendingData);
         debugLog('SubmitQuery - added to pending queries');
-        
+
         // Return message to send
         return {
           newState: state,
           messagesToSend: [query],
         };
       }
-      
+
       case 'Disconnect':
         return this.handleDisconnect(state);
     }
@@ -1203,17 +1146,17 @@ export class ConnectedStateHandler {
       type: 'CloseSession',
       reason: 'ClientShutdown',
     };
-    
+
     // Fail all pending requests/queries
     const error = new Error('Client disconnected');
     state.pendingRequests.failAll(error);
     state.pendingQueries.failAll(error);
-    
+
     const newState: DisconnectedState = {
       state: 'Disconnected',
       config: state.config,
     };
-    
+
     return {
       newState,
       messagesToSend: [closeSessionMsg],
@@ -1224,28 +1167,25 @@ export class ConnectedStateHandler {
   /**
    * Handle server messages in Connected state
    */
-  private async handleServerMessage(
-    state: ConnectedState,
-    message: ServerMessage
-  ): Promise<StateTransitionResult> {
+  private async handleServerMessage(state: ConnectedState, message: ServerMessage): Promise<StateTransitionResult> {
     debugLog('handleServerMessage - message.type:', message.type);
-    
+
     switch (message.type) {
       case 'ClientResponse':
         return this.handleClientResponse(state, message);
-      
+
       case 'QueryResponse':
         return this.handleQueryResponse(state, message);
-      
+
       case 'ServerRequest':
         return this.handleServerRequest(state, message);
-      
+
       case 'RequestError':
         return this.handleRequestError(state, message);
-      
+
       case 'SessionClosed':
         return this.handleSessionClosed(state, message);
-      
+
       case 'KeepAliveResponse':
         // TODO (eran): KeepAlive validation incomplete - we receive KeepAliveResponse with
         // timestamp but don't validate it (e.g., check for clock drift, measure round-trip
@@ -1254,7 +1194,7 @@ export class ConnectedStateHandler {
         // SCALA COMPARISON: SAME - Scala also ignores timestamp (RaftClient.scala:587-588).
         // Acknowledge keep-alive, no state change
         return { newState: state };
-      
+
       default:
         // Ignore other message types (e.g., SessionCreated, SessionRejected)
         debugLog('handleServerMessage - UNHANDLED message type in Connected state:', message.type);
@@ -1265,10 +1205,7 @@ export class ConnectedStateHandler {
   /**
    * Handle ClientResponse: complete pending request
    */
-  private async handleClientResponse(
-    state: ConnectedState,
-    message: ClientResponse
-  ): Promise<StateTransitionResult> {
+  private async handleClientResponse(state: ConnectedState, message: ClientResponse): Promise<StateTransitionResult> {
     // Complete the pending request
     state.pendingRequests.complete(message.requestId, message.result);
     return { newState: state };
@@ -1277,28 +1214,22 @@ export class ConnectedStateHandler {
   /**
    * Handle QueryResponse: complete pending query
    */
-  private async handleQueryResponse(
-    state: ConnectedState,
-    message: QueryResponse
-  ): Promise<StateTransitionResult> {
+  private async handleQueryResponse(state: ConnectedState, message: QueryResponse): Promise<StateTransitionResult> {
     debugLog('handleQueryResponse - correlationId:', message.correlationId, 'result size:', message.result.length);
-    
+
     // Complete the pending query
     const completed = state.pendingQueries.complete(message.correlationId, message.result);
     debugLog('handleQueryResponse - completed:', completed);
-    
+
     return { newState: state };
   }
 
   /**
    * Handle ServerRequest: process or re-ack based on tracker
    */
-  private async handleServerRequest(
-    state: ConnectedState,
-    message: ServerRequest
-  ): Promise<StateTransitionResult> {
+  private async handleServerRequest(state: ConnectedState, message: ServerRequest): Promise<StateTransitionResult> {
     const result = state.serverRequestTracker.shouldProcess(message.requestId);
-    
+
     switch (result.type) {
       case 'Process': {
         // New request - acknowledge and emit event
@@ -1307,32 +1238,32 @@ export class ConnectedStateHandler {
           ...state,
           serverRequestTracker: newTracker,
         };
-        
+
         const ackMsg: ServerRequestAck = {
           type: 'ServerRequestAck',
           requestId: message.requestId,
         };
-        
+
         return {
           newState,
           messagesToSend: [ackMsg],
           eventsToEmit: [{ type: 'serverRequestReceived', request: message }],
         };
       }
-      
+
       case 'OldRequest': {
         // Duplicate request - re-acknowledge without processing
         const ackMsg: ServerRequestAck = {
           type: 'ServerRequestAck',
           requestId: message.requestId,
         };
-        
+
         return {
           newState: state,
           messagesToSend: [ackMsg],
         };
       }
-      
+
       case 'OutOfOrder':
         // Gap detected - drop the request
         return { newState: state };
@@ -1342,10 +1273,7 @@ export class ConnectedStateHandler {
   /**
    * Handle RequestError: fail the pending request
    */
-  private async handleRequestError(
-    state: ConnectedState,
-    message: RequestError
-  ): Promise<StateTransitionResult> {
+  private async handleRequestError(state: ConnectedState, message: RequestError): Promise<StateTransitionResult> {
     const error = new Error(`Request error: ${message.reason}`);
     state.pendingRequests.fail(message.requestId, error);
     return { newState: state };
@@ -1354,17 +1282,14 @@ export class ConnectedStateHandler {
   /**
    * Handle SessionClosed: transition to Disconnected or reconnect
    */
-  private async handleSessionClosed(
-    state: ConnectedState,
-    message: SessionClosed
-  ): Promise<StateTransitionResult> {
+  private async handleSessionClosed(state: ConnectedState, message: SessionClosed): Promise<StateTransitionResult> {
     switch (message.reason) {
       case 'SessionExpired':
         return this.handleSessionExpired(state);
-      
+
       case 'NotLeaderAnymore':
         return this.handleNotLeaderAnymore(state, message.leaderId);
-      
+
       case 'Shutdown':
       case 'SessionError':
       case 'ConnectionClosed':
@@ -1379,12 +1304,12 @@ export class ConnectedStateHandler {
     const error = new Error('Session expired');
     state.pendingRequests.failAll(error);
     state.pendingQueries.failAll(error);
-    
+
     const newState: DisconnectedState = {
       state: 'Disconnected',
       config: state.config,
     };
-    
+
     return {
       newState,
       eventsToEmit: [
@@ -1397,14 +1322,11 @@ export class ConnectedStateHandler {
   /**
    * Handle NotLeaderAnymore: reconnect to new leader
    */
-  private async handleNotLeaderAnymore(
-    state: ConnectedState,
-    leaderId?: MemberId
-  ): Promise<StateTransitionResult> {
+  private async handleNotLeaderAnymore(state: ConnectedState, leaderId?: MemberId): Promise<StateTransitionResult> {
     // Determine which member to connect to
     let targetMemberId: MemberId;
     let targetAddress: string | undefined;
-    
+
     if (leaderId) {
       targetAddress = state.config.clusterMembers.get(leaderId);
       if (targetAddress) {
@@ -1427,7 +1349,7 @@ export class ConnectedStateHandler {
       }
       [targetMemberId, targetAddress] = firstMember;
     }
-    
+
     // Transition to ConnectingExistingSession
     const nonce = Nonce.generate();
     const newState: ConnectingExistingSessionState = {
@@ -1443,13 +1365,13 @@ export class ConnectedStateHandler {
       pendingRequests: state.pendingRequests,
       pendingQueries: state.pendingQueries,
     };
-    
+
     const continueSessionMsg: ContinueSession = {
       type: 'ContinueSession',
       sessionId: state.sessionId,
       nonce,
     };
-    
+
     return {
       newState,
       messagesToSend: [continueSessionMsg],
@@ -1463,19 +1385,16 @@ export class ConnectedStateHandler {
   /**
    * Handle terminal session close reasons
    */
-  private async handleTerminalClose(
-    state: ConnectedState,
-    reason: SessionCloseReason
-  ): Promise<StateTransitionResult> {
+  private async handleTerminalClose(state: ConnectedState, reason: SessionCloseReason): Promise<StateTransitionResult> {
     const error = new Error(`Session closed: ${reason}`);
     state.pendingRequests.failAll(error);
     state.pendingQueries.failAll(error);
-    
+
     const newState: DisconnectedState = {
       state: 'Disconnected',
       config: state.config,
     };
-    
+
     return {
       newState,
       eventsToEmit: [{ type: 'stateChange', oldState: 'Connected', newState: 'Disconnected' }],
@@ -1490,7 +1409,7 @@ export class ConnectedStateHandler {
       type: 'KeepAlive',
       timestamp: new Date(),
     };
-    
+
     return {
       newState: state,
       messagesToSend: [keepAliveMsg],
@@ -1510,21 +1429,16 @@ export class ConnectedStateHandler {
     const now = new Date();
     const expiredRequests = state.pendingRequests.resendExpired(now, state.config.requestTimeout);
     const expiredQueries = state.pendingQueries.resendExpired(now, state.config.requestTimeout);
-    
+
     // Emit timeout events for each expired request
     const timeoutEvents: ClientEventData[] = [];
     for (const { requestId } of expiredRequests) {
       timeoutEvents.push({ type: 'requestTimeout', requestId });
     }
-    
+
     // Build messages for expired requests and queries
-    const messagesToSend = buildResendMessages(
-      expiredRequests,
-      expiredQueries,
-      state.pendingRequests,
-      now
-    );
-    
+    const messagesToSend = buildResendMessages(expiredRequests, expiredQueries, state.pendingRequests, now);
+
     return {
       newState: state,
       messagesToSend,
@@ -1555,16 +1469,16 @@ export class StateManager {
     switch (state.state) {
       case 'Disconnected':
         return this.disconnectedHandler.handle(state, event);
-      
+
       case 'ConnectingNewSession':
         return this.connectingNewSessionHandler.handle(state, event);
-      
+
       case 'ConnectingExistingSession':
         return this.connectingExistingSessionHandler.handle(state, event);
-      
+
       case 'Connected':
         return this.connectedHandler.handle(state, event);
-      
+
       default:
         // Exhaustive check
         const _exhaustive: never = state;
@@ -1572,5 +1486,3 @@ export class StateManager {
     }
   }
 }
-
-

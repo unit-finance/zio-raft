@@ -16,7 +16,7 @@ import { debugLog } from '../utils/debug';
  * Uses CLIENT socket to communicate with SERVER socket (not ROUTER)
  */
 export class ZmqTransport implements ClientTransport {
-  private socket: ZmqClient;
+  private readonly socket: ZmqClient;
   private currentAddress: string | null = null;
 
   constructor() {
@@ -28,7 +28,7 @@ export class ZmqTransport implements ClientTransport {
       heartbeatTimeToLive: 1000,
       heartbeatTimeout: 1000,
     });
-    
+
     // Add event listeners to debug connection issues
     this.socket.events.on('connect', (event: any) => {
       debugLog('Socket event: connect', event);
@@ -48,7 +48,7 @@ export class ZmqTransport implements ClientTransport {
     this.socket.events.on('end', () => {
       debugLog('Socket event: end');
     });
-    
+
     debugLog('ZmqTransport constructor - CLIENT socket created');
     debugLog('Socket type: CLIENT (draft)');
     debugLog('Socket immediate:', this.socket.immediate);
@@ -72,7 +72,7 @@ export class ZmqTransport implements ClientTransport {
     } catch (error) {
       debugLog('ZmqTransport.connect() failed:', error);
       this.currentAddress = null;
-      throw new Error(`Failed to connect to ${address}: ${error}`);
+      throw new Error(`Failed to connect to ${address}: ${String(error)}`);
     }
   }
 
@@ -93,7 +93,7 @@ export class ZmqTransport implements ClientTransport {
       debugLog('ZmqTransport.disconnect() completed');
     } catch (error) {
       debugLog('ZmqTransport.disconnect() failed:', error);
-      throw new Error(`Failed to disconnect: ${error}`);
+      throw new Error(`Failed to disconnect: ${String(error)}`);
     }
   }
 
@@ -103,7 +103,7 @@ export class ZmqTransport implements ClientTransport {
   async sendMessage(message: ClientMessage): Promise<void> {
     debugLog('ZmqTransport.sendMessage() called');
     debugLog('currentAddress:', this.currentAddress);
-    
+
     if (this.currentAddress === null) {
       debugLog('ZmqTransport.sendMessage() - NOT CONNECTED, throwing error');
       throw new Error('Not connected. Call connect() first.');
@@ -117,13 +117,13 @@ export class ZmqTransport implements ClientTransport {
       debugLog('Socket readable:', this.socket.readable);
       debugLog('Socket closed:', this.socket.closed);
       debugLog('Sending to socket...');
-      
+
       // ZMQ will queue this until connection is ready
       await this.socket.send(encoded);
       debugLog('Socket.send() completed - message sent/queued');
     } catch (error) {
       debugLog('ZmqTransport.sendMessage() failed:', error);
-      throw new Error(`Failed to send message: ${error}`);
+      throw new Error(`Failed to send message: ${String(error)}`);
     }
   }
 
@@ -132,12 +132,13 @@ export class ZmqTransport implements ClientTransport {
    */
   get incomingMessages(): AsyncIterable<ServerMessage> {
     debugLog('ZmqTransport.incomingMessages getter called');
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
     return {
       [Symbol.asyncIterator]() {
         debugLog('ZmqTransport.incomingMessages Symbol.asyncIterator called');
         return self.createMessageStream();
-      }
+      },
     };
   }
 
@@ -148,13 +149,18 @@ export class ZmqTransport implements ClientTransport {
       let iterationCount = 0;
       for await (const [buffer] of this.socket) {
         iterationCount++;
-        debugLog('Socket iteration', iterationCount, '- received data, buffer:', buffer ? buffer.length + ' bytes' : 'null');
-        
+        debugLog(
+          'Socket iteration',
+          iterationCount,
+          '- received data, buffer:',
+          buffer ? buffer.length + ' bytes' : 'null'
+        );
+
         if (!buffer) {
           debugLog('Buffer is null/undefined, skipping');
           continue;
         }
-        
+
         try {
           debugLog('Decoding server message...');
           const message = decodeServerMessage(buffer as Buffer);
@@ -169,7 +175,7 @@ export class ZmqTransport implements ClientTransport {
       debugLog('Socket iteration loop ended');
     } catch (error) {
       debugLog('Socket iteration error:', error);
-      throw new Error(`Failed to receive messages: ${error}`);
+      throw new Error(`Failed to receive messages: ${String(error)}`);
     }
   }
 
@@ -186,4 +192,3 @@ export class ZmqTransport implements ClientTransport {
     debugLog('ZmqTransport.close() completed');
   }
 }
-

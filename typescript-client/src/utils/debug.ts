@@ -1,6 +1,6 @@
 /**
  * Debug logging utility
- * 
+ *
  * Centralized debug logging that can be easily enabled/disabled.
  * Set DEBUG_ENABLED to true to enable debug logs during development.
  */

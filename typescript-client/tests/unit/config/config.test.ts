@@ -2,7 +2,7 @@
 // Tests ClientConfig validation and defaults
 
 import { describe, it, expect } from 'vitest';
-import { createConfig, validateConfig, ClientConfigInput } from '../../../src/config';
+import { createConfig, ClientConfigInput } from '../../../src/config';
 import { MemberId } from '../../../src/types';
 
 describe('Configuration', () => {
@@ -141,4 +141,3 @@ describe('Configuration', () => {
     });
   });
 });
-

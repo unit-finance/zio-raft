@@ -10,7 +10,7 @@ import { WatchNotification } from '../../src/types.js';
  */
 export class MockKVClient extends KVClient {
   private mockConnected = false;
-  private mockNotifications: WatchNotification[] = [];
+  private readonly mockNotifications: WatchNotification[] = [];
   private mockGetResult: string | null = null;
   private shouldThrowOnConnect = false;
   private shouldThrowOnSet = false;

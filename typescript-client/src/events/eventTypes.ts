@@ -224,4 +224,3 @@ export const EventFactory = {
     timestamp: new Date(),
   }),
 };
-

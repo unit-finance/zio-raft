@@ -15,14 +15,9 @@ export function validateKey(key: string): void {
   }
 
   const buffer = Buffer.from(key, 'utf8');
-  
+
   if (buffer.length > 256) {
-    throw new ValidationError(
-      'key',
-      `Key exceeds maximum size`,
-      buffer.length,
-      256
-    );
+    throw new ValidationError('key', `Key exceeds maximum size`, buffer.length, 256);
   }
 
   // Verify valid UTF-8 round-trip
@@ -44,12 +39,7 @@ export function validateValue(value: string): void {
   const MAX_SIZE = 1024 * 1024; // 1MB
 
   if (buffer.length > MAX_SIZE) {
-    throw new ValidationError(
-      'value',
-      `Value exceeds maximum size`,
-      buffer.length,
-      MAX_SIZE
-    );
+    throw new ValidationError('value', `Value exceeds maximum size`, buffer.length, MAX_SIZE);
   }
 
   // Verify valid UTF-8 round-trip
@@ -67,20 +57,14 @@ export function validateEndpoint(endpoint: string): void {
   const match = endpoint.match(regex);
 
   if (!match) {
-    throw new ValidationError(
-      'endpoints',
-      `Invalid endpoint format: ${endpoint}. Expected: tcp://host:port`
-    );
+    throw new ValidationError('endpoints', `Invalid endpoint format: ${endpoint}. Expected: tcp://host:port`);
   }
 
   const [, , portStr] = match;
   const port = parseInt(portStr, 10);
 
   if (port < 1 || port > 65535) {
-    throw new ValidationError(
-      'endpoints',
-      `Invalid port: ${port}. Must be 1-65535`
-    );
+    throw new ValidationError('endpoints', `Invalid port: ${port}. Must be 1-65535`);
   }
 }
 
@@ -97,13 +81,13 @@ export function parseEndpoints(input: string): EndpointConfig {
     };
   }
 
-  const pairs = input.split(',').map(s => s.trim()).filter(s => s.length > 0);
+  const pairs = input
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 
   if (pairs.length === 0) {
-    throw new ValidationError(
-      'endpoints',
-      'No endpoints provided'
-    );
+    throw new ValidationError('endpoints', 'No endpoints provided');
   }
 
   const endpoints = new Map<string, string>();
@@ -112,10 +96,7 @@ export function parseEndpoints(input: string): EndpointConfig {
     const [memberId, endpoint] = pair.split('=', 2);
 
     if (!memberId || !endpoint) {
-      throw new ValidationError(
-        'endpoints',
-        `Invalid format: ${pair}. Expected: memberId=tcp://host:port`
-      );
+      throw new ValidationError('endpoints', `Invalid format: ${pair}. Expected: memberId=tcp://host:port`);
     }
 
     const trimmedMemberId = memberId.trim();

@@ -9,7 +9,7 @@ import { ClientMessage, ServerMessage } from '../protocol/messages';
 export class MockTransport implements ClientTransport {
   private connected: boolean = false;
   private address: string | null = null;
-  
+
   // In-memory queues
   public sentMessages: ClientMessage[] = [];
   private receivedMessages: ServerMessage[] = [];
@@ -48,11 +48,12 @@ export class MockTransport implements ClientTransport {
    * Incoming messages as an async iterable
    */
   get incomingMessages(): AsyncIterable<ServerMessage> {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
     return {
       [Symbol.asyncIterator]() {
         return self.createMessageStream();
-      }
+      },
     };
   }
 
@@ -86,7 +87,7 @@ export class MockTransport implements ClientTransport {
    */
   injectServerMessage(message: ServerMessage): void {
     this.receivedMessages.push(message);
-    
+
     // Notify any waiting iterator
     const callback = this.messageIteratorCallbacks.shift();
     if (callback !== undefined) {
@@ -160,4 +161,3 @@ export class MockTransport implements ClientTransport {
     return this.address;
   }
 }
-

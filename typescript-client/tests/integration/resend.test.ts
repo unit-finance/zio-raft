@@ -49,14 +49,14 @@ describe('GAP-001: Resend Logic After Reconnection', () => {
   });
 
   afterEach(async () => {
-    if (client) {
+    if (client !== null && client !== undefined) {
       try {
         await client.disconnect();
       } catch {
         // Ignore errors during cleanup
       }
     }
-    if (mockTransport) {
+    if (mockTransport !== null && mockTransport !== undefined) {
       mockTransport.closeQueues();
     }
   });
@@ -232,7 +232,8 @@ describe('GAP-001: Resend Logic After Reconnection', () => {
     it('should resend command when request timeout elapses without response', async () => {
       // This test uses its own client with shorter timeout, not the shared one
       // Mark the shared client as null so afterEach doesn't try to disconnect it
-      (client as any) = null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (client as unknown) = null;
 
       // Use a very short request timeout for this test
       const shortTimeoutTransport = new MockTransport();

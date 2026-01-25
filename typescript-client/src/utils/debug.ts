@@ -10,7 +10,7 @@ const DEBUG_ENABLED = false;
 /**
  * Log a debug message if debug mode is enabled
  */
-export function debugLog(message: string, ...args: any[]): void {
+export function debugLog(message: string, ...args: unknown[]): void {
   if (DEBUG_ENABLED) {
     console.log(`[DEBUG] ${message}`, ...args);
   }
@@ -19,7 +19,7 @@ export function debugLog(message: string, ...args: any[]): void {
 /**
  * Log a debug message with no prefix (for raw output)
  */
-export function debugLogRaw(...args: any[]): void {
+export function debugLogRaw(...args: unknown[]): void {
   if (DEBUG_ENABLED) {
     console.log(...args);
   }

@@ -3,6 +3,11 @@
  * is properly routed to the serverRequestQueue
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+
 import { describe, it, expect } from 'vitest';
 import { RaftClient } from '../../src/client';
 import type { ServerRequest } from '../../src/protocol/messages';

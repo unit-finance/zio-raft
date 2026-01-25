@@ -97,6 +97,48 @@ interface DisconnectAction {
 }
 
 // ============================================================================
+// Internal Client Events (emitted by state machine)
+// ============================================================================
+
+/**
+ * Internal event types emitted by the state machine to client
+ * These are transformed to public EventEmitter events
+ */
+type InternalClientEvent =
+  | InternalConnectedEvent
+  | InternalDisconnectedEvent
+  | InternalReconnectingEvent
+  | InternalSessionExpiredEvent
+  | InternalServerRequestEvent;
+
+interface InternalConnectedEvent {
+  readonly type: 'connected';
+  readonly sessionId: string;
+  readonly endpoint: string;
+}
+
+interface InternalDisconnectedEvent {
+  readonly type: 'disconnected';
+  readonly reason: 'network' | 'server-closed' | 'client-shutdown';
+}
+
+interface InternalReconnectingEvent {
+  readonly type: 'reconnecting';
+  readonly attempt: number;
+  readonly endpoint: string;
+}
+
+interface InternalSessionExpiredEvent {
+  readonly type: 'sessionExpired';
+  readonly sessionId: string;
+}
+
+interface InternalServerRequestEvent {
+  readonly type: 'serverRequestReceived';
+  readonly request: ServerRequest;
+}
+
+// ============================================================================
 // RaftClient - Main Public API
 // ============================================================================
 
@@ -455,7 +497,7 @@ export class RaftClient extends EventEmitter {
   /**
    * Emit typed client event
    */
-  private emitClientEvent(evt: any): void {
+  private emitClientEvent(evt: InternalClientEvent): void {
     switch (evt.type) {
       case 'connected':
         this.emit(ClientEvents.CONNECTED, {
@@ -563,8 +605,9 @@ export class RaftClient extends EventEmitter {
   on(event: typeof ClientEvents.RECONNECTING, listener: (evt: ReconnectingEvent) => void): this;
   on(event: typeof ClientEvents.SESSION_EXPIRED, listener: (evt: SessionExpiredEvent) => void): this;
   on(event: typeof ClientEvents.ERROR, listener: (err: Error) => void): this;
-  on(event: string, listener: (...args: any[]) => void): this {
-    return super.on(event, listener);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on(event: string, listener: (...args: unknown[]) => void): this {
+    return super.on(event, listener as (...args: unknown[]) => void);
   }
 
   emit(event: typeof ClientEvents.CONNECTED, evt: ConnectedEvent): boolean;
@@ -572,7 +615,7 @@ export class RaftClient extends EventEmitter {
   emit(event: typeof ClientEvents.RECONNECTING, evt: ReconnectingEvent): boolean;
   emit(event: typeof ClientEvents.SESSION_EXPIRED, evt: SessionExpiredEvent): boolean;
   emit(event: typeof ClientEvents.ERROR, err: Error): boolean;
-  emit(event: string, ...args: any[]): boolean {
+  emit(event: string, ...args: unknown[]): boolean {
     return super.emit(event, ...args);
   }
 }

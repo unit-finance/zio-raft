@@ -38,8 +38,8 @@ export class KVClient {
         ['protocol', 'kvstore'],
         ['version', '1.0.0'],
       ]),
-      connectionTimeout: config.connectionTimeout || 5000,
-      requestTimeout: config.requestTimeout || 5000,
+      connectionTimeout: config.connectionTimeout !== undefined ? config.connectionTimeout : 5000,
+      requestTimeout: config.requestTimeout !== undefined ? config.requestTimeout : 5000,
       keepAliveInterval: 3000,
     });
   }
@@ -168,7 +168,7 @@ export class KVClient {
     this.raftClient.on(ClientEvents.DISCONNECTED, () => {
       done = true;
       if (resolveNext) {
-        resolveNext({ value: undefined as any, done: true });
+        resolveNext({ value: undefined as WatchNotification | undefined, done: true });
         resolveNext = null;
       }
     });

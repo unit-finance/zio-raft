@@ -26,6 +26,11 @@
  *   });
  */
 
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import { join } from 'path';
@@ -178,7 +183,7 @@ async function startWatch(key: string): Promise<WatchHandle> {
   await sleep(WATCH_STARTUP_DELAY);
 
   const stop = async (): Promise<string[]> => {
-    if (stopped || !childProcess.pid) {
+    if (stopped || childProcess.pid === undefined) {
       return output;
     }
 
@@ -279,7 +284,7 @@ afterAll(async () => {
   // Force kill any remaining watches (safety net)
   for (const watch of activeWatches) {
     try {
-      if (watch.process.pid) {
+      if (watch.process.pid !== undefined) {
         watch.process.kill('SIGKILL');
       }
     } catch {

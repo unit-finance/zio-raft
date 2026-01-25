@@ -12,7 +12,7 @@ import { createWatchCommand } from './commands/watch.js';
 /**
  * Main CLI program
  */
-function main() {
+function main(): void {
   const program = new Command();
 
   program.name('kvstore').version('0.1.0').description('KVStore CLI - interact with a distributed key-value store');

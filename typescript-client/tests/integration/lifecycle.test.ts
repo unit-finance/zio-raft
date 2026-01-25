@@ -45,10 +45,10 @@ describe('Client Lifecycle Integration', () => {
 
   afterEach(async () => {
     // Cleanup
-    if (client) {
+    if (client !== null && client !== undefined) {
       try {
         await client.disconnect();
-      } catch (err) {
+      } catch {
         // Ignore errors during cleanup
       }
     }

@@ -22,7 +22,7 @@ export function createWatchCommand(): Command {
       let isShuttingDown = false;
 
       // Signal handler for graceful shutdown
-      const shutdownHandler = async () => {
+      const shutdownHandler = async (): Promise<void> => {
         if (isShuttingDown) {
           return;
         }

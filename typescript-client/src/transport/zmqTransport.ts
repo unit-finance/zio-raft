@@ -30,16 +30,16 @@ export class ZmqTransport implements ClientTransport {
     });
 
     // Add event listeners to debug connection issues
-    this.socket.events.on('connect', (event: any) => {
+    this.socket.events.on('connect', (event: unknown) => {
       debugLog('Socket event: connect', event);
     });
-    this.socket.events.on('connect:delay', (event: any) => {
+    this.socket.events.on('connect:delay', (event: unknown) => {
       debugLog('Socket event: connect:delay', event);
     });
-    this.socket.events.on('connect:retry', (event: any) => {
+    this.socket.events.on('connect:retry', (event: unknown) => {
       debugLog('Socket event: connect:retry', event);
     });
-    this.socket.events.on('disconnect', (event: any) => {
+    this.socket.events.on('disconnect', (event: unknown) => {
       debugLog('Socket event: disconnect', event);
     });
     this.socket.events.on('close', () => {
@@ -153,10 +153,10 @@ export class ZmqTransport implements ClientTransport {
           'Socket iteration',
           iterationCount,
           '- received data, buffer:',
-          buffer ? buffer.length + ' bytes' : 'null'
+          buffer !== undefined ? String(buffer.length) + ' bytes' : 'null'
         );
 
-        if (!buffer) {
+        if (buffer === undefined || buffer === null) {
           debugLog('Buffer is null/undefined, skipping');
           continue;
         }

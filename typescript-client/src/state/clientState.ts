@@ -187,15 +187,17 @@ export type ClientAction = ConnectAction | DisconnectAction | SubmitCommandActio
  */
 export interface ConnectAction {
   readonly type: 'Connect';
+  readonly resolve: () => void;
+  readonly reject: (error: Error) => void;
 }
-
-// TODO (eran): actions here are missing the resolve and reject callbacks - should take a closer look
 
 /**
  * Disconnect action: close session and disconnect
  */
 export interface DisconnectAction {
   readonly type: 'Disconnect';
+  readonly resolve: () => void;
+  readonly reject: (error: Error) => void;
 }
 
 /**
@@ -358,11 +360,9 @@ export class DisconnectedStateHandler {
       pendingRequests: new PendingRequests(),
       pendingQueries: new PendingQueries(),
 
-      // TODO (eran): "as any" is a code smell - need to go over the code and find where it is used, probably because the parent interface is not defined correctly
-
       // Store connect callbacks to resolve/reject the connect() promise
-      connectResolve: (action as any).resolve,
-      connectReject: (action as any).reject,
+      connectResolve: action.resolve,
+      connectReject: action.reject,
     };
 
     // Create CreateSession message to send

@@ -1,7 +1,7 @@
 // Full lifecycle integration test
 // Tests complete client lifecycle with mock server
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { RaftClient } from '../../src/client';
 import { MockTransport } from '../../src/testing/MockTransport';
 import { MemberId } from '../../src/types';
@@ -21,253 +21,264 @@ async function waitForCondition(
   }
 }
 
+/**
+ * Create a test client with MockTransport
+ * Each test creates its own isolated client to avoid shared state issues
+ */
+function createTestClient(options?: {
+  autoRespondToCreateSession?: boolean;
+  keepAliveInterval?: number;
+}): { client: RaftClient; transport: MockTransport } {
+  const transport = new MockTransport();
+  transport.autoRespondToCreateSession = options?.autoRespondToCreateSession ?? true;
+
+  const client = new RaftClient(
+    {
+      clusterMembers: new Map([[MemberId.fromString('node1'), 'tcp://localhost:5555']]),
+      capabilities: new Map([['version', '1.0.0']]),
+      connectionTimeout: 5000,
+      requestTimeout: 10000,
+      keepAliveInterval: options?.keepAliveInterval ?? 50,
+    },
+    transport
+  );
+
+  return { client, transport };
+}
+
 describe('Client Lifecycle Integration', () => {
-  let client: RaftClient;
-  let mockTransport: MockTransport;
-
-  beforeEach(() => {
-    // Create mock transport WITHOUT auto-session-creation (we'll manually respond)
-    mockTransport = new MockTransport();
-    mockTransport.autoRespondToCreateSession = false;
-
-    // Create client with test configuration and injected transport
-    client = new RaftClient(
-      {
-        clusterMembers: new Map([[MemberId.fromString('node1'), 'tcp://localhost:5555']]),
-        capabilities: new Map([['version', '1.0.0']]),
-        connectionTimeout: 5000,
-        requestTimeout: 10000,
-        keepAliveInterval: 50, // Short interval for fast test cleanup
-      },
-      mockTransport
-    );
-  });
-
-  afterEach(async () => {
-    // Cleanup
-    if (client !== null && client !== undefined) {
-      try {
-        await client.disconnect();
-      } catch {
-        // Ignore errors during cleanup
-      }
-    }
-  });
 
   describe('TC-INT-001: Full Connect → Command → Disconnect Cycle', () => {
     it('should complete full lifecycle', async () => {
-      // 1. Start connect (non-blocking)
-      const connectPromise = client.connect();
+      // Create client with MANUAL session creation for fine-grained control
+      const { client, transport } = createTestClient({ autoRespondToCreateSession: false });
 
-      // Wait for CreateSession to be sent
-      await waitForCondition(
-        () => mockTransport.getSentMessagesOfType('CreateSession').length > 0,
-        1000,
-        'CreateSession not sent'
-      );
+      try {
+        // 1. Start connect (non-blocking)
+        const connectPromise = client.connect();
 
-      const createSessionMessages = mockTransport.getSentMessagesOfType('CreateSession');
-      expect(createSessionMessages).toHaveLength(1);
+        // Wait for CreateSession to be sent
+        await waitForCondition(
+          () => transport.getSentMessagesOfType('CreateSession').length > 0,
+          1000,
+          'CreateSession not sent'
+        );
 
-      // Manually inject SessionCreated response
-      mockTransport.injectMessage({
-        type: 'SessionCreated',
-        sessionId: 'test-session-123',
-        nonce: createSessionMessages[0].nonce,
-      });
+        const createSessionMessages = transport.getSentMessagesOfType('CreateSession');
+        expect(createSessionMessages).toHaveLength(1);
 
-      // Wait for connect to complete
-      await connectPromise;
+        // Manually inject SessionCreated response
+        transport.injectMessage({
+          type: 'SessionCreated',
+          sessionId: 'test-session-123',
+          nonce: createSessionMessages[0].nonce,
+        });
 
-      // 2. Submit Command
-      const commandPromise = client.submitCommand(Buffer.from('test-command-payload'));
+        // Wait for connect to complete
+        await connectPromise;
 
-      // Wait for ClientRequest to be sent
-      await waitForCondition(
-        () => mockTransport.getSentMessagesOfType('ClientRequest').length > 0,
-        1000,
-        'ClientRequest not sent within timeout'
-      );
+        // 2. Submit Command
+        const commandPromise = client.submitCommand(Buffer.from('test-command-payload'));
 
-      const clientRequests = mockTransport.getSentMessagesOfType('ClientRequest');
-      expect(clientRequests).toHaveLength(1);
-      expect(clientRequests[0].payload.toString()).toBe('test-command-payload');
+        // Wait for ClientRequest to be sent
+        await waitForCondition(
+          () => transport.getSentMessagesOfType('ClientRequest').length > 0,
+          1000,
+          'ClientRequest not sent within timeout'
+        );
 
-      // Respond with ClientResponse
-      mockTransport.injectMessage({
-        type: 'ClientResponse',
-        requestId: clientRequests[0].requestId,
-        result: Buffer.from('command-result'),
-      });
+        const clientRequests = transport.getSentMessagesOfType('ClientRequest');
+        expect(clientRequests).toHaveLength(1);
+        expect(clientRequests[0].payload.toString()).toBe('test-command-payload');
 
-      // Wait for command to complete
-      const result = await commandPromise;
-      expect(result.toString()).toBe('command-result');
+        // Respond with ClientResponse
+        transport.injectMessage({
+          type: 'ClientResponse',
+          requestId: clientRequests[0].requestId,
+          result: Buffer.from('command-result'),
+        });
 
-      // 3. Disconnect
-      await client.disconnect();
+        // Wait for command to complete
+        const result = await commandPromise;
+        expect(result.toString()).toBe('command-result');
 
-      // Verify CloseSession was sent
-      const closeSessionMessages = mockTransport.getSentMessagesOfType('CloseSession');
-      expect(closeSessionMessages).toHaveLength(1);
+        // 3. Disconnect
+        await client.disconnect();
+
+        // Verify CloseSession was sent
+        const closeSessionMessages = transport.getSentMessagesOfType('CloseSession');
+        expect(closeSessionMessages).toHaveLength(1);
+      } finally {
+        // Cleanup
+        try {
+          await client.disconnect();
+        } catch {
+          // Ignore errors - may already be disconnected
+        }
+      }
     });
   });
 
   describe('TC-INT-002: Multiple Commands Sequentially', () => {
     it('should handle sequential commands', async () => {
-      // Connect first
-      await client.connect();
+      // Create client with AUTO session creation (default behavior)
+      const { client, transport } = createTestClient();
 
-      // Submit 3 commands sequentially
-      const commands = ['command-1', 'command-2', 'command-3'];
-      const results: string[] = [];
+      try {
+        // Connect first
+        await client.connect();
 
-      for (const cmd of commands) {
-        const cmdPromise = client.submitCommand(Buffer.from(cmd));
+        // Submit 3 commands sequentially
+        const commands = ['command-1', 'command-2', 'command-3'];
+        const results: string[] = [];
 
-        // Wait for request to be sent
-        await waitForCondition(
-          () => mockTransport.getSentMessagesOfType('ClientRequest').length === results.length + 1,
-          1000
-        );
+        for (const cmd of commands) {
+          const cmdPromise = client.submitCommand(Buffer.from(cmd));
 
-        const requests = mockTransport.getSentMessagesOfType('ClientRequest');
-        const latestRequest = requests[requests.length - 1];
+          // Wait for request to be sent
+          await waitForCondition(
+            () => transport.getSentMessagesOfType('ClientRequest').length === results.length + 1,
+            1000
+          );
 
-        // Respond immediately
-        mockTransport.injectMessage({
-          type: 'ClientResponse',
-          requestId: latestRequest.requestId,
-          result: Buffer.from(`result-${cmd}`),
-        });
+          const requests = transport.getSentMessagesOfType('ClientRequest');
+          const latestRequest = requests[requests.length - 1];
 
-        const result = await cmdPromise;
-        results.push(result.toString());
+          // Respond immediately
+          transport.injectMessage({
+            type: 'ClientResponse',
+            requestId: latestRequest.requestId,
+            result: Buffer.from(`result-${cmd}`),
+          });
+
+          const result = await cmdPromise;
+          results.push(result.toString());
+        }
+
+        // Verify all commands executed in order
+        expect(results).toEqual(['result-command-1', 'result-command-2', 'result-command-3']);
+      } finally {
+        await client.disconnect();
       }
-
-      // Verify all commands executed in order
-      expect(results).toEqual(['result-command-1', 'result-command-2', 'result-command-3']);
-
-      await client.disconnect();
     });
   });
 
   describe('TC-INT-003: Multiple Commands Concurrently', () => {
     it('should handle concurrent commands', async () => {
-      // Connect first
-      await client.connect();
+      // Create client with AUTO session creation (default behavior)
+      const { client, transport } = createTestClient();
 
-      // Submit 5 commands concurrently
-      const commandPromises = [
-        client.submitCommand(Buffer.from('concurrent-cmd-1')),
-        client.submitCommand(Buffer.from('concurrent-cmd-2')),
-        client.submitCommand(Buffer.from('concurrent-cmd-3')),
-        client.submitCommand(Buffer.from('concurrent-cmd-4')),
-        client.submitCommand(Buffer.from('concurrent-cmd-5')),
-      ];
+      try {
+        // Connect first
+        await client.connect();
 
-      // Wait for all requests to be sent
-      await waitForCondition(
-        () => mockTransport.getSentMessagesOfType('ClientRequest').length === 5,
-        2000,
-        'Not all ClientRequests sent'
-      );
+        // Submit 5 commands concurrently
+        const commandPromises = [
+          client.submitCommand(Buffer.from('concurrent-cmd-1')),
+          client.submitCommand(Buffer.from('concurrent-cmd-2')),
+          client.submitCommand(Buffer.from('concurrent-cmd-3')),
+          client.submitCommand(Buffer.from('concurrent-cmd-4')),
+          client.submitCommand(Buffer.from('concurrent-cmd-5')),
+        ];
 
-      const requests = mockTransport.getSentMessagesOfType('ClientRequest');
-      expect(requests).toHaveLength(5);
+        // Wait for all requests to be sent
+        await waitForCondition(
+          () => transport.getSentMessagesOfType('ClientRequest').length === 5,
+          2000,
+          'Not all ClientRequests sent'
+        );
 
-      // Respond to all in reverse order (test out-of-order handling)
-      for (let i = requests.length - 1; i >= 0; i--) {
-        mockTransport.injectMessage({
-          type: 'ClientResponse',
-          requestId: requests[i].requestId,
-          result: Buffer.from(`result-for-request-${i + 1}`),
-        });
+        const requests = transport.getSentMessagesOfType('ClientRequest');
+        expect(requests).toHaveLength(5);
+
+        // Respond to all in reverse order (test out-of-order handling)
+        for (let i = requests.length - 1; i >= 0; i--) {
+          transport.injectMessage({
+            type: 'ClientResponse',
+            requestId: requests[i].requestId,
+            result: Buffer.from(`result-for-request-${i + 1}`),
+          });
+        }
+
+        // Wait for all to complete
+        const results = await Promise.all(commandPromises);
+
+        // Results should match request order (not response order)
+        expect(results.map((r) => r.toString())).toEqual([
+          'result-for-request-1',
+          'result-for-request-2',
+          'result-for-request-3',
+          'result-for-request-4',
+          'result-for-request-5',
+        ]);
+      } finally {
+        await client.disconnect();
       }
-
-      // Wait for all to complete
-      const results = await Promise.all(commandPromises);
-
-      // Results should match request order (not response order)
-      expect(results.map((r) => r.toString())).toEqual([
-        'result-for-request-1',
-        'result-for-request-2',
-        'result-for-request-3',
-        'result-for-request-4',
-        'result-for-request-5',
-      ]);
-
-      await client.disconnect();
     });
   });
 
   describe('TC-INT-004: Query submission', () => {
     it('should submit query and receive response', async () => {
-      // Connect first
-      await client.connect();
+      // Create client with AUTO session creation (default behavior)
+      const { client, transport } = createTestClient();
 
-      // Submit a query (read-only operation)
-      const queryPromise = client.submitQuery(Buffer.from('query-payload'));
+      try {
+        // Connect first
+        await client.connect();
 
-      // Wait for Query message to be sent
-      await waitForCondition(
-        () => mockTransport.getSentMessagesOfType('Query').length > 0,
-        1000,
-        'Query not sent within timeout'
-      );
+        // Submit a query (read-only operation)
+        const queryPromise = client.submitQuery(Buffer.from('query-payload'));
 
-      const queries = mockTransport.getSentMessagesOfType('Query');
-      expect(queries).toHaveLength(1);
-      expect(queries[0].payload.toString()).toBe('query-payload');
+        // Wait for Query message to be sent
+        await waitForCondition(
+          () => transport.getSentMessagesOfType('Query').length > 0,
+          1000,
+          'Query not sent within timeout'
+        );
 
-      // Respond with QueryResponse
-      mockTransport.injectMessage({
-        type: 'QueryResponse',
-        correlationId: queries[0].correlationId,
-        result: Buffer.from('query-result'),
-      });
+        const queries = transport.getSentMessagesOfType('Query');
+        expect(queries).toHaveLength(1);
+        expect(queries[0].payload.toString()).toBe('query-payload');
 
-      // Wait for query to complete
-      const result = await queryPromise;
-      expect(result.toString()).toBe('query-result');
+        // Respond with QueryResponse
+        transport.injectMessage({
+          type: 'QueryResponse',
+          correlationId: queries[0].correlationId,
+          result: Buffer.from('query-result'),
+        });
 
-      await client.disconnect();
+        // Wait for query to complete
+        const result = await queryPromise;
+        expect(result.toString()).toBe('query-result');
+      } finally {
+        await client.disconnect();
+      }
     });
   });
 
   describe('TC-INT-005: Keep-alive maintenance', () => {
     it('should send keep-alive messages', async () => {
-      // Create client with short keep-alive interval for testing
-      const testTransport = new MockTransport();
-      const testClient = new RaftClient(
-        {
-          clusterMembers: new Map([[MemberId.fromString('node1'), 'tcp://localhost:5555']]),
-          capabilities: new Map([['version', '1.0.0']]),
-          connectionTimeout: 5000,
-          requestTimeout: 10000,
-          keepAliveInterval: 100, // 100ms for fast testing
-        },
-        testTransport
-      );
+      // Create client with longer keep-alive interval for reliable testing
+      const { client, transport } = createTestClient({ keepAliveInterval: 100 });
 
       try {
         // Connect
-        await testClient.connect();
+        await client.connect();
 
-        const initialKeepAlives = testTransport.getSentMessagesOfType('KeepAlive').length;
+        const initialKeepAlives = transport.getSentMessagesOfType('KeepAlive').length;
 
         // Wait for keep-alive interval to elapse (100ms + buffer)
         await new Promise((resolve) => setTimeout(resolve, 250));
 
         // Verify at least one KeepAlive was sent
-        const keepAlives = testTransport.getSentMessagesOfType('KeepAlive');
+        const keepAlives = transport.getSentMessagesOfType('KeepAlive');
         expect(keepAlives.length).toBeGreaterThan(initialKeepAlives);
 
         // Verify KeepAlive message structure
         expect(keepAlives[0].type).toBe('KeepAlive');
         expect(keepAlives[0].timestamp).toBeInstanceOf(Date);
       } finally {
-        await testClient.disconnect();
+        await client.disconnect();
       }
     });
   });

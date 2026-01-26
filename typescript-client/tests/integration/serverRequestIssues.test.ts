@@ -1,9 +1,9 @@
 /**
- * Tests for remaining server request issues (Issues 2 & 3)
+ * Tests for server request handler lifecycle management
  *
- * These tests are EXPECTED TO FAIL demonstrating:
- * - Issue 2: Multiple handler race condition
- * - Issue 3: No handler cleanup (memory leak)
+ * These tests verify:
+ * - Issue 2 FIXED: Prevents multiple handler race condition
+ * - Issue 3 FIXED: Handler cleanup via removeServerRequestHandler()
  *
  * Uses MockTransport for clean, reliable testing
  */
@@ -18,7 +18,7 @@ import { RaftClient } from '../../src/client';
 import { MockTransport } from '../../src/testing/MockTransport';
 import type { ServerRequest } from '../../src/protocol/messages';
 
-describe('Server Request Issues (Expected Failures)', () => {
+describe('Server Request Handler Lifecycle', () => {
   let client: RaftClient;
   let mockTransport: MockTransport | undefined;
 
@@ -46,25 +46,28 @@ describe('Server Request Issues (Expected Failures)', () => {
   });
 
   // ==========================================================================
-  // Issue 2: Multiple Handler Race Condition
+  // Issue 2 FIXED: Single Handler Enforcement
   // ==========================================================================
 
-  describe('Issue 2: Multiple Handler Race Condition', () => {
-    it('FAILS: multiple handlers cause race condition', async () => {
-      // Register TWO handlers (current API allows this)
-      const handler1Requests: ServerRequest[] = [];
-      const handler2Requests: ServerRequest[] = [];
+  describe('Issue 2 FIXED: Single Handler Enforcement', () => {
+    it('prevents multiple handlers via exception', () => {
+      // First registration should succeed
+      client.onServerRequest(() => {});
+
+      // Second registration should throw
+      expect(() => {
+        client.onServerRequest(() => {});
+      }).toThrow(/already registered/i);
+    });
+
+    it('single handler receives all requests', async () => {
+      const handlerRequests: ServerRequest[] = [];
 
       client.onServerRequest((request) => {
-        handler1Requests.push(request);
-      });
-
-      client.onServerRequest((request) => {
-        handler2Requests.push(request);
+        handlerRequests.push(request);
       });
 
       // Inject 10 server requests directly via emitClientEvent
-      // (simulates what state machine does)
       const emitClientEvent = (client as any).emitClientEvent.bind(client);
 
       for (let i = 1; i <= 10; i++) {
@@ -82,149 +85,114 @@ describe('Server Request Issues (Expected Failures)', () => {
       // Wait for messages to be processed
       await new Promise((resolve) => setTimeout(resolve, 200));
 
-      // EXPECTED BEHAVIOR: Should throw error on second registration
-      // OR: All requests go to handler2 (last registered)
-      // ACTUAL BEHAVIOR: Requests randomly distributed (race condition)
-
-      console.log('Handler 1 received:', handler1Requests.length);
-      console.log('Handler 2 received:', handler2Requests.length);
-
-      // This assertion will fail unpredictably
-      // Sometimes handler1 gets all, sometimes handler2, usually split
-      expect(handler1Requests.length + handler2Requests.length).toBe(10);
-
-      // FAILING ASSERTION: Requests should not be split
-      // Either all to handler1 (0 + 10) or all to handler2 (10 + 0)
-      expect(
-        (handler1Requests.length === 10 && handler2Requests.length === 0) ||
-          (handler1Requests.length === 0 && handler2Requests.length === 10)
-      ).toBe(true); // ← This will FAIL showing the race condition
+      // All requests should go to the single handler
+      expect(handlerRequests.length).toBe(10);
     }, 15000);
-
-    it('FAILS: calling onServerRequest twice should throw error', () => {
-      // First registration should succeed
-      client.onServerRequest(() => {});
-
-      // Second registration should throw
-      // EXPECTED: Throws error like "Handler already registered"
-      // ACTUAL: Silently creates second consumer loop (race condition)
-      expect(() => {
-        client.onServerRequest(() => {});
-      }).toThrow(/already registered|multiple handlers not allowed/i);
-      // ↑ This will FAIL - no error is thrown
-    });
   });
 
   // ==========================================================================
-  // Issue 3: No Handler Cleanup (Memory Leak)
+  // Issue 3 FIXED: Handler Cleanup API
   // ==========================================================================
 
-  describe('Issue 3: No Handler Cleanup', () => {
-    it('FAILS: handlers are never cleaned up (memory leak)', async () => {
-      // Simulate calling notifications() multiple times
-      // (e.g., user creates multiple iterators)
-
-      const handlerIds: number[] = [];
-
-      // Register 5 handlers
-      for (let i = 1; i <= 5; i++) {
-        const handlerId = i;
-        client.onServerRequest((_request) => {
-          handlerIds.push(handlerId);
-        });
-      }
-
-      // Inject one request via emitClientEvent
-      const emitClientEvent = (client as any).emitClientEvent.bind(client);
-      emitClientEvent({
-        type: 'serverRequestReceived',
-        request: {
-          type: 'ServerRequest',
-          requestId: 'test-req',
-          payload: Buffer.from('work'),
-          createdAt: new Date(),
-        },
-      });
-
-      // Wait for processing
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      // EXPECTED: Only handler 5 (last registered) receives it
-      // OR: Error was thrown on handlers 2-5
-      // ACTUAL: Random handler receives it (race condition)
-
-      console.log('Handlers that received request:', handlerIds);
-
-      // FAILING ASSERTION: Only one handler should receive message
-      expect(handlerIds).toHaveLength(1);
-      // ↑ This will FAIL - multiple handlers received it
-    }, 15000);
-
-    it('FAILS: no removeServerRequestHandler API exists', () => {
+  describe('Issue 3 FIXED: Handler Cleanup API', () => {
+    it('removeServerRequestHandler API exists', () => {
       // Register a handler
       client.onServerRequest(() => {});
 
-      // Try to remove it
-      // EXPECTED: API like client.removeServerRequestHandler() exists
-      // ACTUAL: No such API
+      // API should exist
+      expect(typeof client.removeServerRequestHandler).toBe('function');
 
-      expect(typeof (client as any).removeServerRequestHandler).toBe('function');
-      // ↑ This will FAIL - API doesn't exist
+      // Should be able to remove handler
+      expect(() => client.removeServerRequestHandler()).not.toThrow();
     });
 
-    it('DEMONSTRATES: background loops accumulate', async () => {
-      // This test demonstrates the memory leak
-      // Each call to onServerRequest() spawns a background loop
-      // These loops are never stopped
+    it('can register new handler after removal', () => {
+      // Register first handler
+      client.onServerRequest(() => {});
 
-      // Simulate repeated calls (e.g., user creates/abandons iterators)
-      for (let i = 0; i < 100; i++) {
+      // Remove it
+      client.removeServerRequestHandler();
+
+      // Should be able to register new handler
+      expect(() => {
         client.onServerRequest(() => {});
+      }).not.toThrow();
+    });
+
+    it('removed handler stops receiving requests', async () => {
+      const handler1Requests: ServerRequest[] = [];
+      const handler2Requests: ServerRequest[] = [];
+
+      // Register first handler
+      client.onServerRequest((request) => {
+        handler1Requests.push(request);
+      });
+
+      // Inject 5 requests
+      const emitClientEvent = (client as any).emitClientEvent.bind(client);
+      for (let i = 1; i <= 5; i++) {
+        emitClientEvent({
+          type: 'serverRequestReceived',
+          request: {
+            type: 'ServerRequest',
+            requestId: `req-${i}`,
+            payload: Buffer.from(`work-${i}`),
+            createdAt: new Date(),
+          },
+        });
       }
 
-      // All 100 loops are now running in background, consuming from same queue
-      // This is a resource leak - loops should be cleaned up
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // We can't easily assert on this, but it's observable in:
-      // 1. Memory profiling (100 async loops)
-      // 2. CPU usage (100 loops polling queue)
-      // 3. Race conditions (random distribution)
+      // Handler 1 should receive all 5
+      expect(handler1Requests.length).toBe(5);
 
-      // For now, just document the issue
-      console.log('Created 100 background consumer loops - none can be stopped!');
+      // Remove handler 1
+      client.removeServerRequestHandler();
 
-      // This test passes but demonstrates the problem
-      expect(true).toBe(true);
+      // Register handler 2
+      client.onServerRequest((request) => {
+        handler2Requests.push(request);
+      });
+
+      // Inject 5 more requests
+      for (let i = 6; i <= 10; i++) {
+        emitClientEvent({
+          type: 'serverRequestReceived',
+          request: {
+            type: 'ServerRequest',
+            requestId: `req-${i}`,
+            payload: Buffer.from(`work-${i}`),
+            createdAt: new Date(),
+          },
+        });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Handler 1 should still have only 5 (stopped receiving)
+      expect(handler1Requests.length).toBe(5);
+
+      // Handler 2 should receive the new 5
+      expect(handler2Requests.length).toBe(5);
     }, 15000);
   });
 
   // ==========================================================================
-  // Issue 2 + 3 Combined: Real-World Scenario
+  // Real-World Scenario: kvstore-cli watch notifications
   // ==========================================================================
 
   describe('Real-World Scenario: kvstore-cli watch notifications', () => {
-    it('FAILS: demonstrates issue in actual usage', async () => {
+    it('properly handles user restarting watch command', async () => {
       // Simulate kvstore-cli watch command usage
-      // User calls client.notifications() which internally calls onServerRequest()
 
       // First iteration (user runs watch command)
       const iteration1: ServerRequest[] = [];
       client.onServerRequest((req) => iteration1.push(req));
 
-      // User gets bored, cancels (Ctrl+C)
-      // Handler is NOT cleaned up (Issue 3)
-
-      // User runs watch command again
-      const iteration2: ServerRequest[] = [];
-      client.onServerRequest((req) => iteration2.push(req));
-
-      // Now TWO handlers are registered
-      // Requests will be randomly distributed (Issue 2)
-
-      // Inject requests via emitClientEvent
+      // Inject 5 requests during first watch
       const emitClientEvent = (client as any).emitClientEvent.bind(client);
-
-      for (let i = 1; i <= 10; i++) {
+      for (let i = 1; i <= 5; i++) {
         emitClientEvent({
           type: 'serverRequestReceived',
           request: {
@@ -236,18 +204,38 @@ describe('Server Request Issues (Expected Failures)', () => {
         });
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
-      console.log('First iteration received:', iteration1.length);
-      console.log('Second iteration received:', iteration2.length);
+      // First handler should receive all 5
+      expect(iteration1.length).toBe(5);
 
-      // EXPECTED: iteration2 gets all 10 (iteration1 should be cleaned up)
-      // ACTUAL: Random split between iteration1 and iteration2
+      // User cancels (Ctrl+C) - properly cleanup handler
+      client.removeServerRequestHandler();
 
-      // FAILING ASSERTION: Only second iteration should receive
-      expect(iteration1.length).toBe(0);
-      expect(iteration2.length).toBe(10);
-      // ↑ Both will FAIL showing the combined issue
+      // User runs watch command again
+      const iteration2: ServerRequest[] = [];
+      client.onServerRequest((req) => iteration2.push(req));
+
+      // Inject 5 more requests during second watch
+      for (let i = 6; i <= 10; i++) {
+        emitClientEvent({
+          type: 'serverRequestReceived',
+          request: {
+            type: 'ServerRequest',
+            requestId: `req-${i}`,
+            payload: Buffer.from(`notification-${i}`),
+            createdAt: new Date(),
+          },
+        });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // First handler should still have only 5 (stopped after removal)
+      expect(iteration1.length).toBe(5);
+
+      // Second handler should receive the new 5
+      expect(iteration2.length).toBe(5);
     }, 15000);
   });
 });

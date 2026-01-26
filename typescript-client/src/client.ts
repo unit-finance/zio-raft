@@ -111,6 +111,10 @@ export class RaftClient extends EventEmitter {
   private disconnectResolve: (() => void) | null = null;
   private reconnectAttempt = 0; // Tracks reconnection attempts for RECONNECTING event
 
+  private serverRequestHandler: ((request: ServerRequest) => void) | null = null;
+  private serverRequestLoopPromise: Promise<void> | null = null;
+  private stopServerRequestLoop = false;
+
   /**
    * Constructor - validates config, initializes state machine
    * Does NOT initiate connection (lazy initialization)
@@ -246,13 +250,40 @@ export class RaftClient extends EventEmitter {
   /**
    * Register handler for server-initiated requests
    * Handler is invoked for each ServerRequest received
+   * 
+   * @throws Error if handler already registered
    */
   onServerRequest(handler: (request: ServerRequest) => void): void {
-    // Consume from server request queue in background
-    (async () => {
+    if (this.serverRequestHandler !== null) {
+      throw new Error('Server request handler already registered. Call removeServerRequestHandler() first.');
+    }
+
+    this.serverRequestHandler = handler;
+    this.stopServerRequestLoop = false;
+    this.startServerRequestLoop();
+  }
+
+  /**
+   * Remove the registered server request handler
+   * Stops the background consumer loop
+   */
+  removeServerRequestHandler(): void {
+    this.serverRequestHandler = null;
+    this.stopServerRequestLoop = true;
+  }
+
+  /**
+   * Start background loop to consume server requests
+   * Only one loop runs at a time
+   */
+  private startServerRequestLoop(): void {
+    this.serverRequestLoopPromise = (async () => {
       for await (const request of this.serverRequestQueue) {
+        if (this.stopServerRequestLoop || this.serverRequestHandler === null) {
+          break;
+        }
         try {
-          handler(request);
+          this.serverRequestHandler(request);
         } catch (err) {
           // TODO (eran): Error swallowing issue - user handler errors are only emitted as events.
           // If nobody listens to ERROR, bugs are silently swallowed. Consider requiring error
@@ -587,12 +618,21 @@ export class RaftClient extends EventEmitter {
   // ==========================================================================
 
   private async cleanup(): Promise<void> {
-    // Disconnect transport
-    await this.transport.disconnect();
-
-    // Clear queues
+    // Stop server request loop
+    this.stopServerRequestLoop = true;
+    
+    // Close queues first to unblock any pending iterations
     this.actionQueue.close();
     this.serverRequestQueue.close();
+
+    // Wait for server request loop to complete
+    if (this.serverRequestLoopPromise) {
+      await this.serverRequestLoopPromise;
+      this.serverRequestLoopPromise = null;
+    }
+
+    // Disconnect transport
+    await this.transport.disconnect();
   }
 
   // ==========================================================================

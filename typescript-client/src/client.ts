@@ -250,7 +250,7 @@ export class RaftClient extends EventEmitter {
   /**
    * Register handler for server-initiated requests
    * Handler is invoked for each ServerRequest received
-   * 
+   *
    * @throws Error if handler already registered
    */
   onServerRequest(handler: (request: ServerRequest) => void): void {
@@ -620,7 +620,7 @@ export class RaftClient extends EventEmitter {
   private async cleanup(): Promise<void> {
     // Stop server request loop
     this.stopServerRequestLoop = true;
-    
+
     // Close queues first to unblock any pending iterations
     this.actionQueue.close();
     this.serverRequestQueue.close();

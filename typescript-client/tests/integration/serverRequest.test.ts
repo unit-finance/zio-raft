@@ -57,11 +57,7 @@ describe('Server-Initiated Requests Integration', () => {
 
     mockTransport.injectMessage(testRequest);
 
-    await waitForCondition(
-      () => receivedRequests.length > 0,
-      1000,
-      'ServerRequest handler was not called'
-    );
+    await waitForCondition(() => receivedRequests.length > 0, 1000, 'ServerRequest handler was not called');
 
     expect(receivedRequests).toHaveLength(1);
     expect(receivedRequests[0].requestId).toBe(RequestId.fromBigInt(1n));
@@ -98,11 +94,7 @@ describe('Server-Initiated Requests Integration', () => {
       createdAt: new Date(),
     });
 
-    await waitForCondition(
-      () => receivedRequests.length >= 3,
-      2000,
-      'ServerRequest handlers were not called'
-    );
+    await waitForCondition(() => receivedRequests.length >= 3, 2000, 'ServerRequest handlers were not called');
 
     expect(receivedRequests).toHaveLength(3);
     expect(receivedRequests.map((r) => r.requestId)).toEqual([

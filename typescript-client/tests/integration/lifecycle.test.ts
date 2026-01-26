@@ -25,10 +25,10 @@ async function waitForCondition(
  * Create a test client with MockTransport
  * Each test creates its own isolated client to avoid shared state issues
  */
-function createTestClient(options?: {
-  autoRespondToCreateSession?: boolean;
-  keepAliveInterval?: number;
-}): { client: RaftClient; transport: MockTransport } {
+function createTestClient(options?: { autoRespondToCreateSession?: boolean; keepAliveInterval?: number }): {
+  client: RaftClient;
+  transport: MockTransport;
+} {
   const transport = new MockTransport();
   transport.autoRespondToCreateSession = options?.autoRespondToCreateSession ?? true;
 
@@ -47,7 +47,6 @@ function createTestClient(options?: {
 }
 
 describe('Client Lifecycle Integration', () => {
-
   describe('TC-INT-001: Full Connect → Command → Disconnect Cycle', () => {
     it('should complete full lifecycle', async () => {
       // Create client with MANUAL session creation for fine-grained control

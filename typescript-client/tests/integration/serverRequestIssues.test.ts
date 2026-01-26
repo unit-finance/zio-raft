@@ -20,7 +20,7 @@ import type { ServerRequest } from '../../src/protocol/messages';
 
 describe('Server Request Issues (Expected Failures)', () => {
   let client: RaftClient;
-  let mockTransport: MockTransport;
+  let mockTransport: MockTransport | undefined;
 
   beforeEach(() => {
     mockTransport = new MockTransport();

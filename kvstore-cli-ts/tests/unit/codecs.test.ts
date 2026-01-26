@@ -109,14 +109,14 @@ describe('Encoding', () => {
 describe('Decoding', () => {
   // TC-025: Get result with value decodes correctly
   it('should decode Get result with value (Some case)', () => {
-    // Create buffer: [0x01][length:4][value bytes]
+    // Create buffer: [0xFF][length:4][value bytes]
     const value = 'myvalue';
     const valueBytes = Buffer.from(value, 'utf8');
     const lengthBuffer = Buffer.allocUnsafe(4);
     lengthBuffer.writeUInt32BE(valueBytes.length, 0);
 
     const buffer = Buffer.concat([
-      Buffer.from([0x01]), // hasValue = 1 (Some)
+      Buffer.from([0xff]), // hasValue = 0xFF (Some) - scodec bool encoding
       lengthBuffer,
       valueBytes,
     ]);
@@ -240,7 +240,7 @@ describe('Round-Trip', () => {
     const lengthBuffer = Buffer.allocUnsafe(4);
     lengthBuffer.writeUInt32BE(valueBytes.length, 0);
 
-    const resultBuffer = Buffer.concat([Buffer.from([0x01]), lengthBuffer, valueBytes]);
+    const resultBuffer = Buffer.concat([Buffer.from([0xff]), lengthBuffer, valueBytes]); // 0xFF for Some
 
     const decodedValue = decodeGetResult(resultBuffer);
     expect(decodedValue).toBe(value);

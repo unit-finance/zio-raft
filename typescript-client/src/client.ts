@@ -76,7 +76,7 @@ type EventArgs = ConnectedEvent | DisconnectedEvent | ReconnectingEvent | Sessio
  * Usage:
  * ```typescript
  * import { RaftClient, ZmqTransport } from '@zio-raft/typescript-client';
- * 
+ *
  * const client = new RaftClient(
  *   {
  *     clusterMembers: new Map([['node1', 'tcp://localhost:5555']]),

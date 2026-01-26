@@ -3,7 +3,7 @@
  * Provides typed API for KVStore operations
  */
 
-import { RaftClient, ClientEvents } from '@zio-raft/typescript-client';
+import { RaftClient, ClientEvents, ZmqTransport } from '@zio-raft/typescript-client';
 import type { MemberId } from '@zio-raft/typescript-client';
 import { encodeSetRequest, encodeGetQuery, encodeWatchRequest, decodeGetResult, decodeNotification } from './codecs.js';
 import { WatchNotification } from './types.js';
@@ -32,16 +32,19 @@ export class KVClient {
       clusterMembers.set(memberId as MemberId, endpoint);
     }
 
-    this.raftClient = new RaftClient({
-      clusterMembers,
-      capabilities: new Map([
-        ['protocol', 'kvstore'],
-        ['version', '1.0.0'],
-      ]),
-      connectionTimeout: config.connectionTimeout !== undefined ? config.connectionTimeout : 5000,
-      requestTimeout: config.requestTimeout !== undefined ? config.requestTimeout : 5000,
-      keepAliveInterval: 3000,
-    });
+    this.raftClient = new RaftClient(
+      {
+        clusterMembers,
+        capabilities: new Map([
+          ['protocol', 'kvstore'],
+          ['version', '1.0.0'],
+        ]),
+        connectionTimeout: config.connectionTimeout !== undefined ? config.connectionTimeout : 5000,
+        requestTimeout: config.requestTimeout !== undefined ? config.requestTimeout : 5000,
+        keepAliveInterval: 3000,
+      },
+      new ZmqTransport()
+    );
   }
 
   /**

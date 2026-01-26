@@ -40,6 +40,9 @@ export type {
 // Transport interface (for testing / custom implementations)
 export type { ClientTransport } from './transport/transport';
 
+// Transport implementations
+export { ZmqTransport } from './transport/zmqTransport';
+
 // Testing utilities
 export { MockTransport } from './testing/MockTransport';
 

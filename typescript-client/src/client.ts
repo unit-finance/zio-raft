@@ -4,7 +4,6 @@
 import { EventEmitter } from 'events';
 import { ClientConfig, createConfig, ClientConfigInput } from './config';
 import { ClientTransport } from './transport/transport';
-import { ZmqTransport } from './transport/zmqTransport';
 import {
   ClientState,
   StateManager,
@@ -76,10 +75,15 @@ type EventArgs = ConnectedEvent | DisconnectedEvent | ReconnectingEvent | Sessio
  *
  * Usage:
  * ```typescript
- * const client = new RaftClient({
- *   clusterMembers: new Map([['node1', 'tcp://localhost:5555']]),
- *   capabilities: new Map([['version', '1.0.0']]),
- * });
+ * import { RaftClient, ZmqTransport } from '@zio-raft/typescript-client';
+ * 
+ * const client = new RaftClient(
+ *   {
+ *     clusterMembers: new Map([['node1', 'tcp://localhost:5555']]),
+ *     capabilities: new Map([['version', '1.0.0']]),
+ *   },
+ *   new ZmqTransport()
+ * );
  *
  * await client.connect();
  * const result = await client.submitCommand(payload);
@@ -112,16 +116,16 @@ export class RaftClient extends EventEmitter {
    * Does NOT initiate connection (lazy initialization)
    *
    * @param configInput - Client configuration
-   * @param transport - Optional transport for testing (defaults to ZmqTransport)
+   * @param transport - Transport implementation (e.g., ZmqTransport for production, MockTransport for testing)
    */
-  constructor(configInput: ClientConfigInput, transport?: ClientTransport) {
+  constructor(configInput: ClientConfigInput, transport: ClientTransport) {
     super();
 
     // Validate and apply defaults
     this.config = createConfig(configInput);
 
-    // Use provided transport or default to production ZMQ transport
-    this.transport = transport ?? new ZmqTransport();
+    // Use provided transport (dependency injection)
+    this.transport = transport;
 
     // Initialize state machine
     this.stateManager = new StateManager();

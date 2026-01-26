@@ -31,13 +31,16 @@ export default defineConfig({
     // Global test timeout
     testTimeout: 10000,
     
+    // Teardown timeout for async cleanup (ZeroMQ resources)
+    teardownTimeout: 5000,
+    
+    // Hook timeout (for afterEach cleanup)
+    hookTimeout: 15000,
+    
     // Run tests in parallel for speed
+    // Note: ZeroMQ native bindings may cause cleanup warnings but tests pass
     pool: 'threads',
-    poolOptions: {
-      threads: {
-        singleThread: false,
-      },
-    },
+    maxConcurrency: 5,
   },
 });
 

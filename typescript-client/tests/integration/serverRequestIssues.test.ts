@@ -36,8 +36,13 @@ describe('Server Request Issues (Expected Failures)', () => {
     // which don't require a full connection
   });
 
-  afterEach(() => {
-    // Don't disconnect - would hang due to issues we're testing
+  afterEach(async () => {
+    // Properly cleanup MockTransport resources
+    // Note: client.disconnect() won't work as these tests simulate broken states
+    // But we need to cleanup the MockTransport queue to avoid resource leaks
+    if (mockTransport) {
+      mockTransport.closeQueues();
+    }
   });
 
   // ==========================================================================

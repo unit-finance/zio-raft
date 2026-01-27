@@ -74,14 +74,6 @@ export class KVClient {
       await this.raftClient.disconnect();
       this.isConnected = false;
     } catch (err) {
-      // TODO (eran): Disconnect errors are swallowed - callers can't know if disconnect
-      // actually succeeded. This is intentional for cleanup paths but may hide real issues.
-      // Consider adding an optional throwOnError parameter or returning a result type.
-      // SCALA COMPARISON: DIFFERENT DESIGN - Scala uses ZIO Scope for automatic cleanup
-      // (Main.scala uses .provideSomeLayer with Scope). No explicit disconnect in user code.
-      // Log disconnect errors for debugging, but don't throw
-      // Rationale: Disconnect is often called in cleanup paths (finally blocks)
-      // and we don't want cleanup failures to mask original errors
       console.error('Warning: Failed to disconnect from cluster:', err);
       // Mark as disconnected even if the call failed
       this.isConnected = false;
@@ -133,21 +125,26 @@ export class KVClient {
   /**
    * Iterate over watch notifications
    * Yields WatchNotification objects decoded from server requests
+   * 
+   * Handlers are automatically cleaned up when iteration completes,
+   * even if the consumer breaks early or throws an error.
    */
   async *notifications(): AsyncIterableIterator<WatchNotification> {
-    // TODO (eran): Potential memory leak - event handlers registered below (onServerRequest,
-    // on(DISCONNECTED)) are never unregistered if the iterator is abandoned early (e.g., break
-    // from for-await loop, or error thrown). Could accumulate handlers over time. Consider
-    // using a cleanup pattern with try/finally or AbortController.
-    // SCALA COMPARISON: NOT APPLICABLE - Scala exposes notifications as ZStream which handles
-    // lifecycle automatically (KVClient.scala:34-37). No event handler registration pattern.
-
     // Create a promise-based queue for server requests
     const queue: WatchNotification[] = [];
     // Use explicit union type for proper done/value typing
     type WatchIteratorResult = { value: WatchNotification; done: false } | { value: undefined; done: true };
     let resolveNext: ((value: WatchIteratorResult) => void) | null = null;
     let done = false;
+
+    // Store handler reference for cleanup
+    const disconnectHandler = () => {
+      done = true;
+      if (resolveNext) {
+        resolveNext({ value: undefined, done: true });
+        resolveNext = null;
+      }
+    };
 
     // Register handler for server requests
     this.raftClient.onServerRequest((serverRequest) => {
@@ -169,32 +166,33 @@ export class KVClient {
       }
     });
 
-    // Handle disconnection
-    this.raftClient.on(ClientEvents.DISCONNECTED, () => {
-      done = true;
-      if (resolveNext) {
-        resolveNext({ value: undefined, done: true });
-        resolveNext = null;
-      }
-    });
+    // Register disconnection handler
+    this.raftClient.on(ClientEvents.DISCONNECTED, disconnectHandler);
 
-    // Yield notifications
-    while (!done) {
-      if (queue.length > 0) {
-        const notification = queue.shift()!;
-        yield notification;
-      } else {
-        // Wait for next notification
-        const result = await new Promise<WatchIteratorResult>((resolve) => {
-          resolveNext = resolve;
-        });
+    try {
+      // Yield notifications
+      while (!done) {
+        if (queue.length > 0) {
+          const notification = queue.shift()!;
+          yield notification;
+        } else {
+          // Wait for next notification
+          const result = await new Promise<WatchIteratorResult>((resolve) => {
+            resolveNext = resolve;
+          });
 
-        if (result.done) {
-          break;
+          if (result.done) {
+            break;
+          }
+
+          yield result.value;
         }
-
-        yield result.value;
       }
+    } finally {
+      // Always cleanup handlers, even on early break/error
+      // This prevents memory leaks when iterator is abandoned
+      this.raftClient.removeServerRequestHandler();
+      this.raftClient.removeListener(ClientEvents.DISCONNECTED, disconnectHandler);
     }
   }
 }

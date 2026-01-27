@@ -125,7 +125,7 @@ export class KVClient {
   /**
    * Iterate over watch notifications
    * Yields WatchNotification objects decoded from server requests
-   * 
+   *
    * Handlers are automatically cleaned up when iteration completes,
    * even if the consumer breaks early or throws an error.
    */
@@ -138,7 +138,7 @@ export class KVClient {
     let done = false;
 
     // Store handler reference for cleanup
-    const disconnectHandler = () => {
+    const disconnectHandler: () => void = () => {
       done = true;
       if (resolveNext) {
         resolveNext({ value: undefined, done: true });

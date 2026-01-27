@@ -1,5 +1,4 @@
 // Integration tests for resend logic after reconnection and timeout
-// Tests GAP-001: Incomplete Resend Logic After Reconnection
 //
 // These tests verify that pending commands and queries are properly resent:
 // 1. After reconnection (SessionClosed → ContinueSession → SessionContinued)
@@ -25,7 +24,7 @@ async function waitForCondition(
   }
 }
 
-describe('GAP-001: Resend Logic After Reconnection', () => {
+describe('Resend Logic After Reconnection', () => {
   let client: RaftClient;
   let mockTransport: MockTransport;
 
@@ -121,12 +120,11 @@ describe('GAP-001: Resend Logic After Reconnection', () => {
         nonce: continueSessionMsgs[0].nonce,
       });
 
-      // 7. Wait for the pending command to be RESENT
-      // THIS IS THE BUG: Currently the command is NOT resent
+      // 7. Wait for the pending command to be resent
       await waitForCondition(
         () => mockTransport.getSentMessagesOfType('ClientRequest').length > 0,
         1000,
-        'ClientRequest not resent after reconnection - GAP-001 BUG!'
+        'ClientRequest not resent after reconnection'
       );
 
       const resentRequests = mockTransport.getSentMessagesOfType('ClientRequest');
@@ -202,12 +200,11 @@ describe('GAP-001: Resend Logic After Reconnection', () => {
         nonce: continueSessionMsgs[0].nonce,
       });
 
-      // 7. Wait for the pending query to be RESENT
-      // THIS IS THE BUG: Currently the query is NOT resent
+      // 7. Wait for the pending query to be resent
       await waitForCondition(
         () => mockTransport.getSentMessagesOfType('Query').length > 0,
         1000,
-        'Query not resent after reconnection - GAP-001 BUG!'
+        'Query not resent after reconnection'
       );
 
       const resentQueries = mockTransport.getSentMessagesOfType('Query');
@@ -279,7 +276,7 @@ describe('GAP-001: Resend Logic After Reconnection', () => {
         await waitForCondition(
           () => shortTimeoutTransport.getSentMessagesOfType('ClientRequest').length >= 2,
           500,
-          'ClientRequest not resent after timeout - GAP-001 BUG!'
+          'ClientRequest not resent after timeout'
         );
 
         const allRequests = shortTimeoutTransport.getSentMessagesOfType('ClientRequest');
@@ -359,11 +356,11 @@ describe('GAP-001: Resend Logic After Reconnection', () => {
         nonce: continueSessionMsgs[0].nonce,
       });
 
-      // 4. Wait for ALL 3 commands to be resent
+      // 4. Wait for all 3 commands to be resent
       await waitForCondition(
         () => mockTransport.getSentMessagesOfType('ClientRequest').length === 3,
         1000,
-        'Not all ClientRequests resent after reconnection - GAP-001 BUG!'
+        'Not all ClientRequests resent after reconnection'
       );
 
       const resentRequests = mockTransport.getSentMessagesOfType('ClientRequest');

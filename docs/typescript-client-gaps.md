@@ -39,10 +39,6 @@ const now = new Date();
 state.pendingRequests.resendAll(now);
 state.pendingQueries.resendAll(now);
 
-// TODO (eran): POTENTIAL BUG - Incomplete resend logic. This comment says the client will
-// handle resending, but looking at client.ts there's no code that checks for pending
-// requests needing resend after reconnection.
-
 return {
   newState,
   messagesToSend: [],  // ← Empty! Nothing actually resent

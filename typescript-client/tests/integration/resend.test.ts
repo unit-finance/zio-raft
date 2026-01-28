@@ -386,4 +386,223 @@ describe('Resend Logic After Reconnection', () => {
       expect(result3.toString()).toBe('result-command-3');
     });
   });
+
+  describe('TC-RESEND-005: SessionExpired during reconnect', () => {
+    it('should fail pending commands when session expires during reconnection', async () => {
+      // 1. Connect to cluster
+      const connectPromise = client.connect();
+
+      await waitForCondition(
+        () => mockTransport.getSentMessagesOfType('CreateSession').length > 0,
+        1000,
+        'CreateSession not sent'
+      );
+
+      const createSessionMsgs = mockTransport.getSentMessagesOfType('CreateSession');
+      mockTransport.injectMessage({
+        type: 'SessionCreated',
+        sessionId: 'test-session-005',
+        nonce: createSessionMsgs[0].nonce,
+      });
+
+      await connectPromise;
+
+      // 2. Submit a command (don't respond - keep it pending)
+      const commandPromise = client.submitCommand(Buffer.from('pending-command'));
+
+      await waitForCondition(
+        () => mockTransport.getSentMessagesOfType('ClientRequest').length > 0,
+        1000,
+        'ClientRequest not sent'
+      );
+
+      // 3. Simulate leader change
+      mockTransport.clearSentMessages();
+      mockTransport.injectMessage({
+        type: 'SessionClosed',
+        reason: 'NotLeaderAnymore',
+        leaderId: MemberId.fromString('node2'),
+      });
+
+      // 4. Wait for ContinueSession to be sent
+      await waitForCondition(
+        () => mockTransport.getSentMessagesOfType('ContinueSession').length > 0,
+        1000,
+        'ContinueSession not sent after SessionClosed'
+      );
+
+      const continueSessionMsgs = mockTransport.getSentMessagesOfType('ContinueSession');
+      expect(continueSessionMsgs).toHaveLength(1);
+
+      // 5. Respond with SessionRejected(SessionExpired) - session has expired on server
+      mockTransport.injectMessage({
+        type: 'SessionRejected',
+        nonce: continueSessionMsgs[0].nonce,
+        reason: 'SessionExpired',
+      });
+
+      // 6. Verify command promise rejects with session expired error
+      await expect(commandPromise).rejects.toThrow('Session expired');
+
+      // 7. Verify client transitioned to Disconnected state
+      // We can check this by trying to submit a new command which should reject immediately
+      const newCommandPromise = client.submitCommand(Buffer.from('new-command'));
+      await expect(newCommandPromise).rejects.toThrow();
+    });
+  });
+
+  describe('TC-RESEND-006: Multiple sequential failovers with success', () => {
+    it('should successfully reconnect after multiple leader redirects', async () => {
+      // Setup: Create client with 3 nodes in cluster
+      (client as unknown) = null; // Don't disconnect in afterEach
+
+      const multiNodeTransport = new MockTransport();
+      multiNodeTransport.autoRespondToCreateSession = false;
+
+      const multiNodeClient = new RaftClient(
+        {
+          clusterMembers: new Map([
+            [MemberId.fromString('node1'), 'tcp://localhost:5555'],
+            [MemberId.fromString('node2'), 'tcp://localhost:5556'],
+            [MemberId.fromString('node3'), 'tcp://localhost:5557'],
+          ]),
+          capabilities: new Map([['version', '1.0.0']]),
+          connectionTimeout: 5000,
+          requestTimeout: 200,
+          keepAliveInterval: 50,
+        },
+        multiNodeTransport
+      );
+
+      try {
+        // 1. Connect to node1
+        const connectPromise = multiNodeClient.connect();
+
+        await waitForCondition(() => multiNodeTransport.getSentMessagesOfType('CreateSession').length > 0, 1000);
+
+        const createSessionMsgs = multiNodeTransport.getSentMessagesOfType('CreateSession');
+        multiNodeTransport.injectMessage({
+          type: 'SessionCreated',
+          sessionId: 'test-session-006',
+          nonce: createSessionMsgs[0].nonce,
+        });
+
+        await connectPromise;
+
+        // 2. Submit a command
+        const commandPromise = multiNodeClient.submitCommand(Buffer.from('multi-failover-command'));
+
+        await waitForCondition(() => multiNodeTransport.getSentMessagesOfType('ClientRequest').length > 0, 1000);
+
+        const originalRequest = multiNodeTransport.getSentMessagesOfType('ClientRequest')[0];
+        const originalRequestId = originalRequest.requestId;
+
+        // 3. First failover: node1 → node2
+        multiNodeTransport.clearSentMessages();
+        multiNodeTransport.injectMessage({
+          type: 'SessionClosed',
+          reason: 'NotLeaderAnymore',
+          leaderId: MemberId.fromString('node2'),
+        });
+
+        await waitForCondition(() => multiNodeTransport.getSentMessagesOfType('ContinueSession').length > 0, 1000);
+
+        const continueSession1 = multiNodeTransport.getSentMessagesOfType('ContinueSession')[0];
+
+        // 4. Second failover: node2 rejects, redirect to node3
+        multiNodeTransport.clearSentMessages();
+        multiNodeTransport.injectMessage({
+          type: 'SessionRejected',
+          nonce: continueSession1.nonce,
+          reason: 'NotLeader',
+          leaderId: MemberId.fromString('node3'),
+        });
+
+        await waitForCondition(() => multiNodeTransport.getSentMessagesOfType('ContinueSession').length > 0, 1000);
+
+        const continueSession2 = multiNodeTransport.getSentMessagesOfType('ContinueSession')[0];
+
+        // 5. Third attempt succeeds: node3 accepts
+        multiNodeTransport.injectMessage({
+          type: 'SessionContinued',
+          nonce: continueSession2.nonce,
+        });
+
+        // 6. Wait for command to be resent
+        await waitForCondition(() => multiNodeTransport.getSentMessagesOfType('ClientRequest').length > 0, 1000);
+
+        const resentRequest = multiNodeTransport.getSentMessagesOfType('ClientRequest')[0];
+        expect(resentRequest.requestId).toBe(originalRequestId);
+
+        // 7. Respond and verify success
+        multiNodeTransport.injectMessage({
+          type: 'ClientResponse',
+          requestId: originalRequestId,
+          result: Buffer.from('multi-failover-result'),
+        });
+
+        const result = await commandPromise;
+        expect(result.toString()).toBe('multi-failover-result');
+      } finally {
+        try {
+          await multiNodeClient.disconnect();
+        } catch {
+          // Ignore
+        }
+        multiNodeTransport.closeQueues();
+      }
+    });
+  });
+
+  describe('TC-RESEND-007: Sequential failover with member exhaustion', () => {
+    it('should fail when all cluster members are exhausted during reconnection', async () => {
+      // Use the shared 2-node client from beforeEach
+      // 1. Connect to node1
+      const connectPromise = client.connect();
+
+      await waitForCondition(() => mockTransport.getSentMessagesOfType('CreateSession').length > 0, 1000);
+
+      const createSessionMsgs = mockTransport.getSentMessagesOfType('CreateSession');
+      mockTransport.injectMessage({
+        type: 'SessionCreated',
+        sessionId: 'test-session-007',
+        nonce: createSessionMsgs[0].nonce,
+      });
+
+      await connectPromise;
+
+      // 2. Submit a command
+      const commandPromise = client.submitCommand(Buffer.from('exhaustion-command'));
+
+      await waitForCondition(() => mockTransport.getSentMessagesOfType('ClientRequest').length > 0, 1000);
+
+      // 3. First failover: node1 → node2
+      mockTransport.clearSentMessages();
+      mockTransport.injectMessage({
+        type: 'SessionClosed',
+        reason: 'NotLeaderAnymore',
+        leaderId: MemberId.fromString('node2'),
+      });
+
+      await waitForCondition(() => mockTransport.getSentMessagesOfType('ContinueSession').length > 0, 1000);
+
+      const continueSession1 = mockTransport.getSentMessagesOfType('ContinueSession')[0];
+
+      // 4. Second attempt fails: node2 rejects with NotLeader but no valid leaderId
+      mockTransport.clearSentMessages();
+      mockTransport.injectMessage({
+        type: 'SessionRejected',
+        nonce: continueSession1.nonce,
+        reason: 'NotLeader',
+        // No leaderId - cluster has no known leader, or points to node not in our config
+      });
+
+      // 5. Client should exhaust retry attempts and fail
+      await expect(commandPromise).rejects.toThrow('Failed to reconnect to any cluster member');
+
+      // 6. Verify client is disconnected
+      const newCommandPromise = client.submitCommand(Buffer.from('should-fail'));
+      await expect(newCommandPromise).rejects.toThrow();
+    });
+  });
 });

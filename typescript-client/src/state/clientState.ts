@@ -631,12 +631,6 @@ export class ConnectingNewSessionStateHandler {
    * Try connecting to the next member in the cluster
    */
   private async tryNextMember(state: ConnectingNewSessionState): Promise<StateTransitionResult> {
-    // TODO (eran): No connection retry with backoff - tries each member once sequentially,
-    // then gives up. Should implement: (1) exponential backoff between attempts,
-    // (2) retry the whole cluster multiple times before giving up, (3) configurable
-    // max retry count and backoff parameters.
-    // SCALA COMPARISON: MISSING - Scala uses ROUND-ROBIN with wrap-around (nextIndex + 1) % size
-    // in RaftClient.scala:126-127. TypeScript fails after one pass through all members.
     const members = Array.from(state.config.clusterMembers.entries());
     const currentIndex = members.findIndex(([id]) => MemberId.unwrap(id) === MemberId.unwrap(state.currentMemberId));
 
@@ -709,10 +703,11 @@ export class ConnectingNewSessionStateHandler {
  * Handler for ConnectingExistingSession state
  * Handles session resumption after reconnection
  */
-// TODO (eran): Session resumption appears untested - this handler covers leader failover
-// and session continue flow, but I didn't see integration tests exercising this path.
-// Should add tests for: (1) NotLeaderAnymore → redirect → SessionContinued,
-// (2) SessionExpired during reconnect, (3) multiple member failovers in sequence.
+// Session resumption is covered by integration tests in tests/integration/resend.test.ts:
+// - TC-RESEND-001/002: NotLeaderAnymore → redirect → SessionContinued → request resend
+// - TC-RESEND-005: SessionExpired during reconnect (terminal failure)
+// - TC-RESEND-006: Multiple sequential failovers (node1 → node2 → node3)
+// - TC-RESEND-007: Sequential failover with member exhaustion
 // SCALA COMPARISON: SAME - Both have full implementation. Testing coverage is project-specific.
 // See RaftClient.scala:336-490 for Scala's ConnectingExistingSession.
 export class ConnectingExistingSessionStateHandler {

@@ -57,17 +57,12 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     }
 
     // No items available - wait for one
-    // TODO (eran): Error propagation issue - the throw inside the callback won't propagate
-    // to the Promise caller. When close() invokes this callback, the error is thrown inside
-    // a forEach loop, not inside the Promise's executor. The Promise will never resolve or
-    // reject properly, potentially causing hung awaits. Consider using reject() instead.
-    // SCALA COMPARISON: NOT APPLICABLE - Scala uses ZIO Queue which has proper typed error
-    // handling built-in. This is a TypeScript-specific issue that needs fixing.
-    return new Promise<T>((resolve) => {
+    return new Promise<T>((resolve, reject) => {
       this.waiting.push((item) => {
         if (typeof item === 'object' && item !== null && 'done' in item) {
           // IteratorResult - queue is closed
-          throw new Error('Queue is closed and empty');
+          reject(new Error('Queue is closed and empty'));
+          return;
         }
         resolve(item as T);
       });

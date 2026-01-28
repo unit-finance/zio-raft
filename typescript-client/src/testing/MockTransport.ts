@@ -26,7 +26,27 @@ import type { ClientTransport } from '../transport/transport';
 import type { ClientMessage, ServerMessage } from '../protocol/messages';
 import { SessionId } from '../types';
 
-// TODO (Eran): I don't like MockTransport, implement E2E tests and remove it
+/**
+ * MockTransport enables deterministic testing of client protocol logic,
+ * edge cases, and failover scenarios that are difficult to reproduce reliably in E2E tests.
+ * 
+ * Design rationale:
+ * - E2E tests validate end-to-end flow with real servers (kvstore-cli-ts)
+ * - MockTransport tests validate client protocol correctness in isolation
+ * - Trade-off: Tests construct protocol messages (maintained via helpers in tests/helpers/messageFactories.ts)
+ * - TypeScript enforces correctness at compile time when protocol changes
+ * 
+ * Use MockTransport for:
+ * - Protocol edge cases (leader failover, session expiration, timeouts)
+ * - Request resend logic after reconnection
+ * - Multi-node failover scenarios
+ * - Internal API contracts (transport lifecycle, handler registration)
+ * 
+ * Use E2E tests for:
+ * - Full stack integration validation
+ * - User-facing workflows (CLI operations, watch functionality)
+ * - Real network behavior
+ */
 export class MockTransport implements ClientTransport {
   /**
    * Incoming messages queue - messages flow to RaftClient from here

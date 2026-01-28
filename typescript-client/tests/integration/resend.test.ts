@@ -8,6 +8,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { RaftClient } from '../../src/client';
 import { MockTransport } from '../../src/testing/MockTransport';
 import { MemberId } from '../../src/types';
+import {
+  sessionCreatedFor,
+  sessionClosedDueTo,
+  sessionContinuedFor,
+  sessionRejectedWith,
+  clientResponseFor,
+  queryResponseFor,
+} from '../helpers/messageFactories';
 
 // Helper to wait for a condition with timeout
 async function waitForCondition(
@@ -72,11 +80,7 @@ describe('Resend Logic After Reconnection', () => {
       );
 
       const createSessionMsgs = mockTransport.getSentMessagesOfType('CreateSession');
-      mockTransport.injectMessage({
-        type: 'SessionCreated',
-        sessionId: 'test-session-001',
-        nonce: createSessionMsgs[0].nonce,
-      });
+      mockTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-001'));
 
       await connectPromise;
 
@@ -98,11 +102,7 @@ describe('Resend Logic After Reconnection', () => {
       mockTransport.clearSentMessages();
 
       // 4. Simulate leader change - server sends SessionClosed with NotLeaderAnymore
-      mockTransport.injectMessage({
-        type: 'SessionClosed',
-        reason: 'NotLeaderAnymore',
-        leaderId: MemberId.fromString('node2'),
-      });
+      mockTransport.injectMessage(sessionClosedDueTo('NotLeaderAnymore', MemberId.fromString('node2')));
 
       // 5. Wait for ContinueSession to be sent (client tries to reconnect)
       await waitForCondition(
@@ -115,10 +115,7 @@ describe('Resend Logic After Reconnection', () => {
       expect(continueSessionMsgs).toHaveLength(1);
 
       // 6. Respond with SessionContinued (reconnection successful)
-      mockTransport.injectMessage({
-        type: 'SessionContinued',
-        nonce: continueSessionMsgs[0].nonce,
-      });
+      mockTransport.injectMessage(sessionContinuedFor(continueSessionMsgs[0].nonce));
 
       // 7. Wait for the pending command to be resent
       await waitForCondition(
@@ -133,11 +130,7 @@ describe('Resend Logic After Reconnection', () => {
       expect(resentRequests[0].payload.toString()).toBe('pending-command');
 
       // 8. Now respond to complete the command
-      mockTransport.injectMessage({
-        type: 'ClientResponse',
-        requestId: resentRequests[0].requestId,
-        result: Buffer.from('command-result'),
-      });
+      mockTransport.injectMessage(clientResponseFor(resentRequests[0].requestId, Buffer.from('command-result')));
 
       // 9. Verify command completed successfully
       const result = await commandPromise;
@@ -157,11 +150,7 @@ describe('Resend Logic After Reconnection', () => {
       );
 
       const createSessionMsgs = mockTransport.getSentMessagesOfType('CreateSession');
-      mockTransport.injectMessage({
-        type: 'SessionCreated',
-        sessionId: 'test-session-002',
-        nonce: createSessionMsgs[0].nonce,
-      });
+      mockTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-002'));
 
       await connectPromise;
 
@@ -179,11 +168,7 @@ describe('Resend Logic After Reconnection', () => {
       mockTransport.clearSentMessages();
 
       // 4. Simulate leader change
-      mockTransport.injectMessage({
-        type: 'SessionClosed',
-        reason: 'NotLeaderAnymore',
-        leaderId: MemberId.fromString('node2'),
-      });
+      mockTransport.injectMessage(sessionClosedDueTo('NotLeaderAnymore', MemberId.fromString('node2')));
 
       // 5. Wait for ContinueSession
       await waitForCondition(
@@ -195,10 +180,7 @@ describe('Resend Logic After Reconnection', () => {
       const continueSessionMsgs = mockTransport.getSentMessagesOfType('ContinueSession');
 
       // 6. Respond with SessionContinued
-      mockTransport.injectMessage({
-        type: 'SessionContinued',
-        nonce: continueSessionMsgs[0].nonce,
-      });
+      mockTransport.injectMessage(sessionContinuedFor(continueSessionMsgs[0].nonce));
 
       // 7. Wait for the pending query to be resent
       await waitForCondition(
@@ -213,11 +195,7 @@ describe('Resend Logic After Reconnection', () => {
       expect(resentQueries[0].payload.toString()).toBe('pending-query');
 
       // 8. Respond to complete the query
-      mockTransport.injectMessage({
-        type: 'QueryResponse',
-        correlationId: resentQueries[0].correlationId,
-        result: Buffer.from('query-result'),
-      });
+      mockTransport.injectMessage(queryResponseFor(resentQueries[0].correlationId, Buffer.from('query-result')));
 
       // 9. Verify query completed successfully
       const result = await queryPromise;
@@ -253,11 +231,7 @@ describe('Resend Logic After Reconnection', () => {
         await waitForCondition(() => shortTimeoutTransport.getSentMessagesOfType('CreateSession').length > 0, 1000);
 
         const createSessionMsgs = shortTimeoutTransport.getSentMessagesOfType('CreateSession');
-        shortTimeoutTransport.injectMessage({
-          type: 'SessionCreated',
-          sessionId: 'test-session-003',
-          nonce: createSessionMsgs[0].nonce,
-        });
+        shortTimeoutTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-003'));
 
         await connectPromise;
 
@@ -287,11 +261,7 @@ describe('Resend Logic After Reconnection', () => {
         expect(allRequests[1].payload.toString()).toBe('timeout-command');
 
         // 4. Now respond to complete
-        shortTimeoutTransport.injectMessage({
-          type: 'ClientResponse',
-          requestId: originalRequestId,
-          result: Buffer.from('timeout-result'),
-        });
+        shortTimeoutTransport.injectMessage(clientResponseFor(originalRequestId, Buffer.from('timeout-result')));
 
         const result = await commandPromise;
         expect(result.toString()).toBe('timeout-result');
@@ -315,11 +285,7 @@ describe('Resend Logic After Reconnection', () => {
       await waitForCondition(() => mockTransport.getSentMessagesOfType('CreateSession').length > 0, 1000);
 
       const createSessionMsgs = mockTransport.getSentMessagesOfType('CreateSession');
-      mockTransport.injectMessage({
-        type: 'SessionCreated',
-        sessionId: 'test-session-004',
-        nonce: createSessionMsgs[0].nonce,
-      });
+      mockTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-004'));
 
       await connectPromise;
 
@@ -342,19 +308,12 @@ describe('Resend Logic After Reconnection', () => {
       // 3. Clear and trigger reconnection
       mockTransport.clearSentMessages();
 
-      mockTransport.injectMessage({
-        type: 'SessionClosed',
-        reason: 'NotLeaderAnymore',
-        leaderId: MemberId.fromString('node2'),
-      });
+      mockTransport.injectMessage(sessionClosedDueTo('NotLeaderAnymore', MemberId.fromString('node2')));
 
       await waitForCondition(() => mockTransport.getSentMessagesOfType('ContinueSession').length > 0, 1000);
 
       const continueSessionMsgs = mockTransport.getSentMessagesOfType('ContinueSession');
-      mockTransport.injectMessage({
-        type: 'SessionContinued',
-        nonce: continueSessionMsgs[0].nonce,
-      });
+      mockTransport.injectMessage(sessionContinuedFor(continueSessionMsgs[0].nonce));
 
       // 4. Wait for all 3 commands to be resent
       await waitForCondition(
@@ -372,11 +331,9 @@ describe('Resend Logic After Reconnection', () => {
 
       // 5. Respond to all and verify completion
       for (const request of resentRequests) {
-        mockTransport.injectMessage({
-          type: 'ClientResponse',
-          requestId: request.requestId,
-          result: Buffer.from(`result-${request.payload.toString()}`),
-        });
+        mockTransport.injectMessage(
+          clientResponseFor(request.requestId, Buffer.from(`result-${request.payload.toString()}`))
+        );
       }
 
       const [result1, result2, result3] = await Promise.all([command1Promise, command2Promise, command3Promise]);
@@ -399,11 +356,7 @@ describe('Resend Logic After Reconnection', () => {
       );
 
       const createSessionMsgs = mockTransport.getSentMessagesOfType('CreateSession');
-      mockTransport.injectMessage({
-        type: 'SessionCreated',
-        sessionId: 'test-session-005',
-        nonce: createSessionMsgs[0].nonce,
-      });
+      mockTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-005'));
 
       await connectPromise;
 
@@ -418,11 +371,7 @@ describe('Resend Logic After Reconnection', () => {
 
       // 3. Simulate leader change
       mockTransport.clearSentMessages();
-      mockTransport.injectMessage({
-        type: 'SessionClosed',
-        reason: 'NotLeaderAnymore',
-        leaderId: MemberId.fromString('node2'),
-      });
+      mockTransport.injectMessage(sessionClosedDueTo('NotLeaderAnymore', MemberId.fromString('node2')));
 
       // 4. Wait for ContinueSession to be sent
       await waitForCondition(
@@ -435,11 +384,7 @@ describe('Resend Logic After Reconnection', () => {
       expect(continueSessionMsgs).toHaveLength(1);
 
       // 5. Respond with SessionRejected(SessionExpired) - session has expired on server
-      mockTransport.injectMessage({
-        type: 'SessionRejected',
-        nonce: continueSessionMsgs[0].nonce,
-        reason: 'SessionExpired',
-      });
+      mockTransport.injectMessage(sessionRejectedWith(continueSessionMsgs[0].nonce, 'SessionExpired'));
 
       // 6. Verify command promise rejects with session expired error
       await expect(commandPromise).rejects.toThrow('Session expired');
@@ -481,11 +426,7 @@ describe('Resend Logic After Reconnection', () => {
         await waitForCondition(() => multiNodeTransport.getSentMessagesOfType('CreateSession').length > 0, 1000);
 
         const createSessionMsgs = multiNodeTransport.getSentMessagesOfType('CreateSession');
-        multiNodeTransport.injectMessage({
-          type: 'SessionCreated',
-          sessionId: 'test-session-006',
-          nonce: createSessionMsgs[0].nonce,
-        });
+        multiNodeTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-006'));
 
         await connectPromise;
 
@@ -499,11 +440,7 @@ describe('Resend Logic After Reconnection', () => {
 
         // 3. First failover: node1 → node2
         multiNodeTransport.clearSentMessages();
-        multiNodeTransport.injectMessage({
-          type: 'SessionClosed',
-          reason: 'NotLeaderAnymore',
-          leaderId: MemberId.fromString('node2'),
-        });
+        multiNodeTransport.injectMessage(sessionClosedDueTo('NotLeaderAnymore', MemberId.fromString('node2')));
 
         await waitForCondition(() => multiNodeTransport.getSentMessagesOfType('ContinueSession').length > 0, 1000);
 
@@ -511,22 +448,16 @@ describe('Resend Logic After Reconnection', () => {
 
         // 4. Second failover: node2 rejects, redirect to node3
         multiNodeTransport.clearSentMessages();
-        multiNodeTransport.injectMessage({
-          type: 'SessionRejected',
-          nonce: continueSession1.nonce,
-          reason: 'NotLeader',
-          leaderId: MemberId.fromString('node3'),
-        });
+        multiNodeTransport.injectMessage(
+          sessionRejectedWith(continueSession1.nonce, 'NotLeader', MemberId.fromString('node3'))
+        );
 
         await waitForCondition(() => multiNodeTransport.getSentMessagesOfType('ContinueSession').length > 0, 1000);
 
         const continueSession2 = multiNodeTransport.getSentMessagesOfType('ContinueSession')[0];
 
         // 5. Third attempt succeeds: node3 accepts
-        multiNodeTransport.injectMessage({
-          type: 'SessionContinued',
-          nonce: continueSession2.nonce,
-        });
+        multiNodeTransport.injectMessage(sessionContinuedFor(continueSession2.nonce));
 
         // 6. Wait for command to be resent
         await waitForCondition(() => multiNodeTransport.getSentMessagesOfType('ClientRequest').length > 0, 1000);
@@ -535,11 +466,7 @@ describe('Resend Logic After Reconnection', () => {
         expect(resentRequest.requestId).toBe(originalRequestId);
 
         // 7. Respond and verify success
-        multiNodeTransport.injectMessage({
-          type: 'ClientResponse',
-          requestId: originalRequestId,
-          result: Buffer.from('multi-failover-result'),
-        });
+        multiNodeTransport.injectMessage(clientResponseFor(originalRequestId, Buffer.from('multi-failover-result')));
 
         const result = await commandPromise;
         expect(result.toString()).toBe('multi-failover-result');
@@ -563,11 +490,7 @@ describe('Resend Logic After Reconnection', () => {
       await waitForCondition(() => mockTransport.getSentMessagesOfType('CreateSession').length > 0, 1000);
 
       const createSessionMsgs = mockTransport.getSentMessagesOfType('CreateSession');
-      mockTransport.injectMessage({
-        type: 'SessionCreated',
-        sessionId: 'test-session-007',
-        nonce: createSessionMsgs[0].nonce,
-      });
+      mockTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-007'));
 
       await connectPromise;
 
@@ -578,11 +501,7 @@ describe('Resend Logic After Reconnection', () => {
 
       // 3. First failover: node1 → node2
       mockTransport.clearSentMessages();
-      mockTransport.injectMessage({
-        type: 'SessionClosed',
-        reason: 'NotLeaderAnymore',
-        leaderId: MemberId.fromString('node2'),
-      });
+      mockTransport.injectMessage(sessionClosedDueTo('NotLeaderAnymore', MemberId.fromString('node2')));
 
       await waitForCondition(() => mockTransport.getSentMessagesOfType('ContinueSession').length > 0, 1000);
 
@@ -590,12 +509,8 @@ describe('Resend Logic After Reconnection', () => {
 
       // 4. Second attempt fails: node2 rejects with NotLeader but no valid leaderId
       mockTransport.clearSentMessages();
-      mockTransport.injectMessage({
-        type: 'SessionRejected',
-        nonce: continueSession1.nonce,
-        reason: 'NotLeader',
-        // No leaderId - cluster has no known leader, or points to node not in our config
-      });
+      // No leaderId - cluster has no known leader, or points to node not in our config
+      mockTransport.injectMessage(sessionRejectedWith(continueSession1.nonce, 'NotLeader'));
 
       // 5. Client should exhaust retry attempts and fail
       await expect(commandPromise).rejects.toThrow('Failed to reconnect to any cluster member');

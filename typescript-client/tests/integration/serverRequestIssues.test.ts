@@ -16,7 +16,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { RaftClient } from '../../src/client';
 import { MockTransport } from '../../src/testing/MockTransport';
-import type { ServerRequest } from '../../src/protocol/messages';
+import { RequestId } from '../../src/types';
+import { serverRequestWith } from '../helpers/messageFactories';
 
 describe('Server Request Handler Lifecycle', () => {
   let client: RaftClient;
@@ -73,12 +74,7 @@ describe('Server Request Handler Lifecycle', () => {
       for (let i = 1; i <= 10; i++) {
         emitClientEvent({
           type: 'serverRequestReceived',
-          request: {
-            type: 'ServerRequest',
-            requestId: `req-${i.toString().padStart(3, '0')}`,
-            payload: Buffer.from(`work-${i}`),
-            createdAt: new Date(),
-          },
+          request: serverRequestWith(RequestId.fromBigInt(BigInt(i)), Buffer.from(`work-${i}`)),
         });
       }
 
@@ -133,12 +129,7 @@ describe('Server Request Handler Lifecycle', () => {
       for (let i = 1; i <= 5; i++) {
         emitClientEvent({
           type: 'serverRequestReceived',
-          request: {
-            type: 'ServerRequest',
-            requestId: `req-${i}`,
-            payload: Buffer.from(`work-${i}`),
-            createdAt: new Date(),
-          },
+          request: serverRequestWith(RequestId.fromBigInt(BigInt(i)), Buffer.from(`work-${i}`)),
         });
       }
 
@@ -159,12 +150,7 @@ describe('Server Request Handler Lifecycle', () => {
       for (let i = 6; i <= 10; i++) {
         emitClientEvent({
           type: 'serverRequestReceived',
-          request: {
-            type: 'ServerRequest',
-            requestId: `req-${i}`,
-            payload: Buffer.from(`work-${i}`),
-            createdAt: new Date(),
-          },
+          request: serverRequestWith(RequestId.fromBigInt(BigInt(i)), Buffer.from(`work-${i}`)),
         });
       }
 
@@ -195,12 +181,7 @@ describe('Server Request Handler Lifecycle', () => {
       for (let i = 1; i <= 5; i++) {
         emitClientEvent({
           type: 'serverRequestReceived',
-          request: {
-            type: 'ServerRequest',
-            requestId: `req-${i}`,
-            payload: Buffer.from(`notification-${i}`),
-            createdAt: new Date(),
-          },
+          request: serverRequestWith(RequestId.fromBigInt(BigInt(i)), Buffer.from(`notification-${i}`)),
         });
       }
 
@@ -220,12 +201,7 @@ describe('Server Request Handler Lifecycle', () => {
       for (let i = 6; i <= 10; i++) {
         emitClientEvent({
           type: 'serverRequestReceived',
-          request: {
-            type: 'ServerRequest',
-            requestId: `req-${i}`,
-            payload: Buffer.from(`notification-${i}`),
-            createdAt: new Date(),
-          },
+          request: serverRequestWith(RequestId.fromBigInt(BigInt(i)), Buffer.from(`notification-${i}`)),
         });
       }
 

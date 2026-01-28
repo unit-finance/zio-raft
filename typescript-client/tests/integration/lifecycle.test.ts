@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { RaftClient } from '../../src/client';
 import { MockTransport } from '../../src/testing/MockTransport';
 import { MemberId } from '../../src/types';
+import { sessionCreatedFor, clientResponseFor, queryResponseFor } from '../helpers/messageFactories';
 
 // Helper to wait for a condition with timeout
 async function waitForCondition(
@@ -67,11 +68,7 @@ describe('Client Lifecycle Integration', () => {
         expect(createSessionMessages).toHaveLength(1);
 
         // Manually inject SessionCreated response
-        transport.injectMessage({
-          type: 'SessionCreated',
-          sessionId: 'test-session-123',
-          nonce: createSessionMessages[0].nonce,
-        });
+        transport.injectMessage(sessionCreatedFor(createSessionMessages[0].nonce, 'test-session-123'));
 
         // Wait for connect to complete
         await connectPromise;
@@ -91,11 +88,7 @@ describe('Client Lifecycle Integration', () => {
         expect(clientRequests[0].payload.toString()).toBe('test-command-payload');
 
         // Respond with ClientResponse
-        transport.injectMessage({
-          type: 'ClientResponse',
-          requestId: clientRequests[0].requestId,
-          result: Buffer.from('command-result'),
-        });
+        transport.injectMessage(clientResponseFor(clientRequests[0].requestId, Buffer.from('command-result')));
 
         // Wait for command to complete
         const result = await commandPromise;
@@ -144,11 +137,7 @@ describe('Client Lifecycle Integration', () => {
           const latestRequest = requests[requests.length - 1];
 
           // Respond immediately
-          transport.injectMessage({
-            type: 'ClientResponse',
-            requestId: latestRequest.requestId,
-            result: Buffer.from(`result-${cmd}`),
-          });
+          transport.injectMessage(clientResponseFor(latestRequest.requestId, Buffer.from(`result-${cmd}`)));
 
           const result = await cmdPromise;
           results.push(result.toString());
@@ -192,11 +181,7 @@ describe('Client Lifecycle Integration', () => {
 
         // Respond to all in reverse order (test out-of-order handling)
         for (let i = requests.length - 1; i >= 0; i--) {
-          transport.injectMessage({
-            type: 'ClientResponse',
-            requestId: requests[i].requestId,
-            result: Buffer.from(`result-for-request-${i + 1}`),
-          });
+          transport.injectMessage(clientResponseFor(requests[i].requestId, Buffer.from(`result-for-request-${i + 1}`)));
         }
 
         // Wait for all to complete
@@ -240,11 +225,7 @@ describe('Client Lifecycle Integration', () => {
         expect(queries[0].payload.toString()).toBe('query-payload');
 
         // Respond with QueryResponse
-        transport.injectMessage({
-          type: 'QueryResponse',
-          correlationId: queries[0].correlationId,
-          result: Buffer.from('query-result'),
-        });
+        transport.injectMessage(queryResponseFor(queries[0].correlationId, Buffer.from('query-result')));
 
         // Wait for query to complete
         const result = await queryPromise;

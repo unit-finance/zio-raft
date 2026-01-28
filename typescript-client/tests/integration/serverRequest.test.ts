@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { RaftClient } from '../../src/client';
 import { MockTransport } from '../../src/testing/MockTransport';
 import { RequestId, MemberId } from '../../src/types';
-import type { ServerRequest } from '../../src/protocol/messages';
+import { serverRequestWith } from '../helpers/messageFactories';
 
 describe('Server-Initiated Requests Integration', () => {
   let client: RaftClient;
@@ -48,12 +48,7 @@ describe('Server-Initiated Requests Integration', () => {
       receivedRequests.push(request);
     });
 
-    const testRequest: ServerRequest = {
-      type: 'ServerRequest',
-      requestId: RequestId.fromBigInt(1n),
-      payload: Buffer.from('test-work-item'),
-      createdAt: new Date(),
-    };
+    const testRequest = serverRequestWith(RequestId.fromBigInt(1n), Buffer.from('test-work-item'));
 
     mockTransport.injectMessage(testRequest);
 
@@ -73,26 +68,9 @@ describe('Server-Initiated Requests Integration', () => {
     });
 
     // Inject multiple requests
-    mockTransport.injectMessage({
-      type: 'ServerRequest',
-      requestId: RequestId.fromBigInt(1n),
-      payload: Buffer.from('work-1'),
-      createdAt: new Date(),
-    });
-
-    mockTransport.injectMessage({
-      type: 'ServerRequest',
-      requestId: RequestId.fromBigInt(2n),
-      payload: Buffer.from('work-2'),
-      createdAt: new Date(),
-    });
-
-    mockTransport.injectMessage({
-      type: 'ServerRequest',
-      requestId: RequestId.fromBigInt(3n),
-      payload: Buffer.from('work-3'),
-      createdAt: new Date(),
-    });
+    mockTransport.injectMessage(serverRequestWith(RequestId.fromBigInt(1n), Buffer.from('work-1')));
+    mockTransport.injectMessage(serverRequestWith(RequestId.fromBigInt(2n), Buffer.from('work-2')));
+    mockTransport.injectMessage(serverRequestWith(RequestId.fromBigInt(3n), Buffer.from('work-3')));
 
     await waitForCondition(() => receivedRequests.length >= 3, 2000, 'ServerRequest handlers were not called');
 

@@ -6,6 +6,7 @@ import { describe, it } from 'vitest';
 import { RaftClient } from '../../src/client';
 import { MockTransport } from '../../src/testing/MockTransport';
 import { MemberId } from '../../src/types';
+import { sessionCreatedFor } from '../helpers/messageFactories';
 
 describe('Debug Connect', () => {
   it('should connect successfully', async () => {
@@ -42,11 +43,7 @@ describe('Debug Connect', () => {
       console.log('[DEBUG] CreateSession found! Injecting SessionCreated...');
       const createSession = mockTransport.getSentMessagesOfType('CreateSession')[0];
 
-      mockTransport.injectMessage({
-        type: 'SessionCreated',
-        sessionId: 'debug-session-123',
-        nonce: createSession.nonce,
-      });
+      mockTransport.injectMessage(sessionCreatedFor(createSession.nonce, 'debug-session-123'));
 
       console.log('[DEBUG] SessionCreated injected. Waiting for connect to resolve...');
 

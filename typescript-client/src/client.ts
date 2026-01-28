@@ -277,13 +277,6 @@ export class RaftClient extends EventEmitter {
         try {
           this.serverRequestHandler(request);
         } catch (err) {
-          // TODO (eran): Error swallowing issue - user handler errors are only emitted as events.
-          // If nobody listens to ERROR, bugs are silently swallowed. Consider requiring error
-          // handler registration or using a different error propagation strategy.
-          // SCALA COMPARISON: DIFFERENT DESIGN - Scala exposes serverRequests as ZStream
-          // (RaftClient.scala:77-78). Errors propagate naturally through the stream. TypeScript
-          // uses callback registration which is less safe.
-          // Swallow errors in user handler to prevent crash
           this.emit(ClientEvents.ERROR, err instanceof Error ? err : new Error(String(err)));
         }
       }
@@ -441,12 +434,6 @@ export class RaftClient extends EventEmitter {
     debugLog('Calling transport.connect()...');
     await this.transport.connect(address);
     debugLog('transport.connect() completed successfully');
-
-    // TODO (eran): think about this comment... does it make sense?
-
-    // Note: We don't disconnect here when transitioning to Disconnected
-    // because the event loop is still running and needs the transport.
-    // Disconnect happens in cleanup() after the event loop exits.
   }
 
   /**
@@ -491,21 +478,6 @@ export class RaftClient extends EventEmitter {
   /**
    * Handle state change events and emit appropriate public events
    *
-   * // TODO (Eran): Issue 1 - Missing DISCONNECTED for failed reconnections
-   * Currently only emits DISCONNECTED when going from Connected → Disconnected.
-   * But ConnectingExistingSession → Disconnected (reconnection failed completely)
-   * should probably also emit DISCONNECTED since the user was previously connected.
-   *
-   * // TODO (Eran): Issue 2 - RECONNECTING only fires once per cycle
-   * Currently only emits RECONNECTING on stateChange (Connected → ConnectingExistingSession).
-   * But when retrying to the next member, state stays ConnectingExistingSession and only
-   * 'connectionAttempt' event is emitted. Should track connectionAttempt events and emit
-   * RECONNECTING for each retry attempt, not just the first one.
-   *
-   * // TODO (Eran): Issue 3 - Type assertions could mask bugs
-   * The 'as ConnectedState' and 'as ConnectingExistingSessionState' assertions are necessary
-   * because we check event strings (oldState/newState) not this.currentState.state.
-   * Consider adding defensive checks like: if (this.currentState.state !== 'Connected') return;
    */
   private handleStateChangeEvent(oldState: ClientState['state'], newState: ClientState['state']): void {
     debugLog('State change:', oldState, '->', newState);
@@ -523,7 +495,6 @@ export class RaftClient extends EventEmitter {
     }
 
     // Emit DISCONNECTED when transitioning from Connected to Disconnected
-    // TODO (Eran): Also handle ConnectingExistingSession → Disconnected?
     if (newState === 'Disconnected' && oldState === 'Connected') {
       const reason = this.isShuttingDown ? 'client-shutdown' : 'network';
       this.emit(ClientEvents.DISCONNECTED, {
@@ -533,7 +504,6 @@ export class RaftClient extends EventEmitter {
     }
 
     // Emit RECONNECTING when transitioning from Connected to ConnectingExistingSession
-    // TODO (Eran): Also emit for subsequent connectionAttempt events during reconnection?
     if (newState === 'ConnectingExistingSession' && oldState === 'Connected') {
       this.reconnectAttempt++;
       const state = this.currentState as ConnectingExistingSessionState;

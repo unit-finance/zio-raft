@@ -708,8 +708,6 @@ export class ConnectingNewSessionStateHandler {
 // - TC-RESEND-005: SessionExpired during reconnect (terminal failure)
 // - TC-RESEND-006: Multiple sequential failovers (node1 → node2 → node3)
 // - TC-RESEND-007: Sequential failover with member exhaustion
-// SCALA COMPARISON: SAME - Both have full implementation. Testing coverage is project-specific.
-// See RaftClient.scala:336-490 for Scala's ConnectingExistingSession.
 export class ConnectingExistingSessionStateHandler {
   /**
    * Handle an event in the ConnectingExistingSession state
@@ -1411,12 +1409,6 @@ export class ConnectedStateHandler {
    * Handle TimeoutCheck: resend expired requests and queries
    */
   private async handleTimeoutCheck(state: ConnectedState): Promise<StateTransitionResult> {
-    // TODO (eran): No maximum retry count - requests retry forever until they succeed or
-    // session terminates. Should implement a max retry limit and fail requests with
-    // TimeoutError after N retries or M total seconds. Currently requests could hang
-    // indefinitely if server never responds.
-    // SCALA COMPARISON: SAME - Scala also retries indefinitely (PendingRequests.scala:51-66).
-    // This is BY DESIGN for Raft - eventual consistency means infinite retries are acceptable.
     const now = new Date();
     const expiredRequests = state.pendingRequests.resendExpired(now, state.config.requestTimeout);
     const expiredQueries = state.pendingQueries.resendExpired(now, state.config.requestTimeout);

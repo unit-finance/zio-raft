@@ -1,11 +1,6 @@
 /**
  * Set command implementation
  */
-// TODO (eran): Code duplication - set.ts, get.ts, and watch.ts have nearly identical
-// boilerplate: client creation, connect/disconnect, error handling. Consider extracting
-// a helper like: withKVClient(endpoints, async (client) => { ... }) to reduce duplication.
-// SCALA COMPARISON: SAME - Scala also has similar boilerplate per command in Main.scala,
-// but it's in a single file and less verbose due to for-comprehension syntax.
 
 import { Command } from 'commander';
 import { KVClient } from '../kvClient.js';

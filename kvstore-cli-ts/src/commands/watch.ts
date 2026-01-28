@@ -30,14 +30,7 @@ export function createWatchCommand(): Command {
         isShuttingDown = true;
         console.error('\nShutting down...');
 
-        if (client) {
-          try {
-            await client.disconnect();
-          } catch (cleanupError) {
-            // Log cleanup errors for debugging
-            console.error('Warning: Failed to disconnect client during shutdown:', cleanupError);
-          }
-        }
+        await client?.disconnect();
 
         process.exit(130); // Standard SIGINT exit code
       };
@@ -80,21 +73,14 @@ export function createWatchCommand(): Command {
         }
 
         // 10. Normal exit (stream ended)
-        await client.disconnect();
+        await client?.disconnect();
         process.exit(0);
       } catch (error) {
         // Error handling
         console.error(formatError(error));
 
         // Ensure cleanup
-        if (client) {
-          try {
-            await client.disconnect();
-          } catch (cleanupError) {
-            // Log cleanup errors for debugging
-            console.error('Warning: Failed to disconnect client during cleanup:', cleanupError);
-          }
-        }
+        await client?.disconnect();
 
         process.exit(getExitCode(error));
       }

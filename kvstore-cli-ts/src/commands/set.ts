@@ -51,21 +51,14 @@ export function createSetCommand(): Command {
         console.log('OK');
 
         // 7. Disconnect and exit
-        await client.disconnect();
+        await client?.disconnect();
         process.exit(0);
       } catch (error) {
         // 8. Error handling
         console.error(formatError(error));
 
         // Ensure cleanup
-        if (client) {
-          try {
-            await client.disconnect();
-          } catch (cleanupError) {
-            // Log cleanup errors for debugging
-            console.error('Warning: Failed to disconnect client during cleanup:', cleanupError);
-          }
-        }
+        await client?.disconnect();
 
         process.exit(getExitCode(error));
       }

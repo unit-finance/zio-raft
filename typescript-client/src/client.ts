@@ -20,7 +20,6 @@ import { ValidationError } from './errors';
 import { ServerRequest } from './protocol/messages';
 import { ClientEvents } from './events/eventNames';
 import { MemberId } from './types';
-import { debugLog } from './utils/debug';
 
 // ============================================================================
 // Event Types
@@ -140,22 +139,18 @@ export class RaftClient extends EventEmitter {
    * Returns when session is created
    */
   async connect(): Promise<void> {
-    debugLog('RaftClient.connect() called, currentState:', this.currentState.state);
 
     if (this.currentState.state !== 'Disconnected') {
       // Already connected or connecting
-      debugLog('Already connected/connecting, returning early');
       return;
     }
 
     // Start event loop if not running
     if (this.eventLoopPromise === null) {
-      debugLog('Starting event loop...');
       this.eventLoopPromise = this.runEventLoop();
     }
 
     // Enqueue connect action and wait for completion
-    debugLog('Enqueuing Connect action to action queue');
     return new Promise<void>((resolve, reject) => {
       this.actionQueue.offer({
         type: 'Connect',
@@ -294,22 +289,16 @@ export class RaftClient extends EventEmitter {
    * Merges action queue, transport messages, and timers into unified stream
    */
   private async runEventLoop(): Promise<void> {
-    debugLog('runEventLoop() starting...');
     try {
       // Create unified event stream
-      debugLog('Creating action stream...');
       const actionStream = this.createActionStream();
 
-      debugLog('Creating server message stream...');
       const serverMessageStream = this.createServerMessageStream();
 
-      debugLog('Creating keep-alive stream...');
       const keepAliveStream = this.createKeepAliveStream();
 
-      debugLog('Creating timeout check stream...');
       const timeoutCheckStream = this.createTimeoutCheckStream();
 
-      debugLog('Merging streams...');
       const unifiedStream = mergeStreams<StreamEvent>(
         actionStream,
         serverMessageStream,
@@ -317,10 +306,8 @@ export class RaftClient extends EventEmitter {
         timeoutCheckStream
       );
 
-      debugLog('Starting event loop iteration...');
       // Process events
       for await (const event of unifiedStream) {
-        debugLog('Received event:', event.type);
         await this.processEvent(event);
 
         // Exit loop if shutting down and disconnected
@@ -329,10 +316,8 @@ export class RaftClient extends EventEmitter {
         }
       }
     } catch (err) {
-      debugLog('runEventLoop error:', err);
       this.emit(ClientEvents.ERROR, err instanceof Error ? err : new Error(String(err)));
     } finally {
-      debugLog('runEventLoop cleanup...');
       await this.cleanup();
 
       // Resolve disconnect promise if waiting
@@ -349,32 +334,24 @@ export class RaftClient extends EventEmitter {
   private async processEvent(event: StreamEvent): Promise<void> {
     try {
       const oldState = this.currentState;
-      debugLog('processEvent - oldState:', oldState.state, 'event:', event.type);
 
       const result: StateTransitionResult = await this.stateManager.handleEvent(this.currentState, event);
 
       const newState = result.newState;
-      debugLog('processEvent - newState:', newState.state);
 
       // Handle transport connection changes based on state transitions
-      debugLog('Calling handleTransportConnection...');
       await this.handleTransportConnection(oldState, newState);
-      debugLog('handleTransportConnection completed');
 
       // Update state
       this.currentState = result.newState;
 
       // Send messages via transport
       if (result.messagesToSend && result.messagesToSend.length > 0) {
-        debugLog('processEvent - sending', result.messagesToSend.length, 'messages');
         for (let i = 0; i < result.messagesToSend.length; i++) {
           const message = result.messagesToSend[i]!;
-          debugLog('Sending message', i + 1, 'of', result.messagesToSend.length);
           await this.transport.sendMessage(message);
-          debugLog('Message', i + 1, 'sent successfully');
         }
       } else {
-        debugLog('processEvent - no messages to send');
       }
 
       // Emit client events
@@ -397,7 +374,6 @@ export class RaftClient extends EventEmitter {
    * Handle transport connection/disconnection based on state transitions
    */
   private async handleTransportConnection(oldState: ClientState, newState: ClientState): Promise<void> {
-    debugLog('handleTransportConnection - oldState:', oldState.state, 'newState:', newState.state);
 
     // Check if we're transitioning TO a connecting state FROM a different state
     const isEnteringConnectingState =
@@ -405,16 +381,13 @@ export class RaftClient extends EventEmitter {
       oldState.state !== newState.state;
 
     if (!isEnteringConnectingState) {
-      debugLog('Not entering connecting state, no connection change needed');
       return;
     }
 
-    debugLog('Entering connecting state, need to establish connection');
     const address = newState.config.clusterMembers.get(newState.currentMemberId);
     if (!address) {
       throw new Error(`No address found for member ${MemberId.unwrap(newState.currentMemberId)}`);
     }
-    debugLog('Target address:', address);
 
     // Check if we're switching to a different member (need to reconnect)
     if (
@@ -425,15 +398,12 @@ export class RaftClient extends EventEmitter {
       const oldMemberId = oldState.currentMemberId;
       if (MemberId.unwrap(oldMemberId) !== MemberId.unwrap(newState.currentMemberId)) {
         // Switching to different member - disconnect first
-        debugLog('Switching members, disconnecting first...');
         await this.transport.disconnect();
       }
     }
 
     // Connect to the target member
-    debugLog('Calling transport.connect()...');
     await this.transport.connect(address);
-    debugLog('transport.connect() completed successfully');
   }
 
   /**
@@ -463,14 +433,12 @@ export class RaftClient extends EventEmitter {
 
       case 'connectionAttempt':
         // Track endpoint for reconnection events (used in handleStateChangeEvent)
-        debugLog('Connection attempt to:', evt.address);
         break;
 
       case 'connectionSuccess':
       case 'connectionFailure':
       case 'requestTimeout':
         // Internal events - logged for debugging
-        debugLog('Internal event:', evt.type);
         break;
     }
   }
@@ -480,7 +448,6 @@ export class RaftClient extends EventEmitter {
    *
    */
   private handleStateChangeEvent(oldState: ClientState['state'], newState: ClientState['state']): void {
-    debugLog('State change:', oldState, '->', newState);
 
     // Emit CONNECTED when transitioning to Connected state
     if (newState === 'Connected' && oldState !== 'Connected') {
@@ -546,9 +513,7 @@ export class RaftClient extends EventEmitter {
   }
 
   private async *createServerMessageStream(): AsyncIterable<StreamEvent> {
-    debugLog('createServerMessageStream - About to access transport.incomingMessages');
     for await (const message of this.transport.incomingMessages) {
-      debugLog('createServerMessageStream - Received message from transport');
       yield { type: 'ServerMsg', message };
 
       // Check if we should exit after processing a server message

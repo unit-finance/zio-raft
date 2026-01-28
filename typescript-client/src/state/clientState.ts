@@ -1187,12 +1187,8 @@ export class ConnectedStateHandler {
         return this.handleSessionClosed(state, message);
 
       case 'KeepAliveResponse':
-        // TODO (eran): KeepAlive validation incomplete - we receive KeepAliveResponse with
-        // timestamp but don't validate it (e.g., check for clock drift, measure round-trip
-        // latency, detect stale responses). Consider tracking last keepalive RTT and
-        // emitting warnings if it exceeds threshold.
-        // SCALA COMPARISON: SAME - Scala also ignores timestamp (RaftClient.scala:587-588).
         // Acknowledge keep-alive, no state change
+        // Note: Timestamp validation (clock drift, RTT) is not required for a reference implementation
         return { newState: state };
 
       default:

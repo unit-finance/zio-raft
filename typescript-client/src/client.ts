@@ -90,14 +90,6 @@ type EventArgs = ConnectedEvent | DisconnectedEvent | ReconnectingEvent | Sessio
  * await client.disconnect();
  * ```
  */
-// TODO (eran): No metrics/observability hooks - consider adding instrumentation for:
-// - Request latency (time from submit to response)
-// - Retry counts per request
-// - Connection state changes with timestamps
-// - Message send/receive counts
-// Could expose via EventEmitter events or a separate metrics interface.
-// SCALA COMPARISON: SAME - Scala uses ZIO.logDebug/logInfo/logWarning for logging only,
-// no structured metrics. Both lack latency histograms, counters, etc.
 export class RaftClient extends EventEmitter {
   private readonly config: ClientConfig;
   private readonly transport: ClientTransport;
@@ -490,7 +482,7 @@ export class RaftClient extends EventEmitter {
       case 'connectionSuccess':
       case 'connectionFailure':
       case 'requestTimeout':
-        // Internal observability events - could add metrics/logging here
+        // Internal events - logged for debugging
         debugLog('Internal event:', evt.type);
         break;
     }

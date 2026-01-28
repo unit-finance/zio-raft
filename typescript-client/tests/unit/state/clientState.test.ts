@@ -68,32 +68,12 @@ describe('State Machine', () => {
 
       await stateManager.handleEvent(state, submitAction);
 
-      expect(rejected).toBe(true);
-    });
+    expect(rejected).toBe(true);
   });
+});
 
-  // More test cases would follow similar pattern...
-  // TC-STATE-003 through TC-STATE-016 testing other transitions
-
-  describe('Placeholder for remaining tests', () => {
-    it('TC-STATE-003: ConnectingNew handles SessionCreated', () => {
-      // TODO: Implement full test
-      expect(true).toBe(true);
-    });
-
-    it('TC-STATE-004: ConnectingNew handles SessionRejected retry', () => {
-      // TODO: Implement full test
-      expect(true).toBe(true);
-    });
-
-    it('TC-STATE-005: Connected handles SubmitCommand', () => {
-      // TODO: Implement full test
-      expect(true).toBe(true);
-    });
-
-    it('TC-STATE-006: Connected handles ClientResponse', () => {
-      // TODO: Implement full test
-      expect(true).toBe(true);
-    });
-  });
+  // Additional state transitions are comprehensively covered by integration tests:
+  // - TC-INT-001 through TC-INT-005: Full lifecycle flows (lifecycle.test.ts)
+  // - TC-RESEND-001 through TC-RESEND-007: Reconnection and retry logic (resend.test.ts)
+  // - TC-TRANSPORT-001 through TC-TRANSPORT-003: Transport integration (transport-connection.test.ts)
 });

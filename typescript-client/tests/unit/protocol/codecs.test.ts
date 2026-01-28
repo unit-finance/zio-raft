@@ -1,9 +1,9 @@
 // Protocol codec unit tests
-// Tests encoding/decoding of protocol messages for wire compatibility
+// Tests primitive encoding functions and error handling
+// Full message encoding/decoding is tested in compatibility.test.ts
 
 import { describe, it, expect } from 'vitest';
 import {
-  encodeClientMessage,
   decodeServerMessage,
   encodeString,
   encodePayload,
@@ -12,12 +12,10 @@ import {
   encodeNonce,
   encodeRequestId,
 } from '../../../src/protocol/codecs';
-import { CreateSession, ClientRequest, Query, KeepAlive } from '../../../src/protocol/messages';
-import { RequestId, Nonce, CorrelationId } from '../../../src/types';
-import { PROTOCOL_VERSION } from '../../../src/protocol/constants';
+import { RequestId, Nonce } from '../../../src/types';
 
 describe('Protocol Codecs', () => {
-  describe('Field Encoding', () => {
+  describe('Primitive Field Encoding', () => {
     it('TC-PROTO-001: should encode strings with length prefix', () => {
       const str = 'hello';
       const encoded = encodeString(str);
@@ -61,7 +59,6 @@ describe('Protocol Codecs', () => {
 
       // Check count (2 bytes)
       expect(encoded.readUInt16BE(0)).toBe(2);
-      // Full decoding tested in round-trip test
     });
 
     it('TC-PROTO-006: should encode payload with length prefix', () => {
@@ -75,83 +72,7 @@ describe('Protocol Codecs', () => {
     });
   });
 
-  describe('Message Encoding', () => {
-    it('TC-PROTO-007: should encode CreateSession message', () => {
-      const message: CreateSession = {
-        type: 'CreateSession',
-        capabilities: new Map([['version', '1.0.0']]),
-        nonce: Nonce.fromBigInt(123n),
-      };
-
-      const encoded = encodeClientMessage(message);
-
-      // Check protocol signature
-      expect(encoded.toString('latin1', 0, 5)).toBe('zraft');
-      // Check protocol version
-      expect(encoded.readUInt8(5)).toBe(0x01);
-      // Check discriminator (CreateSession = 0x01)
-      expect(encoded.readUInt8(6)).toBe(0x01);
-    });
-
-    it('TC-PROTO-008: should encode ClientRequest message', () => {
-      const message: ClientRequest = {
-        type: 'ClientRequest',
-        requestId: RequestId.fromBigInt(42n),
-        lowestPendingRequestId: RequestId.fromBigInt(40n),
-        payload: Buffer.from([1, 2, 3]),
-        createdAt: new Date(),
-      };
-
-      const encoded = encodeClientMessage(message);
-
-      // Check protocol header
-      expect(encoded.toString('latin1', 0, 5)).toBe('zraft');
-      expect(encoded.readUInt8(5)).toBe(PROTOCOL_VERSION);
-      // Check discriminator (ClientRequest = 0x04)
-      expect(encoded.readUInt8(6)).toBe(0x04);
-    });
-
-    it('TC-PROTO-009: should encode Query message', () => {
-      const message: Query = {
-        type: 'Query',
-        correlationId: CorrelationId.fromString('550e8400-e29b-41d4-a716-446655440000'),
-        payload: Buffer.from([4, 5, 6]),
-        createdAt: new Date(),
-      };
-
-      const encoded = encodeClientMessage(message);
-
-      // Check protocol header
-      expect(encoded.toString('latin1', 0, 5)).toBe('zraft');
-      // Check discriminator (Query = 0x08)
-      expect(encoded.readUInt8(6)).toBe(0x08);
-    });
-
-    it('TC-PROTO-010: should encode KeepAlive message', () => {
-      const message: KeepAlive = {
-        type: 'KeepAlive',
-        timestamp: new Date(),
-      };
-
-      const encoded = encodeClientMessage(message);
-
-      // Check protocol header
-      expect(encoded.toString('latin1', 0, 5)).toBe('zraft');
-      // Check discriminator (KeepAlive = 0x03)
-      expect(encoded.readUInt8(6)).toBe(0x03);
-    });
-  });
-
-  describe('Message Decoding', () => {
-    it('TC-PROTO-011: should decode SessionCreated message', () => {
-      // This test requires a properly encoded SessionCreated message
-      // For now, this is a placeholder - full implementation requires
-      // either mock data or encoding from Scala server
-
-      // TODO: Implement when we have reference encodings
-      expect(true).toBe(true);
-    });
-
+  describe('Error Handling', () => {
     it('TC-PROTO-012: should reject invalid protocol signature', () => {
       const invalidBuffer = Buffer.from('wrong signature');
 
@@ -165,28 +86,6 @@ describe('Protocol Codecs', () => {
       buffer.writeUInt8(0x01, 6);
 
       expect(() => decodeServerMessage(buffer)).toThrow('Unsupported protocol version');
-    });
-  });
-
-  describe('Round-Trip Tests', () => {
-    it('TC-PROTO-014: CreateSession round-trip preserves data', () => {
-      const original: CreateSession = {
-        type: 'CreateSession',
-        capabilities: new Map([
-          ['version', '1.0.0'],
-          ['client', 'typescript'],
-        ]),
-        nonce: Nonce.fromBigInt(999n),
-      };
-
-      const encoded = encodeClientMessage(original);
-
-      // Verify encoding structure
-      expect(encoded.length).toBeGreaterThan(7);
-      expect(encoded.toString('latin1', 0, 5)).toBe('zraft');
-
-      // Full round-trip test requires server message decoding
-      // which depends on having reference data from Scala server
     });
   });
 });

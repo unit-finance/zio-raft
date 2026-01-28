@@ -20,7 +20,6 @@ export const SessionId = {
 
 /**
  * Request identifier for commands (bigint-based, monotonically increasing)
- * TODO (eran): Evaluate if branded type adds value for numeric IDs - unwrap() ceremony vs compile-time safety
  */
 export type RequestId = bigint & { readonly __brand: 'RequestId' };
 
@@ -32,7 +31,7 @@ export const RequestId = {
     }
     return value as RequestId;
   },
-  next: (id: RequestId): RequestId => ((id as bigint) + 1n) as RequestId,
+  next: (id: RequestId): RequestId => RequestId.fromBigInt(RequestId.unwrap(id) + 1n),
   unwrap: (id: RequestId): bigint => id as bigint,
 };
 
@@ -42,18 +41,17 @@ export const RequestId = {
 export type MemberId = string & { readonly __brand: 'MemberId' };
 
 export const MemberId = {
-  // TODO (eran): Inconsistent validation - MemberId.fromString doesn't validate anything,
-  // but SessionId.fromString throws on empty. Consider adding validation for consistency,
-  // or document why MemberId intentionally allows empty strings.
-  // SCALA COMPARISON: SAME - Scala's MemberId is just a case class wrapper with no validation:
-  // case class MemberId(value: String). Neither implementation validates.
-  fromString: (value: string): MemberId => value as MemberId,
+  fromString: (value: string): MemberId => {
+    if (!value || value.length === 0) {
+      throw new Error('MemberId cannot be empty');
+    }
+    return value as MemberId;
+  },
   unwrap: (id: MemberId): string => id as string,
 };
 
 /**
  * Nonce for request/response correlation (bigint-based, non-zero)
- * TODO (eran): Evaluate if branded type adds value for numeric IDs - unwrap() ceremony vs compile-time safety
  */
 export type Nonce = bigint & { readonly __brand: 'Nonce' };
 

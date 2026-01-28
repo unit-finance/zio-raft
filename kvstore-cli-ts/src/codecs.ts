@@ -5,6 +5,8 @@
 
 import { ProtocolError } from './errors.js';
 import { WatchNotification } from './types.js';
+import type { ServerRequest } from '../../typescript-client/src/protocol/messages.js';
+import { RequestId } from '../../typescript-client/src/types.js';
 
 /**
  * Encodes a string as UTF-8 with 4-byte big-endian length prefix
@@ -104,11 +106,15 @@ export function decodeGetResult(buffer: Buffer): string | null {
 }
 
 /**
- * Decodes a Notification message
- * Format: [0x4E 'N'][length:4][key bytes][length:4][value bytes]
+ * Decodes a Notification message from a ServerRequest
+ * The sequence number is extracted from the ServerRequest.requestId
+ * Payload format: [0x4E 'N'][length:4][key bytes][length:4][value bytes]
+ * @param serverRequest - The ServerRequest containing the notification payload
  * @throws ProtocolError if discriminator is invalid
  */
-export function decodeNotification(buffer: Buffer): WatchNotification {
+export function decodeNotification(serverRequest: ServerRequest): WatchNotification {
+  const buffer = serverRequest.payload;
+  
   if (buffer.length < 1) {
     throw new ProtocolError('Buffer too short to read discriminator');
   }
@@ -133,8 +139,8 @@ export function decodeNotification(buffer: Buffer): WatchNotification {
   offset += valueBytesRead;
 
   return {
-    timestamp: new Date(),
-    sequenceNumber: 0n, // TODO: Extract from metadata if available
+    timestamp: serverRequest.createdAt,
+    sequenceNumber: RequestId.unwrap(serverRequest.requestId),
     key,
     value,
   };

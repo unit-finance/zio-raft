@@ -13,6 +13,20 @@ import {
   decodeNotification,
 } from '../../src/codecs.js';
 import { ProtocolError } from '../../src/errors.js';
+import { RequestId } from '../../../typescript-client/src/types.js';
+import type { ServerRequest } from '../../../typescript-client/src/protocol/messages.js';
+
+/**
+ * Helper to create a mock ServerRequest for testing
+ */
+function createMockServerRequest(requestId: bigint, payload: Buffer, createdAt?: Date): ServerRequest {
+  return {
+    type: 'ServerRequest',
+    requestId: RequestId.fromBigInt(requestId),
+    payload,
+    createdAt: createdAt ?? new Date(),
+  };
+}
 
 describe('UTF-8 Codec', () => {
   it('should encode and decode UTF-8 strings correctly', () => {
@@ -156,22 +170,27 @@ describe('Decoding', () => {
       valueBytes,
     ]);
 
-    const notification = decodeNotification(buffer);
+    const requestId = 42n;
+    const createdAt = new Date('2026-01-29T10:00:00.000Z');
+    const serverRequest = createMockServerRequest(requestId, buffer, createdAt);
+
+    const notification = decodeNotification(serverRequest);
 
     expect(notification.key).toBe(key);
     expect(notification.value).toBe(value);
-    expect(notification.timestamp).toBeInstanceOf(Date);
-    expect(notification.sequenceNumber).toBe(0n);
+    expect(notification.timestamp).toBe(createdAt);
+    expect(notification.sequenceNumber).toBe(requestId);
   });
 
   // TC-028: Invalid discriminator throws error
   it('should throw error for invalid discriminator', () => {
     const buffer = Buffer.from([0xff, 0x00, 0x00, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74]);
+    const serverRequest = createMockServerRequest(1n, buffer);
 
-    expect(() => decodeNotification(buffer)).toThrow(ProtocolError);
+    expect(() => decodeNotification(serverRequest)).toThrow(ProtocolError);
 
     try {
-      decodeNotification(buffer);
+      decodeNotification(serverRequest);
     } catch (error) {
       expect(error).toBeInstanceOf(ProtocolError);
       expect((error as ProtocolError).message).toContain('Invalid discriminator');
@@ -274,7 +293,8 @@ describe('Round-Trip', () => {
       valueBytes,
     ]);
 
-    const notification = decodeNotification(notificationBuffer);
+    const serverRequest = createMockServerRequest(1n, notificationBuffer);
+    const notification = decodeNotification(serverRequest);
     expect(notification.key).toBe(notificationKey);
     expect(notification.value).toBe(notificationValue);
   });

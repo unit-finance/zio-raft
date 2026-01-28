@@ -149,7 +149,7 @@ export class KVClient {
     // Register handler for server requests
     this.raftClient.onServerRequest((serverRequest) => {
       try {
-        const notification = decodeNotification(serverRequest.payload);
+        const notification = decodeNotification(serverRequest);
 
         if (resolveNext) {
           resolveNext({ value: notification, done: false });

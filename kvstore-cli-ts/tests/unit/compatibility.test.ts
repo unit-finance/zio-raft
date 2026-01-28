@@ -9,6 +9,20 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { encodeSetRequest, encodeGetQuery, encodeWatchRequest, decodeNotification } from '../../src/codecs.js';
+import { RequestId } from '../../../typescript-client/src/types.js';
+import type { ServerRequest } from '../../../typescript-client/src/protocol/messages.js';
+
+/**
+ * Helper to create a mock ServerRequest for testing
+ */
+function createMockServerRequest(requestId: bigint, payload: Buffer, createdAt?: Date): ServerRequest {
+  return {
+    type: 'ServerRequest',
+    requestId: RequestId.fromBigInt(requestId),
+    payload,
+    createdAt: createdAt ?? new Date(),
+  };
+}
 
 /**
  * Read hex fixture from Scala protocol module
@@ -79,7 +93,8 @@ describe('Scala Compatibility', () => {
       const expectedHex = readFixture('Notification.hex');
 
       const buffer = fromHex(expectedHex);
-      const notification = decodeNotification(buffer);
+      const serverRequest = createMockServerRequest(1n, buffer);
+      const notification = decodeNotification(serverRequest);
 
       expect(notification.key).toBe('test-key');
       expect(notification.value).toBe('test-value');

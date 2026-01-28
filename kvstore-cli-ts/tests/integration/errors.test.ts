@@ -8,6 +8,20 @@ import { OperationError, ProtocolError } from '../../src/errors.js';
 import { createMockClient } from '../helpers/mocks.js';
 import { formatError, getExitCode } from '../../src/formatting.js';
 import { decodeNotification } from '../../src/codecs.js';
+import { RequestId } from '../../../typescript-client/src/types.js';
+import type { ServerRequest } from '../../../typescript-client/src/protocol/messages.js';
+
+/**
+ * Helper to create a mock ServerRequest for testing
+ */
+function createMockServerRequest(requestId: bigint, payload: Buffer, createdAt?: Date): ServerRequest {
+  return {
+    type: 'ServerRequest',
+    requestId: RequestId.fromBigInt(requestId),
+    payload,
+    createdAt: createdAt ?? new Date(),
+  };
+}
 
 describe('Error Handling Scenarios', () => {
   // TC-061: Network timeout during connect
@@ -162,10 +176,10 @@ describe('Error Handling Scenarios', () => {
       0x65, // "value"
     ]);
 
-    expect(() => decodeNotification(invalidBuffer)).toThrow(ProtocolError);
+    expect(() => decodeNotification(createMockServerRequest(1n, invalidBuffer))).toThrow(ProtocolError);
 
     try {
-      decodeNotification(invalidBuffer);
+      decodeNotification(createMockServerRequest(1n, invalidBuffer));
     } catch (error) {
       expect(error).toBeInstanceOf(ProtocolError);
       expect((error as ProtocolError).message).toContain('Invalid discriminator');
@@ -176,10 +190,10 @@ describe('Error Handling Scenarios', () => {
   it('should handle buffer too short for notification', () => {
     const shortBuffer = Buffer.from([0x4e, 0x00]); // Only discriminator and partial length
 
-    expect(() => decodeNotification(shortBuffer)).toThrow(ProtocolError);
+    expect(() => decodeNotification(createMockServerRequest(1n, shortBuffer))).toThrow(ProtocolError);
 
     try {
-      decodeNotification(shortBuffer);
+      decodeNotification(createMockServerRequest(1n, shortBuffer));
     } catch (error) {
       expect(error).toBeInstanceOf(ProtocolError);
       expect((error as ProtocolError).message).toContain('Buffer too short');

@@ -62,7 +62,6 @@ export class ZmqTransport implements ClientTransport {
    * Send a client message
    */
   async sendMessage(message: ClientMessage): Promise<void> {
-
     if (this.currentAddress === null) {
       throw new Error('Not connected. Call connect() first.');
     }

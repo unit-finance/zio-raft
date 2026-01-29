@@ -1158,7 +1158,6 @@ export class ConnectedStateHandler {
    * Handle server messages in Connected state
    */
   private async handleServerMessage(state: ConnectedState, message: ServerMessage): Promise<StateTransitionResult> {
-
     switch (message.type) {
       case 'ClientResponse':
         return this.handleClientResponse(state, message);

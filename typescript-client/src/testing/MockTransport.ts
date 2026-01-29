@@ -29,19 +29,19 @@ import { SessionId } from '../types';
 /**
  * MockTransport enables deterministic testing of client protocol logic,
  * edge cases, and failover scenarios that are difficult to reproduce reliably in E2E tests.
- * 
+ *
  * Design rationale:
  * - E2E tests validate end-to-end flow with real servers (kvstore-cli-ts)
  * - MockTransport tests validate client protocol correctness in isolation
  * - Trade-off: Tests construct protocol messages (maintained via helpers in tests/helpers/messageFactories.ts)
  * - TypeScript enforces correctness at compile time when protocol changes
- * 
+ *
  * Use MockTransport for:
  * - Protocol edge cases (leader failover, session expiration, timeouts)
  * - Request resend logic after reconnection
  * - Multi-node failover scenarios
  * - Internal API contracts (transport lifecycle, handler registration)
- * 
+ *
  * Use E2E tests for:
  * - Full stack integration validation
  * - User-facing workflows (CLI operations, watch functionality)

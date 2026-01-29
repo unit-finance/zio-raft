@@ -68,7 +68,7 @@ describe('State Machine', () => {
 
       await stateManager.handleEvent(state, submitAction);
 
-    expect(rejected).toBe(true);
+      expect(rejected).toBe(true);
+    });
   });
-});
 });

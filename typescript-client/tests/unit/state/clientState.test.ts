@@ -71,9 +71,4 @@ describe('State Machine', () => {
     expect(rejected).toBe(true);
   });
 });
-
-  // Additional state transitions are comprehensively covered by integration tests:
-  // - TC-INT-001 through TC-INT-005: Full lifecycle flows (lifecycle.test.ts)
-  // - TC-RESEND-001 through TC-RESEND-007: Reconnection and retry logic (resend.test.ts)
-  // - TC-TRANSPORT-001 through TC-TRANSPORT-003: Transport integration (transport-connection.test.ts)
 });

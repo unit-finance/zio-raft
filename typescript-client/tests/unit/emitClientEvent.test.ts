@@ -13,18 +13,22 @@ import { RaftClient } from '../../src/client';
 import type { ServerRequest } from '../../src/protocol/messages';
 
 describe('emitClientEvent - serverRequestReceived routing', () => {
-  it('should route serverRequestReceived event to serverRequestQueue', async () => {
+  it('should route serverRequestReceived event to serverRequests iterator', async () => {
     // Create client
     const client = new RaftClient({
       clusterMembers: new Map([['node1', 'tcp://localhost:5555']]),
       capabilities: new Map([['test', '1.0']]),
     });
 
-    // Register handler
     const receivedRequests: ServerRequest[] = [];
-    client.onServerRequest((request) => {
-      receivedRequests.push(request);
-    });
+
+    // Start consuming iterator in background
+    const iteratorPromise = (async () => {
+      for await (const request of client.serverRequests) {
+        receivedRequests.push(request);
+        if (receivedRequests.length >= 1) break;
+      }
+    })();
 
     // Access private method emitClientEvent via type assertion
     const emitClientEvent = (client as any).emitClientEvent.bind(client);
@@ -45,10 +49,13 @@ describe('emitClientEvent - serverRequestReceived routing', () => {
     // Call emitClientEvent
     emitClientEvent(event);
 
-    // Wait a bit for async queue processing
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait for async processing
+    await Promise.race([
+      iteratorPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1000)),
+    ]);
 
-    // Verify handler was called
+    // Verify request was received
     expect(receivedRequests).toHaveLength(1);
     expect(receivedRequests[0].requestId).toBe('test-req-001');
     expect(receivedRequests[0].payload.toString()).toBe('test-payload');
@@ -61,9 +68,14 @@ describe('emitClientEvent - serverRequestReceived routing', () => {
     });
 
     const receivedRequests: ServerRequest[] = [];
-    client.onServerRequest((request) => {
-      receivedRequests.push(request);
-    });
+
+    // Start consuming iterator in background
+    const iteratorPromise = (async () => {
+      for await (const request of client.serverRequests) {
+        receivedRequests.push(request);
+        if (receivedRequests.length >= 5) break;
+      }
+    })();
 
     const emitClientEvent = (client as any).emitClientEvent.bind(client);
 
@@ -81,7 +93,10 @@ describe('emitClientEvent - serverRequestReceived routing', () => {
     }
 
     // Wait for async processing
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await Promise.race([
+      iteratorPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1000)),
+    ]);
 
     // Verify all received
     expect(receivedRequests).toHaveLength(5);

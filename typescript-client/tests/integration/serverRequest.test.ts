@@ -33,27 +33,30 @@ describe('Server-Initiated Requests Integration', () => {
   });
 
   afterEach(async () => {
-    try {
-      client.removeServerRequestHandler();
-    } catch {
-      // Ignore if no handler registered
-    }
     await client.disconnect();
   });
 
-  it('should receive and deliver ServerRequest to handler', async () => {
+  it('should receive ServerRequest via async iterable', async () => {
     await client.connect();
 
     const receivedRequests: ServerRequest[] = [];
-    client.onServerRequest((request) => {
-      receivedRequests.push(request);
-    });
+
+    // Start consuming iterator in background
+    const iteratorPromise = (async () => {
+      for await (const request of client.serverRequests) {
+        receivedRequests.push(request);
+        if (receivedRequests.length >= 1) break;
+      }
+    })();
 
     const testRequest = serverRequestWith(RequestId.fromBigInt(1n), Buffer.from('test-work-item'));
 
     mockTransport.injectMessage(testRequest);
 
-    await waitForCondition(() => receivedRequests.length > 0, 1000, 'ServerRequest handler was not called');
+    await Promise.race([
+      iteratorPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1000)),
+    ]);
 
     expect(receivedRequests).toHaveLength(1);
     expect(receivedRequests[0].requestId).toBe(RequestId.fromBigInt(1n));
@@ -64,16 +67,24 @@ describe('Server-Initiated Requests Integration', () => {
     await client.connect();
 
     const receivedRequests: ServerRequest[] = [];
-    client.onServerRequest((request) => {
-      receivedRequests.push(request);
-    });
+
+    // Start consuming iterator in background
+    const iteratorPromise = (async () => {
+      for await (const request of client.serverRequests) {
+        receivedRequests.push(request);
+        if (receivedRequests.length >= 3) break;
+      }
+    })();
 
     // Inject multiple requests
     mockTransport.injectMessage(serverRequestWith(RequestId.fromBigInt(1n), Buffer.from('work-1')));
     mockTransport.injectMessage(serverRequestWith(RequestId.fromBigInt(2n), Buffer.from('work-2')));
     mockTransport.injectMessage(serverRequestWith(RequestId.fromBigInt(3n), Buffer.from('work-3')));
 
-    await waitForCondition(() => receivedRequests.length >= 3, 2000, 'ServerRequest handlers were not called');
+    await Promise.race([
+      iteratorPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000)),
+    ]);
 
     expect(receivedRequests).toHaveLength(3);
     expect(receivedRequests.map((r) => r.requestId)).toEqual([
@@ -82,27 +93,4 @@ describe('Server-Initiated Requests Integration', () => {
       RequestId.fromBigInt(3n),
     ]);
   }, 15000);
-
-  it('should prevent multiple handler registration', async () => {
-    await client.connect();
-
-    client.onServerRequest(() => {});
-
-    expect(() => {
-      client.onServerRequest(() => {});
-    }).toThrow(/already registered/i);
-  }, 15000);
 });
-
-// Helper function to wait for a condition with timeout
-async function waitForCondition(condition: () => boolean, timeoutMs: number, errorMessage: string): Promise<void> {
-  const startTime = Date.now();
-
-  while (!condition()) {
-    if (Date.now() - startTime > timeoutMs) {
-      throw new Error(errorMessage);
-    }
-    // Wait 10ms before checking again
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}

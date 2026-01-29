@@ -1,7 +1,6 @@
 // Main RaftClient class - public API for applications
-// Idiomatic TypeScript: EventEmitter-based, Promise API, classes
+// Idiomatic TypeScript: Promise API, async iterables, classes
 
-import { EventEmitter } from 'events';
 import { ClientConfig, createConfig, ClientConfigInput } from './config';
 import { ClientTransport } from './transport/transport';
 import {
@@ -18,50 +17,7 @@ import { AsyncQueue } from './utils/asyncQueue';
 import { mergeStreams } from './utils/streamMerger';
 import { ValidationError } from './errors';
 import { ServerRequest } from './protocol/messages';
-import { ClientEvents } from './events/eventNames';
 import { MemberId } from './types';
-
-// ============================================================================
-// Event Types
-// ============================================================================
-
-export interface ConnectedEvent {
-  readonly sessionId: string;
-  readonly endpoint: string;
-  readonly timestamp: Date;
-}
-
-export interface DisconnectedEvent {
-  readonly reason: 'network' | 'server-closed' | 'client-shutdown';
-  readonly timestamp: Date;
-}
-
-export interface ReconnectingEvent {
-  readonly attempt: number;
-  readonly endpoint: string;
-  readonly timestamp: Date;
-}
-
-export interface SessionExpiredEvent {
-  readonly sessionId: string;
-  readonly timestamp: Date;
-}
-
-// ============================================================================
-// Event Listener Types (for type-safe EventEmitter overloads)
-// ============================================================================
-
-type EventListener =
-  | { event: typeof ClientEvents.CONNECTED; listener: (evt: ConnectedEvent) => void }
-  | { event: typeof ClientEvents.DISCONNECTED; listener: (evt: DisconnectedEvent) => void }
-  | { event: typeof ClientEvents.RECONNECTING; listener: (evt: ReconnectingEvent) => void }
-  | { event: typeof ClientEvents.SESSION_EXPIRED; listener: (evt: SessionExpiredEvent) => void }
-  | { event: typeof ClientEvents.ERROR; listener: (err: Error) => void };
-
-type EventListenerFunction = EventListener['listener'];
-
-// Union of all possible event argument types
-type EventArgs = ConnectedEvent | DisconnectedEvent | ReconnectingEvent | SessionExpiredEvent | Error;
 
 // ============================================================================
 // RaftClient - Main Public API
@@ -89,7 +45,7 @@ type EventArgs = ConnectedEvent | DisconnectedEvent | ReconnectingEvent | Sessio
  * await client.disconnect();
  * ```
  */
-export class RaftClient extends EventEmitter {
+export class RaftClient {
   private readonly config: ClientConfig;
   private readonly transport: ClientTransport;
   private readonly stateManager: StateManager;
@@ -100,11 +56,6 @@ export class RaftClient extends EventEmitter {
   private eventLoopPromise: Promise<void> | null = null;
   private isShuttingDown = false;
   private disconnectResolve: (() => void) | null = null;
-  private reconnectAttempt = 0; // Tracks reconnection attempts for RECONNECTING event
-
-  private serverRequestHandler: ((request: ServerRequest) => void) | null = null;
-  private serverRequestLoopPromise: Promise<void> | null = null;
-  private stopServerRequestLoop = false;
 
   /**
    * Constructor - validates config, initializes state machine
@@ -114,8 +65,6 @@ export class RaftClient extends EventEmitter {
    * @param transport - Transport implementation (e.g., ZmqTransport for production, MockTransport for testing)
    */
   constructor(configInput: ClientConfigInput, transport: ClientTransport) {
-    super();
-
     // Validate and apply defaults
     this.config = createConfig(configInput);
 
@@ -234,49 +183,17 @@ export class RaftClient extends EventEmitter {
   }
 
   /**
-   * Register handler for server-initiated requests
-   * Handler is invoked for each ServerRequest received
-   *
-   * @throws Error if handler already registered
+   * Async iterable of server-initiated requests.
+   * Yields ServerRequest objects as they arrive from the server.
+   * Iterator completes when client disconnects.
+   * 
+   * @example
+   * for await (const request of client.serverRequests) {
+   *   console.log('Server request:', request.requestId);
+   * }
    */
-  onServerRequest(handler: (request: ServerRequest) => void): void {
-    if (this.serverRequestHandler !== null) {
-      throw new Error('Server request handler already registered. Call removeServerRequestHandler() first.');
-    }
-
-    this.serverRequestHandler = handler;
-    this.stopServerRequestLoop = false;
-    this.startServerRequestLoop();
-  }
-
-  /**
-   * Remove the registered server request handler
-   * Stops the background consumer loop
-   */
-  removeServerRequestHandler(): void {
-    this.serverRequestHandler = null;
-    this.stopServerRequestLoop = true;
-  }
-
-  /**
-   * Start background loop to consume server requests
-   * Only one loop runs at a time
-   */
-  private startServerRequestLoop(): void {
-    this.serverRequestLoopPromise = (async () => {
-      for await (const request of this.serverRequestQueue) {
-        if (this.stopServerRequestLoop || this.serverRequestHandler === null) {
-          break;
-        }
-        try {
-          this.serverRequestHandler(request);
-        } catch (err) {
-          this.emit(ClientEvents.ERROR, err instanceof Error ? err : new Error(String(err)));
-        }
-      }
-    })().catch((err) => {
-      this.emit(ClientEvents.ERROR, err instanceof Error ? err : new Error(String(err)));
-    });
+  get serverRequests(): AsyncIterable<ServerRequest> {
+    return this.serverRequestQueue;
   }
 
   // ==========================================================================
@@ -314,8 +231,6 @@ export class RaftClient extends EventEmitter {
           break;
         }
       }
-    } catch (err) {
-      this.emit(ClientEvents.ERROR, err instanceof Error ? err : new Error(String(err)));
     } finally {
       await this.cleanup();
 
@@ -331,40 +246,36 @@ export class RaftClient extends EventEmitter {
    * Process a single event through state machine
    */
   private async processEvent(event: StreamEvent): Promise<void> {
-    try {
-      const oldState = this.currentState;
+    const oldState = this.currentState;
 
-      const result: StateTransitionResult = await this.stateManager.handleEvent(this.currentState, event);
+    const result: StateTransitionResult = await this.stateManager.handleEvent(this.currentState, event);
 
-      const newState = result.newState;
+    const newState = result.newState;
 
-      // Handle transport connection changes based on state transitions
-      await this.handleTransportConnection(oldState, newState);
+    // Handle transport connection changes based on state transitions
+    await this.handleTransportConnection(oldState, newState);
 
-      // Update state
-      this.currentState = result.newState;
+    // Update state
+    this.currentState = result.newState;
 
-      // Send messages via transport
-      if (result.messagesToSend && result.messagesToSend.length > 0) {
-        for (let i = 0; i < result.messagesToSend.length; i++) {
-          const message = result.messagesToSend[i]!;
-          await this.transport.sendMessage(message);
-        }
+    // Send messages via transport
+    if (result.messagesToSend && result.messagesToSend.length > 0) {
+      for (let i = 0; i < result.messagesToSend.length; i++) {
+        const message = result.messagesToSend[i]!;
+        await this.transport.sendMessage(message);
       }
+    }
 
-      // Emit client events
-      if (result.eventsToEmit) {
-        for (const evt of result.eventsToEmit) {
-          this.emitClientEvent(evt);
-        }
+    // Emit client events
+    if (result.eventsToEmit) {
+      for (const evt of result.eventsToEmit) {
+        this.emitClientEvent(evt);
       }
+    }
 
-      // If we're shutting down and now disconnected, close action queue to exit event loop
-      if (this.isShuttingDown && this.currentState.state === 'Disconnected') {
-        this.actionQueue.close();
-      }
-    } catch (err) {
-      this.emit(ClientEvents.ERROR, err instanceof Error ? err : new Error(String(err)));
+    // If we're shutting down and now disconnected, close action queue to exit event loop
+    if (this.isShuttingDown && this.currentState.state === 'Disconnected') {
+      this.actionQueue.close();
     }
   }
 
@@ -409,87 +320,20 @@ export class RaftClient extends EventEmitter {
    */
   private emitClientEvent(evt: ClientEventData): void {
     switch (evt.type) {
-      case 'stateChange':
-        this.handleStateChangeEvent(evt.oldState, evt.newState);
-        break;
-
-      case 'sessionExpired': {
-        // Get sessionId from current state if available
-        const sessionId = this.getSessionIdFromCurrentState();
-        this.emit(ClientEvents.SESSION_EXPIRED, {
-          sessionId,
-          timestamp: new Date(),
-        } as SessionExpiredEvent);
-        break;
-      }
-
       case 'serverRequestReceived':
-        // Route ServerRequest to queue for onServerRequest() handlers
+        // Route ServerRequest to queue for async iteration
         this.serverRequestQueue.offer(evt.request);
         break;
 
+      case 'stateChange':
+      case 'sessionExpired':
       case 'connectionAttempt':
-        // Track endpoint for reconnection events (used in handleStateChangeEvent)
-        break;
-
       case 'connectionSuccess':
       case 'connectionFailure':
       case 'requestTimeout':
-        // Internal events - logged for debugging
+        // No longer emitting events - these are internal state transitions
         break;
     }
-  }
-
-  /**
-   * Handle state change events and emit appropriate public events
-   *
-   */
-  private handleStateChangeEvent(oldState: ClientState['state'], newState: ClientState['state']): void {
-    // Emit CONNECTED when transitioning to Connected state
-    if (newState === 'Connected' && oldState !== 'Connected') {
-      this.reconnectAttempt = 0; // Reset reconnect counter on successful connection
-      const state = this.currentState as ConnectedState;
-      const endpoint = state.config.clusterMembers.get(state.currentMemberId) ?? '';
-      this.emit(ClientEvents.CONNECTED, {
-        sessionId: state.sessionId,
-        endpoint,
-        timestamp: new Date(),
-      } as ConnectedEvent);
-    }
-
-    // Emit DISCONNECTED when transitioning from Connected to Disconnected
-    if (newState === 'Disconnected' && oldState === 'Connected') {
-      const reason = this.isShuttingDown ? 'client-shutdown' : 'network';
-      this.emit(ClientEvents.DISCONNECTED, {
-        reason,
-        timestamp: new Date(),
-      } as DisconnectedEvent);
-    }
-
-    // Emit RECONNECTING when transitioning from Connected to ConnectingExistingSession
-    if (newState === 'ConnectingExistingSession' && oldState === 'Connected') {
-      this.reconnectAttempt++;
-      const state = this.currentState as ConnectingExistingSessionState;
-      const endpoint = state.config.clusterMembers.get(state.currentMemberId) ?? '';
-      this.emit(ClientEvents.RECONNECTING, {
-        attempt: this.reconnectAttempt,
-        endpoint,
-        timestamp: new Date(),
-      } as ReconnectingEvent);
-    }
-  }
-
-  /**
-   * Get session ID from current state if available
-   */
-  private getSessionIdFromCurrentState(): string {
-    if (this.currentState.state === 'Connected') {
-      return this.currentState.sessionId;
-    }
-    if (this.currentState.state === 'ConnectingExistingSession') {
-      return this.currentState.sessionId;
-    }
-    return '';
   }
 
   // ==========================================================================
@@ -541,42 +385,11 @@ export class RaftClient extends EventEmitter {
   // ==========================================================================
 
   private async cleanup(): Promise<void> {
-    // Stop server request loop
-    this.stopServerRequestLoop = true;
-
     // Close queues first to unblock any pending iterations
     this.actionQueue.close();
     this.serverRequestQueue.close();
 
-    // Wait for server request loop to complete
-    if (this.serverRequestLoopPromise) {
-      await this.serverRequestLoopPromise;
-      this.serverRequestLoopPromise = null;
-    }
-
     // Disconnect transport
     await this.transport.disconnect();
-  }
-
-  // ==========================================================================
-  // TypeScript Event Emitter Type Overrides
-  // ==========================================================================
-
-  on(event: typeof ClientEvents.CONNECTED, listener: (evt: ConnectedEvent) => void): this;
-  on(event: typeof ClientEvents.DISCONNECTED, listener: (evt: DisconnectedEvent) => void): this;
-  on(event: typeof ClientEvents.RECONNECTING, listener: (evt: ReconnectingEvent) => void): this;
-  on(event: typeof ClientEvents.SESSION_EXPIRED, listener: (evt: SessionExpiredEvent) => void): this;
-  on(event: typeof ClientEvents.ERROR, listener: (err: Error) => void): this;
-  on(event: string | symbol, listener: EventListenerFunction): this {
-    return super.on(event, listener);
-  }
-
-  emit(event: typeof ClientEvents.CONNECTED, evt: ConnectedEvent): boolean;
-  emit(event: typeof ClientEvents.DISCONNECTED, evt: DisconnectedEvent): boolean;
-  emit(event: typeof ClientEvents.RECONNECTING, evt: ReconnectingEvent): boolean;
-  emit(event: typeof ClientEvents.SESSION_EXPIRED, evt: SessionExpiredEvent): boolean;
-  emit(event: typeof ClientEvents.ERROR, err: Error): boolean;
-  emit(event: string | symbol, ...args: EventArgs[]): boolean {
-    return super.emit(event, ...args);
   }
 }

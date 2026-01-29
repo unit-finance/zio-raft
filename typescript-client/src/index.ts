@@ -3,7 +3,6 @@
 
 // Main client class
 export { RaftClient } from './client';
-export type { ConnectedEvent, DisconnectedEvent, ReconnectingEvent, SessionExpiredEvent } from './client';
 
 // Configuration
 export type { ClientConfig, ClientConfigInput } from './config';
@@ -48,7 +47,3 @@ export { MockTransport } from './testing/MockTransport';
 
 // Event types
 export type { ConnectionEvent } from './events/eventTypes';
-
-// Event name constants for type-safe event handling
-export { ClientEvents } from './events/eventNames';
-export type { ClientEventName } from './events/eventNames';

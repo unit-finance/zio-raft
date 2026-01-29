@@ -1,5 +1,5 @@
 /**
- * Unit test for emit ClientEvent - specifically tests that serverRequestReceived
+ * Unit test for processInternalEvent - specifically tests that serverRequestReceived
  * is properly routed to the serverRequestQueue
  */
 
@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { RaftClient } from '../../src/client';
 import type { ServerRequest } from '../../src/protocol/messages';
 
-describe('emitClientEvent - serverRequestReceived routing', () => {
+describe('processInternalEvent - serverRequestReceived routing', () => {
   it('should route serverRequestReceived event to serverRequests iterator', async () => {
     // Create client
     const client = new RaftClient({
@@ -30,8 +30,8 @@ describe('emitClientEvent - serverRequestReceived routing', () => {
       }
     })();
 
-    // Access private method emitClientEvent via type assertion
-    const emitClientEvent = (client as any).emitClientEvent.bind(client);
+    // Access private method processInternalEvent via type assertion
+    const processInternalEvent = (client as any).processInternalEvent.bind(client);
 
     // Create a serverRequestReceived event (what state machine emits)
     const testRequest: ServerRequest = {
@@ -46,8 +46,8 @@ describe('emitClientEvent - serverRequestReceived routing', () => {
       request: testRequest,
     };
 
-    // Call emitClientEvent
-    emitClientEvent(event);
+    // Call processInternalEvent
+    processInternalEvent(event);
 
     // Wait for async processing
     await Promise.race([
@@ -77,11 +77,11 @@ describe('emitClientEvent - serverRequestReceived routing', () => {
       }
     })();
 
-    const emitClientEvent = (client as any).emitClientEvent.bind(client);
+    const processInternalEvent = (client as any).processInternalEvent.bind(client);
 
     // Emit multiple events
     for (let i = 1; i <= 5; i++) {
-      emitClientEvent({
+      processInternalEvent({
         type: 'serverRequestReceived',
         request: {
           type: 'ServerRequest',

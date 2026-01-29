@@ -1,13 +1,3 @@
-/**
- * Tests for server request async iterator functionality
- *
- * These tests verify:
- * - Iterator can be started and stopped cleanly
- * - Multiple iterations can be performed sequentially
- *
- * Uses MockTransport for clean, reliable testing
- */
-
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
@@ -60,9 +50,9 @@ describe('Server Request Iterator', () => {
       })();
 
       // Inject 10 requests during first watch
-      const emitClientEvent = (client as any).emitClientEvent.bind(client);
+      const processInternalEvent = (client as any).processInternalEvent.bind(client);
       for (let i = 1; i <= 10; i++) {
-        emitClientEvent({
+        processInternalEvent({
           type: 'serverRequestReceived',
           request: serverRequestWith(RequestId.fromBigInt(BigInt(i)), Buffer.from(`notification-${i}`)),
         });

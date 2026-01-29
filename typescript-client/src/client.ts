@@ -264,10 +264,10 @@ export class RaftClient {
       }
     }
 
-    // Emit client events
+    // Process internal events from state machine
     if (result.eventsToEmit) {
       for (const evt of result.eventsToEmit) {
-        this.emitClientEvent(evt);
+        this.processInternalEvent(evt);
       }
     }
 
@@ -313,10 +313,10 @@ export class RaftClient {
   }
 
   /**
-   * Emit typed client event
-   * Translates low-level state machine events (ClientEventData) to public API events
+   * Process internal events from state machine
+   * Routes state machine events to appropriate internal handlers (e.g., server requests to queue)
    */
-  private emitClientEvent(evt: ClientEventData): void {
+  private processInternalEvent(evt: ClientEventData): void {
     switch (evt.type) {
       case 'serverRequestReceived':
         // Route ServerRequest to queue for async iteration

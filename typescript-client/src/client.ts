@@ -139,7 +139,6 @@ export class RaftClient extends EventEmitter {
    * Returns when session is created
    */
   async connect(): Promise<void> {
-
     if (this.currentState.state !== 'Disconnected') {
       // Already connected or connecting
       return;
@@ -351,7 +350,6 @@ export class RaftClient extends EventEmitter {
           const message = result.messagesToSend[i]!;
           await this.transport.sendMessage(message);
         }
-      } else {
       }
 
       // Emit client events
@@ -374,7 +372,6 @@ export class RaftClient extends EventEmitter {
    * Handle transport connection/disconnection based on state transitions
    */
   private async handleTransportConnection(oldState: ClientState, newState: ClientState): Promise<void> {
-
     // Check if we're transitioning TO a connecting state FROM a different state
     const isEnteringConnectingState =
       (newState.state === 'ConnectingNewSession' || newState.state === 'ConnectingExistingSession') &&
@@ -448,7 +445,6 @@ export class RaftClient extends EventEmitter {
    *
    */
   private handleStateChangeEvent(oldState: ClientState['state'], newState: ClientState['state']): void {
-
     // Emit CONNECTED when transitioning to Connected state
     if (newState === 'Connected' && oldState !== 'Connected') {
       this.reconnectAttempt = 0; // Reset reconnect counter on successful connection

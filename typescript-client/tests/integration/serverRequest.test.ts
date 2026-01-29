@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { RaftClient } from '../../src/client';
 import { MockTransport } from '../../src/testing/MockTransport';
 import { RequestId, MemberId } from '../../src/types';
+import { ServerRequest } from '../../src/protocol/messages';
 import { serverRequestWith } from '../helpers/messageFactories';
 
 describe('Server-Initiated Requests Integration', () => {

@@ -10,8 +10,6 @@ import {
   StreamEvent,
   ClientAction,
   ClientEventData,
-  ConnectedState,
-  ConnectingExistingSessionState,
 } from './state/clientState';
 import { AsyncQueue } from './utils/asyncQueue';
 import { mergeStreams } from './utils/streamMerger';

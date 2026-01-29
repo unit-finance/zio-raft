@@ -25,7 +25,8 @@ export {
 } from './errors';
 
 // Core types (for advanced usage)
-export type { SessionId, RequestId, MemberId, Nonce, CorrelationId } from './types';
+// Note: These are exported as both types and values (namespace pattern for branded types)
+export { SessionId, RequestId, MemberId, Nonce, CorrelationId } from './types';
 
 // Protocol message types (for advanced usage / testing)
 export type {

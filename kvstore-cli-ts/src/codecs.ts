@@ -5,8 +5,8 @@
 
 import { ProtocolError } from './errors.js';
 import { WatchNotification } from './types.js';
-import type { ServerRequest } from '../../typescript-client/src/protocol/messages.js';
-import { RequestId } from '../../typescript-client/src/types.js';
+import type { ServerRequest } from '@zio-raft/typescript-client';
+import { RequestId } from '@zio-raft/typescript-client';
 
 /**
  * Encodes a string as UTF-8 with 4-byte big-endian length prefix

@@ -114,7 +114,7 @@ export function decodeGetResult(buffer: Buffer): string | null {
  */
 export function decodeNotification(serverRequest: ServerRequest): WatchNotification {
   const buffer = serverRequest.payload;
-  
+
   if (buffer.length < 1) {
     throw new ProtocolError('Buffer too short to read discriminator');
   }

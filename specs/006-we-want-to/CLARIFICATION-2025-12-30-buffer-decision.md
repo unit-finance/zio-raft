@@ -39,6 +39,8 @@ The Uint8Array requirement was based on:
 4. **Maintainability**: Clearer, less error-prone code
 5. **Ecosystem fit**: All Node.js APIs use Buffer
 
+**Detailed Technical Analysis**: See research.md Section 12 for comprehensive rationale, alternatives considered, and implementation examples.
+
 ### What Changes
 
 **spec.md**:

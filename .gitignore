@@ -10,3 +10,5 @@ metals.sbt
 .bsp
 .DS_Store
 .cursor/mcp.json
+/data
+*.log

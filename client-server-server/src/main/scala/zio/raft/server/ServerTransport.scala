@@ -54,7 +54,8 @@ object ServerTransport:
 
     override def incomingMessages: ZStream[Any, Throwable, IncomingMessage] =
       socket.stream.mapZIO { msg =>
-        ZIO.attempt(
-          IncomingMessage(RoutingId(msg.getRoutingId), clientMessageCodec.decode(BitVector(msg.data())).require.value)
-        )
+        ZIO.logDebug(s"[incomingMessages] Received message: $msg") *>
+          ZIO.attempt(
+            IncomingMessage(RoutingId(msg.getRoutingId), clientMessageCodec.decode(BitVector(msg.data())).require.value)
+          )
       }

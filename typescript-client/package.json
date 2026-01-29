@@ -1,0 +1,57 @@
+{
+  "name": "@zio-raft/typescript-client",
+  "version": "0.1.0",
+  "description": "TypeScript client library for ZIO Raft clusters",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'",
+    "lint:fix": "eslint 'src/**/*.ts' 'tests/**/*.ts' --fix",
+    "format": "prettier --write 'src/**/*.ts' 'tests/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts' 'tests/**/*.ts'",
+    "clean": "rm -rf dist",
+    "clean:tests": "find tests -type f \\( -name '*.js' -o -name '*.d.ts' -o -name '*.map' \\) -delete",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "raft",
+    "distributed",
+    "consensus",
+    "zio",
+    "typescript",
+    "client"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zio/zio-raft.git",
+    "directory": "typescript-client"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "zeromq": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.29",
+    "@typescript-eslint/eslint-plugin": "^6.18.0",
+    "@typescript-eslint/parser": "^6.18.0",
+    "@vitest/coverage-v8": "^4.0.17",
+    "@vitest/ui": "^4.0.17",
+    "eslint": "^8.56.0",
+    "prettier": "^3.8.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.17"
+  }
+}

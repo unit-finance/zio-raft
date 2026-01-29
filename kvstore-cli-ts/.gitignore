@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Compiled JavaScript files (should only be in dist/)
+*.js
+*.d.ts
+*.d.ts.map
+*.js.map
+
+# But allow config files
+!*.config.js
+!.eslintrc.js
+!vitest.config.js
+
+# Coverage reports
+coverage/
+.nyc_output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test output
+.vitest/

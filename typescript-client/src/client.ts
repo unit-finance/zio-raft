@@ -184,7 +184,7 @@ export class RaftClient {
    * Async iterable of server-initiated requests.
    * Yields ServerRequest objects as they arrive from the server.
    * Iterator completes when client disconnects.
-   * 
+   *
    * @example
    * for await (const request of client.serverRequests) {
    *   console.log('Server request:', request.requestId);

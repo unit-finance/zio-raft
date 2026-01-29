@@ -496,6 +496,28 @@ echo "=== Server Logs ==="
 
 ---
 
+## Automation Status
+
+These test scenarios are being automated as part of the E2E test infrastructure.  
+See: `E2E_TYPESCRIPT_MANAGED_PLAN.md` for implementation details.
+
+| Test | Priority | Automation Phase | Status |
+|------|----------|------------------|--------|
+| Test 13 | Critical | Phase 3 | ⏳ Planned |
+| Test 14 | Critical | Phase 3 | ⏳ Planned |
+| Test 15 | Critical | Phase 3 | ⏳ Planned |
+| Test 17 | Critical | Phase 3 | ⏳ Planned |
+| Test 19 | Important | Phase 3 | ⏳ Planned |
+| Test 21 | Important | Phase 3 | ⏳ Planned |
+| Test 16 | Nice-to-have | Phase 5 | 📋 Backlog |
+| Test 18 | Nice-to-have | Phase 5 | 📋 Backlog |
+| Test 20 | Nice-to-have | Phase 5 | 📋 Backlog |
+| Test 22 | Nice-to-have | Phase 5 | 📋 Backlog |
+
+**Target:** 6/10 tests automated by Phase 3, 10/10 by Phase 5
+
+---
+
 ## Server Control Commands Needed
 
 To execute these tests, we need the following server control commands:

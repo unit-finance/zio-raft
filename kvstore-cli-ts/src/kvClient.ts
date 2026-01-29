@@ -3,7 +3,7 @@
  * Provides typed API for KVStore operations
  */
 
-import { RaftClient, ClientEvents, ZmqTransport } from '@zio-raft/typescript-client';
+import { RaftClient, ZmqTransport } from '@zio-raft/typescript-client';
 import type { MemberId } from '@zio-raft/typescript-client';
 import { encodeSetRequest, encodeGetQuery, encodeWatchRequest, decodeGetResult, decodeNotification } from './codecs.js';
 import { WatchNotification } from './types.js';
@@ -123,76 +123,18 @@ export class KVClient {
   }
 
   /**
-   * Iterate over watch notifications
-   * Yields WatchNotification objects decoded from server requests
-   *
-   * Handlers are automatically cleaned up when iteration completes,
-   * even if the consumer breaks early or throws an error.
+   * Iterate over watch notifications.
+   * Yields WatchNotification objects decoded from server requests.
+   * Iterator completes when client disconnects.
    */
   async *notifications(): AsyncIterableIterator<WatchNotification> {
-    // Create a promise-based queue for server requests
-    const queue: WatchNotification[] = [];
-    // Use explicit union type for proper done/value typing
-    type WatchIteratorResult = { value: WatchNotification; done: false } | { value: undefined; done: true };
-    let resolveNext: ((value: WatchIteratorResult) => void) | null = null;
-    let done = false;
-
-    // Store handler reference for cleanup
-    const disconnectHandler: () => void = () => {
-      done = true;
-      if (resolveNext) {
-        resolveNext({ value: undefined, done: true });
-        resolveNext = null;
-      }
-    };
-
-    // Register handler for server requests
-    this.raftClient.onServerRequest((serverRequest) => {
+    for await (const serverRequest of this.raftClient.serverRequests) {
       try {
-        const notification = decodeNotification(serverRequest);
-
-        if (resolveNext) {
-          resolveNext({ value: notification, done: false });
-          resolveNext = null;
-        } else {
-          queue.push(notification);
-        }
+        yield decodeNotification(serverRequest);
       } catch (err) {
-        // Log decode errors - malformed notifications should be visible for debugging
+        // Log decode errors but don't break iteration
         console.error('Warning: Failed to decode watch notification:', err);
-        console.error('  Payload length:', serverRequest.payload.length);
-        console.error('  First 20 bytes:', serverRequest.payload.subarray(0, 20).toString('hex'));
-        // Don't throw - one bad notification shouldn't break the watch stream
       }
-    });
-
-    // Register disconnection handler
-    this.raftClient.on(ClientEvents.DISCONNECTED, disconnectHandler);
-
-    try {
-      // Yield notifications
-      while (!done) {
-        if (queue.length > 0) {
-          const notification = queue.shift()!;
-          yield notification;
-        } else {
-          // Wait for next notification
-          const result = await new Promise<WatchIteratorResult>((resolve) => {
-            resolveNext = resolve;
-          });
-
-          if (result.done) {
-            break;
-          }
-
-          yield result.value;
-        }
-      }
-    } finally {
-      // Always cleanup handlers, even on early break/error
-      // This prevents memory leaks when iterator is abandoned
-      this.raftClient.removeServerRequestHandler();
-      this.raftClient.removeListener(ClientEvents.DISCONNECTED, disconnectHandler);
     }
   }
 }

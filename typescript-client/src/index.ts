@@ -3,7 +3,6 @@
 
 // Main client class
 export { RaftClient } from './client';
-export type { ConnectedEvent, DisconnectedEvent, ReconnectingEvent, SessionExpiredEvent } from './client';
 
 // Configuration
 export type { ClientConfig, ClientConfigInput } from './config';
@@ -26,7 +25,8 @@ export {
 } from './errors';
 
 // Core types (for advanced usage)
-export type { SessionId, RequestId, MemberId, Nonce, CorrelationId } from './types';
+// Note: These are exported as both types and values (namespace pattern for branded types)
+export { SessionId, RequestId, MemberId, Nonce, CorrelationId } from './types';
 
 // Protocol message types (for advanced usage / testing)
 export type {
@@ -48,7 +48,3 @@ export { MockTransport } from './testing/MockTransport';
 
 // Event types
 export type { ConnectionEvent } from './events/eventTypes';
-
-// Event name constants for type-safe event handling
-export { ClientEvents } from './events/eventNames';
-export type { ClientEventName } from './events/eventNames';

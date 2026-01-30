@@ -107,9 +107,14 @@ export class ServerManager {
   async kill(): Promise<void> {
     if (this.process && this.process.pid) {
       console.log(`[ServerManager] Killing server process ${this.process.pid}`);
-      this.process.kill('SIGKILL');
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      console.log('[ServerManager] Server process killed');
+      try {
+        this.process.kill('SIGKILL');
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        console.log('[ServerManager] Server process killed');
+      } catch (err) {
+        // Process may have already exited - this is not an error
+        console.log('[ServerManager] Process already exited or kill failed');
+      }
     }
   }
 

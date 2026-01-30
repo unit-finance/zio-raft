@@ -9,11 +9,12 @@ The `ServerManager` class provides automated lifecycle management for KVStore se
 ### Overview
 
 ServerManager handles:
-- Automatic port allocation (avoids conflicts)
 - Server process spawning and management
 - Waiting for server to be ready
 - Clean shutdown and cleanup
 - Logging server output for debugging
+
+**Note:** Currently uses default ports (7001, 7002) due to command-line argument parsing limitation in the KVStore server.
 
 ### Usage Example
 
@@ -62,9 +63,9 @@ Creates a new ServerManager instance.
 
 Starts the server and waits for it to be ready.
 
-- Allocates two available ports (server port and member port)
-- Spawns `../run-kvstore.sh` with appropriate arguments
-- Waits for server port to accept connections
+- Uses default server configuration (member ID: "node-1", ports: 7001, 7002)
+- Spawns `../run-kvstore.sh` with `--rebuild` flag
+- Waits for server port (7001) to accept connections
 - Adds 2 second buffer for full initialization
 - **Timeout**: 60 seconds for port to become ready
 - **Build**: Always rebuilds JAR with `--rebuild` flag
@@ -81,8 +82,7 @@ Force kills the server process using SIGKILL.
 Returns the endpoint string for use with CLI `-e` flag.
 
 - **Format**: `{memberId}=tcp://127.0.0.1:{serverPort}`
-- **Example**: `test-node-1738223456789=tcp://127.0.0.1:8123`
-- **Throws**: Error if called before `start()`
+- **Example**: `node-1=tcp://127.0.0.1:7001`
 
 ##### `async cleanup(): Promise<void>`
 

@@ -34,6 +34,9 @@ async function isPortFree(port: number): Promise<boolean> {
 /**
  * Find an available port in the given range
  *
+ * NOTE: Currently unused due to command-line argument parsing limitation in KVStore server.
+ * Reserved for future use when server supports dynamic port configuration.
+ *
  * @param start - Start of port range (default: 8000)
  * @param end - End of port range (default: 9000)
  * @returns Promise that resolves to an available port number

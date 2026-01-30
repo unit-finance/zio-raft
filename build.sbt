@@ -134,7 +134,15 @@ lazy val kvstore = project
       "dev.zio" %% "zio-test" % zio2Version % Test,
       "dev.zio" %% "zio-test-sbt" % zio2Version % Test
     ),
-    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13"
+    excludeDependencies += "org.scala-lang.modules" % "scala-collection-compat_2.13",
+    assembly / mainClass := Some("zio.kvstore.KVStoreServerApp"),
+    assembly / assemblyJarName := "kvstore.jar",
+    assembly / assemblyMergeStrategy := {
+      case x if x.endsWith("module-info.class") => MergeStrategy.discard
+      case x =>
+        val oldStrategy = (assembly / assemblyMergeStrategy).value
+        oldStrategy(x)
+    }
   )
   .dependsOn(raft, raftZmq, stores, sessionStateMachine, clientServerProtocol, clientServerServer, kvstoreProtocol)
 

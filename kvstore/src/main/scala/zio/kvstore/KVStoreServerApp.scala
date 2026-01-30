@@ -24,6 +24,14 @@ object ServerAppConfig:
 
 object KVStoreServerApp extends ZIOAppDefault:
 
+  // Force exit after 2 seconds on shutdown
+  java.lang.Runtime.getRuntime.addShutdownHook(new Thread:
+    override def run(): Unit =
+      Thread.sleep(2000)
+      // If we're still here after 2 seconds, force termination
+      java.lang.Runtime.getRuntime.halt(0)
+  )
+
   private def parseEndpoints(endpoints: String): Map[CoreMemberId, String] =
     endpoints
       .split(",")

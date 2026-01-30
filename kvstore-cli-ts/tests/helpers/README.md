@@ -46,12 +46,15 @@ describe('My E2E Tests', () => {
 #### Constructor
 
 ```typescript
-new ServerManager(memberId?: string)
+new ServerManager()
 ```
 
 Creates a new ServerManager instance.
 
-- **memberId** (optional): Custom member ID. Default: `test-node-{timestamp}`
+**Note:** Currently uses the server's default configuration due to a command-line argument parsing limitation in the KVStore server app. The server runs on:
+- Server port: 7001
+- Member port: 7002  
+- Member ID: node-1
 
 #### Methods
 
@@ -95,9 +98,15 @@ Cleans up server resources (calls `kill()`).
 
 #### Port Allocation
 
-- Ports are automatically allocated from range 8000-9000
-- Two ports per server: server port and member port
-- Ports are checked for availability before use
+**Current Implementation:**
+- Uses server's default ports (7001, 7002) due to command-line argument parsing limitation
+- Only one server instance can run at a time
+- Tests must run sequentially, not in parallel
+
+**Future Enhancement:**
+- Once command-line arguments are fixed in the KVStore server, ports will be dynamically allocated
+- This will allow parallel test execution
+- Range: 8000-9000 (configurable)
 
 #### Logging
 

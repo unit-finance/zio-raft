@@ -4,11 +4,15 @@
  *
  * Provides automated server lifecycle management for E2E tests.
  * Handles server startup, port allocation, and cleanup.
+ *
+ * NOTE: The KVStore server currently has a bug where command-line arguments
+ * are not properly parsed. As a workaround, this manager uses the server's
+ * default configuration (port 7001 for client, port 7002 for member, memberId "node-1").
  */
 
 import { spawn, ChildProcess } from 'child_process';
 import { join } from 'path';
-import { findAvailablePort, waitForPort } from './portUtils.js';
+import { waitForPort } from './portUtils.js';
 
 /**
  * ServerManager - Manages a KVStore server instance for testing
@@ -21,19 +25,11 @@ import { findAvailablePort, waitForPort } from './portUtils.js';
  * await server.cleanup();
  */
 export class ServerManager {
-  private memberId: string;
-  private serverPort: number | null = null;
-  private memberPort: number | null = null;
   private process: ChildProcess | null = null;
-
-  /**
-   * Create a new ServerManager
-   *
-   * @param memberId - Optional member ID (default: test-node-{timestamp})
-   */
-  constructor(memberId?: string) {
-    this.memberId = memberId ?? `test-node-${Date.now()}`;
-  }
+  // Use default server configuration (workaround for command-line arg parsing bug)
+  private readonly serverPort = 7001;
+  private readonly memberPort = 7002;
+  private readonly memberId = 'node-1';
 
   /**
    * Start the server and wait for it to be ready
@@ -41,32 +37,21 @@ export class ServerManager {
    * @throws Error if server fails to start
    */
   async start(): Promise<void> {
-    console.log(`[ServerManager] Starting server with member ID: ${this.memberId}`);
+    console.log(`[ServerManager] Starting server with default configuration`);
+    console.log(`[ServerManager] Server port: ${this.serverPort}, Member port: ${this.memberPort}, Member ID: ${this.memberId}`);
 
-    // Allocate ports
-    this.serverPort = await findAvailablePort();
-    this.memberPort = await findAvailablePort(this.serverPort + 1);
+    // Path to run-kvstore.sh (in repository root, one level up from kvstore-cli-ts)
+    const repoRoot = join(process.cwd(), '..');
+    const scriptPath = join(repoRoot, 'run-kvstore.sh');
 
-    console.log(`[ServerManager] Allocated ports - server: ${this.serverPort}, member: ${this.memberPort}`);
-
-    // Path to run-kvstore.sh (relative to project root)
-    const scriptPath = join(process.cwd(), '..', 'run-kvstore.sh');
-
-    // Build arguments
-    const args = [
-      '--serverPort',
-      this.serverPort.toString(),
-      '--memberId',
-      this.memberId,
-      '--members',
-      `${this.memberId}=tcp://127.0.0.1:${this.memberPort}`,
-      '--rebuild',
-    ];
+    // Use --rebuild to ensure JAR is up to date
+    const args = ['--rebuild'];
 
     console.log(`[ServerManager] Spawning: ${scriptPath} ${args.join(' ')}`);
 
-    // Spawn the server process
+    // Spawn the server process from the repository root directory
     this.process = spawn(scriptPath, args, {
+      cwd: repoRoot, // Run from repository root
       detached: false,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -121,9 +106,6 @@ export class ServerManager {
    * @returns Endpoint string in format: memberId=tcp://host:port
    */
   getEndpoint(): string {
-    if (!this.serverPort) {
-      throw new Error('Server not started - call start() first');
-    }
     return `${this.memberId}=tcp://127.0.0.1:${this.serverPort}`;
   }
 

@@ -119,18 +119,32 @@ All server output is logged with `[SERVER]` prefix:
 
 This helps debug startup issues and server behavior.
 
+## CLI Runner Utility
+
+Shared utility for running CLI commands in E2E tests.
+
+### `runCli(...args): Promise<CliResult>`
+
+Run CLI command and return result.
+
+- **args**: CLI arguments (e.g., 'get', 'mykey')
+- **timeout** (optional): First argument can be timeout in ms (default: 5000)
+- **Returns**: Promise with `{ stdout, stderr, exitCode }`
+
+**Example:**
+```typescript
+import { runCli } from '../helpers/cliRunner.js';
+
+// Default timeout (5s)
+const result = await runCli('get', 'mykey');
+
+// Custom timeout (10s)
+const result = await runCli(10000, 'set', 'key', 'value');
+```
+
 ## Port Utilities
 
-Low-level utilities for port management. Generally you don't need to use these directly - ServerManager uses them internally.
-
-### `findAvailablePort(start?, end?): Promise<number>`
-
-Find an available port in the given range.
-
-- **start** (optional): Start of range (default: 8000)
-- **end** (optional): End of range (default: 9000)
-- **Returns**: First available port in range
-- **Throws**: Error if no port available
+Low-level utilities for port management.
 
 ### `waitForPort(port, timeout?): Promise<void>`
 
@@ -141,10 +155,6 @@ Wait for a port to accept connections.
 - **Returns**: Promise that resolves when port is ready
 - **Throws**: Error if timeout reached
 
-### Internal: `isPortFree(port): Promise<boolean>`
-
-Checks if a port is available (not exported).
-
 ## Test Structure
 
 ```
@@ -152,6 +162,7 @@ tests/
   helpers/
     portUtils.ts      - Port management utilities
     serverManager.ts  - ServerManager class
+    cliRunner.ts      - CLI runner utility
     README.md         - This file
   e2e/
     server-not-running.test.ts  - Test CLI behavior without server
@@ -169,5 +180,5 @@ npm test -- --run tests/e2e/server-not-running.test.ts
 npm test -- --run tests/e2e/server-managed.test.ts
 
 # Run both new tests
-npm run test:e2e:new
+npm run test:e2e:server
 ```

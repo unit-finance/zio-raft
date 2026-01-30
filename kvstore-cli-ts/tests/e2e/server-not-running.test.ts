@@ -6,77 +6,8 @@
  * These tests are fast because they don't require a running server.
  */
 
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-
 import { describe, it, expect } from 'vitest';
-import { spawn } from 'child_process';
-import { join } from 'path';
-
-// =============================================================================
-// Configuration
-// =============================================================================
-
-/** Path to the CLI entry point */
-const CLI_PATH = join(process.cwd(), 'dist/index.js');
-
-/** Command timeout in milliseconds */
-const CMD_TIMEOUT = 10000;
-
-// =============================================================================
-// Types
-// =============================================================================
-
-interface CliResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-/**
- * Run CLI command and return result
- *
- * @param args - CLI arguments
- * @returns Promise with stdout, stderr, and exit code
- */
-async function runCli(...args: string[]): Promise<CliResult> {
-  return new Promise((resolve) => {
-    const child = spawn('node', [CLI_PATH, ...args], {
-      timeout: CMD_TIMEOUT,
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    child.on('close', (code) => {
-      resolve({
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        exitCode: code ?? 1,
-      });
-    });
-
-    child.on('error', (err) => {
-      resolve({
-        stdout: '',
-        stderr: err.message,
-        exitCode: 1,
-      });
-    });
-  });
-}
+import { runCli } from '../helpers/cliRunner.js';
 
 // =============================================================================
 // Tests
@@ -95,7 +26,7 @@ describe('Server Not Running', () => {
     // Use a fake endpoint - nothing listening on port 9999
     const fakeEndpoint = 'node-1=tcp://127.0.0.1:9999';
 
-    const result = await runCli('set', 'testkey', 'testvalue', '-e', fakeEndpoint);
+    const result = await runCli(10000, 'set', 'testkey', 'testvalue', '-e', fakeEndpoint);
 
     // Should fail with non-zero exit code
     // This happens because spawn timeout kills the hanging process

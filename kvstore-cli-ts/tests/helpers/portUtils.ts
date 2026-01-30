@@ -2,54 +2,11 @@
  * Port Management Utilities
  * ==========================
  *
- * Utilities for finding available ports and waiting for ports to become ready.
- * Used by ServerManager to allocate ports for test servers.
+ * Utilities for waiting for ports to become ready.
+ * Used by ServerManager to wait for test servers.
  */
 
-import { createServer, Socket } from 'net';
-
-/**
- * Check if a port is free (not in use)
- *
- * @param port - Port number to check
- * @returns Promise that resolves to true if port is free, false otherwise
- */
-async function isPortFree(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const server = createServer();
-
-    server.once('error', () => {
-      resolve(false);
-    });
-
-    server.once('listening', () => {
-      server.close();
-      resolve(true);
-    });
-
-    server.listen(port);
-  });
-}
-
-/**
- * Find an available port in the given range
- *
- * NOTE: Currently unused due to command-line argument parsing limitation in KVStore server.
- * Reserved for future use when server supports dynamic port configuration.
- *
- * @param start - Start of port range (default: 8000)
- * @param end - End of port range (default: 9000)
- * @returns Promise that resolves to an available port number
- * @throws Error if no available port is found in the range
- */
-export async function findAvailablePort(start: number = 8000, end: number = 9000): Promise<number> {
-  for (let port = start; port <= end; port++) {
-    if (await isPortFree(port)) {
-      return port;
-    }
-  }
-  throw new Error(`No available port found in range ${start}-${end}`);
-}
+import { Socket } from 'net';
 
 /**
  * Wait for a port to accept connections

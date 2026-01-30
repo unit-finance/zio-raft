@@ -10,11 +10,6 @@
  * default configuration (port 7001 for client, port 7002 for member, memberId "node-1").
  */
 
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/strict-boolean-expressions */
-
 import { spawn, ChildProcess } from 'child_process';
 import { join } from 'path';
 import { waitForPort } from './portUtils.js';
@@ -42,6 +37,10 @@ export class ServerManager {
    * @throws Error if server fails to start
    */
   async start(): Promise<void> {
+    if (this.process) {
+      throw new Error('Server is already running');
+    }
+
     console.log(`[ServerManager] Starting server with default configuration`);
     console.log(
       `[ServerManager] Server port: ${this.serverPort}, Member port: ${this.memberPort}, Member ID: ${this.memberId}`
@@ -64,7 +63,7 @@ export class ServerManager {
     });
 
     // Log server output for debugging
-    this.process.stdout?.on('data', (data) => {
+    this.process.stdout?.on('data', (data: Buffer) => {
       const lines = data
         .toString()
         .split('\n')
@@ -74,7 +73,7 @@ export class ServerManager {
       });
     });
 
-    this.process.stderr?.on('data', (data) => {
+    this.process.stderr?.on('data', (data: Buffer) => {
       const lines = data
         .toString()
         .split('\n')
@@ -105,7 +104,7 @@ export class ServerManager {
    * Force kill the server process
    */
   async kill(): Promise<void> {
-    if (this.process && this.process.pid) {
+    if (this.process !== null && this.process.pid !== undefined) {
       console.log(`[ServerManager] Killing server process ${this.process.pid}`);
       try {
         this.process.kill('SIGKILL');
@@ -114,6 +113,9 @@ export class ServerManager {
       } catch (err) {
         // Process may have already exited - this is not an error
         console.log('[ServerManager] Process already exited or kill failed');
+      } finally {
+        // Clear process reference to avoid stale state or double-kills
+        this.process = null;
       }
     }
   }

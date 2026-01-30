@@ -6,78 +6,9 @@
  * These tests take longer (~1-2 minutes) due to server startup time.
  */
 
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn } from 'child_process';
-import { join } from 'path';
 import { ServerManager } from '../helpers/serverManager.js';
-
-// =============================================================================
-// Configuration
-// =============================================================================
-
-/** Path to the CLI entry point */
-const CLI_PATH = join(process.cwd(), 'dist/index.js');
-
-/** Command timeout in milliseconds */
-const CMD_TIMEOUT = 5000;
-
-// =============================================================================
-// Types
-// =============================================================================
-
-interface CliResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-/**
- * Run CLI command and return result
- *
- * @param args - CLI arguments
- * @returns Promise with stdout, stderr, and exit code
- */
-async function runCli(...args: string[]): Promise<CliResult> {
-  return new Promise((resolve) => {
-    const child = spawn('node', [CLI_PATH, ...args], {
-      timeout: CMD_TIMEOUT,
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    child.on('close', (code) => {
-      resolve({
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        exitCode: code ?? 1,
-      });
-    });
-
-    child.on('error', (err) => {
-      resolve({
-        stdout: '',
-        stderr: err.message,
-        exitCode: 1,
-      });
-    });
-  });
-}
+import { runCli } from '../helpers/cliRunner.js';
 
 // =============================================================================
 // Test Suite

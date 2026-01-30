@@ -23,16 +23,14 @@ object ServerAppConfig:
     deriveConfig[ServerAppConfig]
 
 object KVStoreServerApp extends ZIOAppDefault:
-  
+
   // Force exit after 2 seconds on shutdown
-  java.lang.Runtime.getRuntime.addShutdownHook(new Thread {
-    override def run(): Unit = {
+  java.lang.Runtime.getRuntime.addShutdownHook(new Thread:
+    override def run(): Unit =
       Thread.sleep(2000)
       // If we're still here after 2 seconds, force termination
       java.lang.Runtime.getRuntime.halt(0)
-    }
-  })
-  
+  )
 
   private def parseEndpoints(endpoints: String): Map[CoreMemberId, String] =
     endpoints
@@ -65,53 +63,51 @@ object KVStoreServerApp extends ZIOAppDefault:
       zio.Runtime.removeDefaultLoggers >>> consoleLogger(logConfig)
 
   override def run =
-    ZIO.scoped {
-      for
-        config <- ZIO.config(ServerAppConfig.config)
+    for
+      config <- ZIO.config(ServerAppConfig.config)
 
-        _ <- ZIO.logInfo(s"Config: $config")
+      _ <- ZIO.logInfo(s"Config: $config")
 
-        // Ensure the lmdb directory exists
-        _ <- ZIO.attemptBlockingIO {
-          val dir = new File(config.lmdbDirectory)
-          if !dir.exists() then dir.mkdirs()
-        }
+      // Ensure the lmdb directory exists
+      _ <- ZIO.attemptBlockingIO {
+        val dir = new File(config.lmdbDirectory)
+        if !dir.exists() then dir.mkdirs()
+      }
 
-        // Ensure the log directory exists
-        _ <- ZIO.attemptBlockingIO {
-          val dir = new File(config.logDir)
-          if !dir.exists() then dir.mkdirs()
-        }
+      // Ensure the log directory exists
+      _ <- ZIO.attemptBlockingIO {
+        val dir = new File(config.logDir)
+        if !dir.exists() then dir.mkdirs()
+      }
 
-        // Ensure the snapshot directory exists
-        _ <- ZIO.attemptBlockingIO {
-          val dir = new File(config.snapshotDir)
-          if !dir.exists() then dir.mkdirs()
-        }
+      // Ensure the snapshot directory exists
+      _ <- ZIO.attemptBlockingIO {
+        val dir = new File(config.snapshotDir)
+        if !dir.exists() then dir.mkdirs()
+      }
 
-        program =
-          for
-            endpoints <- ZIO.succeed(parseEndpoints(config.members))
-            selfId = CoreMemberId(config.memberId)
-            nodeAddr <- ZIO.fromOption(endpoints.get(selfId)).orElseFail(new IllegalArgumentException(
-              "self member must be included in members"
-            ))
-            localNodeAddr = rewriteHostToLocalhost(nodeAddr)
-            peersMap = endpoints - selfId
+      program =
+        for
+          endpoints <- ZIO.succeed(parseEndpoints(config.members))
+          selfId = CoreMemberId(config.memberId)
+          nodeAddr <- ZIO.fromOption(endpoints.get(selfId)).orElseFail(new IllegalArgumentException(
+            "self member must be included in members"
+          ))
+          localNodeAddr = rewriteHostToLocalhost(nodeAddr)
+          peersMap = endpoints - selfId
 
-            node <- Node.make(
-              serverAddress = s"tcp://localhost:${config.serverPort}",
-              nodeAddress = localNodeAddr,
-              logDirectory = config.logDir,
-              snapshotDirectory = config.snapshotDir,
-              memberId = selfId,
-              peers = peersMap
-            ).debug("Node.make")
-            _ <- node.run
-          yield ()
-        _ <- program.provideSomeLayer(
-          (LmdbEnv.builder.withMaxDbs(3).layer(new File(config.lmdbDirectory)) ++ zio.zmq.ZContext.live)
-        )
-      yield ()
-    }
+          node <- Node.make(
+            serverAddress = s"tcp://localhost:${config.serverPort}",
+            nodeAddress = localNodeAddr,
+            logDirectory = config.logDir,
+            snapshotDirectory = config.snapshotDir,
+            memberId = selfId,
+            peers = peersMap
+          ).debug("Node.make")
+          _ <- node.run
+        yield ()
+      _ <- program.provideSomeLayer(
+        (LmdbEnv.builder.withMaxDbs(3).layer(new File(config.lmdbDirectory)) ++ zio.zmq.ZContext.live)
+      )
+    yield ()
 end KVStoreServerApp

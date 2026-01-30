@@ -17,7 +17,6 @@ for arg in "$@"; do
     case $arg in
         --rebuild|-r)
             FORCE_REBUILD=true
-            shift
             ;;
         *)
             APP_ARGS+=("$arg")

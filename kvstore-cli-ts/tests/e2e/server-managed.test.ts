@@ -6,6 +6,9 @@
  * These tests take longer (~1-2 minutes) due to server startup time.
  */
 
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn } from 'child_process';
 import { join } from 'path';

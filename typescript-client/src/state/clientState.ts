@@ -34,7 +34,7 @@ import {
  */
 function buildResendMessages(
   requestsToResend: ReadonlyArray<{ requestId: RequestId; payload: Buffer }>,
-  queriesToResend: Array<{ correlationId: CorrelationId; payload: Buffer }>,
+  queriesToResend: ReadonlyArray<{ correlationId: CorrelationId; payload: Buffer }>,
   pendingRequests: PendingRequests,
   now: Date
 ): ClientMessage[] {
@@ -770,12 +770,13 @@ export class ConnectingExistingSessionStateHandler {
     // Resend all pending requests and queries
     const now = new Date();
     const { requests: updatedRequests, toResend: requestsToResend } = state.pendingRequests.resendAll(now);
-    const queriesToResend = state.pendingQueries.resendAll(now);
+    const { queries: updatedQueries, toResend: queriesToResend } = state.pendingQueries.resendAll(now);
 
-    // Update state with new immutable pending requests
+    // Update state with new immutable pending requests and queries
     const updatedState: ConnectedState = {
       ...newState,
       pendingRequests: updatedRequests,
+      pendingQueries: updatedQueries,
     };
 
     // Build messages for pending requests and queries
@@ -1035,7 +1036,7 @@ export class ConnectedStateHandler {
           createdAt: now,
         };
 
-        // Track pending query with callbacks
+        // Track pending query with callbacks (immutable - returns new instance)
         const pendingData: PendingQueryData = {
           payload: action.payload,
           resolve: action.resolve,
@@ -1044,11 +1045,14 @@ export class ConnectedStateHandler {
           lastSentAt: now,
         };
 
-        state.pendingQueries.add(correlationId, pendingData);
+        const updatedPendingQueries = state.pendingQueries.add(correlationId, pendingData);
 
-        // Return message to send
+        // Return updated state with new pendingQueries
         return {
-          newState: state,
+          newState: {
+            ...state,
+            pendingQueries: updatedPendingQueries,
+          },
           messagesToSend: [query],
         };
       }
@@ -1135,10 +1139,14 @@ export class ConnectedStateHandler {
    * Handle QueryResponse: complete pending query
    */
   private async handleQueryResponse(state: ConnectedState, message: QueryResponse): Promise<StateTransitionResult> {
-    // Complete the pending query
-    state.pendingQueries.complete(message.correlationId, message.result);
-
-    return { newState: state };
+    // Complete the pending query (immutable - returns new instance)
+    const updatedPendingQueries = state.pendingQueries.complete(message.correlationId, message.result);
+    return {
+      newState: {
+        ...state,
+        pendingQueries: updatedPendingQueries,
+      },
+    };
   }
 
   /**
@@ -1334,7 +1342,10 @@ export class ConnectedStateHandler {
       now,
       state.config.requestTimeout
     );
-    const expiredQueries = state.pendingQueries.resendExpired(now, state.config.requestTimeout);
+    const { queries: updatedQueries, toResend: expiredQueries } = state.pendingQueries.resendExpired(
+      now,
+      state.config.requestTimeout
+    );
 
     // Build messages for expired requests and queries
     const messagesToSend = buildResendMessages(expiredRequests, expiredQueries, updatedRequests, now);
@@ -1343,6 +1354,7 @@ export class ConnectedStateHandler {
       newState: {
         ...state,
         pendingRequests: updatedRequests,
+        pendingQueries: updatedQueries,
       },
       messagesToSend,
     };

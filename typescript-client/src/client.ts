@@ -296,6 +296,9 @@ export class RaftClient {
     }
 
     // Check if we're switching to a different member (need to reconnect)
+    // TODO: When transitioning from Connected to ConnectingExistingSession with the SAME member
+    // (e.g., NotLeaderAnymore in single-member cluster), we skip disconnect but the transport
+    // may still be connected. Consider always disconnecting when oldState.state === 'Connected'.
     if (
       oldState.state === 'ConnectingNewSession' ||
       oldState.state === 'ConnectingExistingSession' ||

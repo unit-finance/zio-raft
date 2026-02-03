@@ -33,7 +33,7 @@ import {
  * Used after reconnection (resendAll) and on timeout (resendExpired).
  */
 function buildResendMessages(
-  requestsToResend: Array<{ requestId: RequestId; payload: Buffer }>,
+  requestsToResend: ReadonlyArray<{ requestId: RequestId; payload: Buffer }>,
   queriesToResend: Array<{ correlationId: CorrelationId; payload: Buffer }>,
   pendingRequests: PendingRequests,
   now: Date
@@ -769,14 +769,20 @@ export class ConnectingExistingSessionStateHandler {
 
     // Resend all pending requests and queries
     const now = new Date();
-    const requestsToResend = state.pendingRequests.resendAll(now);
+    const { requests: updatedRequests, toResend: requestsToResend } = state.pendingRequests.resendAll(now);
     const queriesToResend = state.pendingQueries.resendAll(now);
 
+    // Update state with new immutable pending requests
+    const updatedState: ConnectedState = {
+      ...newState,
+      pendingRequests: updatedRequests,
+    };
+
     // Build messages for pending requests and queries
-    const messagesToSend = buildResendMessages(requestsToResend, queriesToResend, state.pendingRequests, now);
+    const messagesToSend = buildResendMessages(requestsToResend, queriesToResend, updatedRequests, now);
 
     return {
-      newState,
+      newState: updatedState,
       messagesToSend,
     };
   }
@@ -994,7 +1000,7 @@ export class ConnectedStateHandler {
           createdAt: now,
         };
 
-        // Track pending request with callbacks
+        // Track pending request with callbacks (immutable - returns new instance)
         const pendingData: PendingRequestData = {
           payload: action.payload,
           resolve: action.resolve,
@@ -1003,13 +1009,14 @@ export class ConnectedStateHandler {
           lastSentAt: now,
         };
 
-        state.pendingRequests.add(requestId, pendingData);
+        const updatedPendingRequests = state.pendingRequests.add(requestId, pendingData);
 
-        // Return updated state with new requestIdCounter and message to send
+        // Return updated state with new requestIdCounter and pendingRequests
         return {
           newState: {
             ...state,
             requestIdCounter: nextId,
+            pendingRequests: updatedPendingRequests,
           },
           messagesToSend: [clientRequest],
         };
@@ -1114,9 +1121,14 @@ export class ConnectedStateHandler {
    * Handle ClientResponse: complete pending request
    */
   private async handleClientResponse(state: ConnectedState, message: ClientResponse): Promise<StateTransitionResult> {
-    // Complete the pending request
-    state.pendingRequests.complete(message.requestId, message.result);
-    return { newState: state };
+    // Complete the pending request (immutable - returns new instance)
+    const updatedPendingRequests = state.pendingRequests.complete(message.requestId, message.result);
+    return {
+      newState: {
+        ...state,
+        pendingRequests: updatedPendingRequests,
+      },
+    };
   }
 
   /**
@@ -1180,8 +1192,14 @@ export class ConnectedStateHandler {
    */
   private async handleRequestError(state: ConnectedState, message: RequestError): Promise<StateTransitionResult> {
     const error = new Error(`Request error: ${message.reason}`);
-    state.pendingRequests.fail(message.requestId, error);
-    return { newState: state };
+    // Fail the pending request (immutable - returns new instance)
+    const updatedPendingRequests = state.pendingRequests.fail(message.requestId, error);
+    return {
+      newState: {
+        ...state,
+        pendingRequests: updatedPendingRequests,
+      },
+    };
   }
 
   /**
@@ -1312,14 +1330,20 @@ export class ConnectedStateHandler {
    */
   private async handleTimeoutCheck(state: ConnectedState): Promise<StateTransitionResult> {
     const now = new Date();
-    const expiredRequests = state.pendingRequests.resendExpired(now, state.config.requestTimeout);
+    const { requests: updatedRequests, toResend: expiredRequests } = state.pendingRequests.resendExpired(
+      now,
+      state.config.requestTimeout
+    );
     const expiredQueries = state.pendingQueries.resendExpired(now, state.config.requestTimeout);
 
     // Build messages for expired requests and queries
-    const messagesToSend = buildResendMessages(expiredRequests, expiredQueries, state.pendingRequests, now);
+    const messagesToSend = buildResendMessages(expiredRequests, expiredQueries, updatedRequests, now);
 
     return {
-      newState: state,
+      newState: {
+        ...state,
+        pendingRequests: updatedRequests,
+      },
       messagesToSend,
     };
   }

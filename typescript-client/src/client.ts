@@ -9,7 +9,6 @@ import {
   StateTransitionResult,
   StreamEvent,
   ClientAction,
-  ClientEventData,
 } from './state/clientState';
 import { AsyncQueue } from './utils/asyncQueue';
 import { mergeStreams } from './utils/streamMerger';
@@ -264,16 +263,11 @@ export class RaftClient {
       }
     }
 
-    // Process internal events from state machine
-    if (result.eventsToEmit) {
-      for (const evt of result.eventsToEmit) {
-        this.processInternalEvent(evt);
+    // Route server requests to queue for async iteration
+    if (result.serverRequests && result.serverRequests.length > 0) {
+      for (const request of result.serverRequests) {
+        this.serverRequestQueue.offer(request);
       }
-    }
-
-    // If we're shutting down and now disconnected, close action queue to exit event loop
-    if (this.isShuttingDown && this.currentState.state === 'Disconnected') {
-      this.actionQueue.close();
     }
   }
 
@@ -313,28 +307,6 @@ export class RaftClient {
 
     // Connect to the target member
     await this.transport.connect(address);
-  }
-
-  /**
-   * Process internal events from state machine
-   * Routes state machine events to appropriate internal handlers (e.g., server requests to queue)
-   */
-  private processInternalEvent(evt: ClientEventData): void {
-    switch (evt.type) {
-      case 'serverRequestReceived':
-        // Route ServerRequest to queue for async iteration
-        this.serverRequestQueue.offer(evt.request);
-        break;
-
-      case 'stateChange':
-      case 'sessionExpired':
-      case 'connectionAttempt':
-      case 'connectionSuccess':
-      case 'connectionFailure':
-      case 'requestTimeout':
-        // No longer emitting events - these are internal state transitions
-        break;
-    }
   }
 
   // ==========================================================================

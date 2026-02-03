@@ -8,12 +8,12 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc --project tsconfig.json",
+    "build": "tsc --build src",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --build",
     "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'",
     "lint:fix": "eslint 'src/**/*.ts' 'tests/**/*.ts' --fix",
     "format": "prettier --write 'src/**/*.ts' 'tests/**/*.ts'",

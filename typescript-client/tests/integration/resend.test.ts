@@ -64,7 +64,7 @@ describe('Resend Logic After Reconnection', () => {
       }
     }
     if (mockTransport !== null && mockTransport !== undefined) {
-      mockTransport.closeQueues();
+      await mockTransport.disconnect();
     }
   });
 
@@ -272,7 +272,6 @@ describe('Resend Logic After Reconnection', () => {
         } catch {
           // Ignore disconnect errors during cleanup
         }
-        shortTimeoutTransport.closeQueues();
       }
     });
   });
@@ -476,7 +475,6 @@ describe('Resend Logic After Reconnection', () => {
         } catch {
           // Ignore
         }
-        multiNodeTransport.closeQueues();
       }
     });
   });

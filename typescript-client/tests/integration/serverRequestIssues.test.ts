@@ -28,7 +28,7 @@ describe('Server Request Iterator', () => {
   afterEach(async () => {
     // Properly cleanup MockTransport resources
     if (mockTransport) {
-      mockTransport.closeQueues();
+      await mockTransport.disconnect();
     }
   });
 

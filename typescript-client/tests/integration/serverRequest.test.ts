@@ -59,7 +59,7 @@ describe('Server-Initiated Requests Integration', () => {
     ]);
 
     expect(receivedRequests).toHaveLength(1);
-    expect(receivedRequests[0].requestId).toBe(RequestId.fromBigInt(1n));
+    expect(receivedRequests[0].requestId).toEqual(RequestId.fromBigInt(1n));
     expect(receivedRequests[0].payload.toString()).toBe('test-work-item');
   }, 15000);
 

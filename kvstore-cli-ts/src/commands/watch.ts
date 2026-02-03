@@ -28,7 +28,7 @@ export function createWatchCommand(): Command {
         }
 
         isShuttingDown = true;
-        console.error('\nShutting down...');
+        console.log('\nShutting down...');
 
         await client?.disconnect();
 
@@ -46,7 +46,7 @@ export function createWatchCommand(): Command {
         // 2. Parse endpoints
         const endpointConfig = parseEndpoints(options.endpoints);
 
-        // 3. Create KVClient with keepalive
+        // 3. Create KVClient
         client = new KVClient({
           endpoints: endpointConfig.endpoints,
           connectionTimeout: 5000,

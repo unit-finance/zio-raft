@@ -1,3 +1,10 @@
+// TODO: This file is too large and should be split into separate files per state:
+// - disconnectedState.ts
+// - connectingNewSessionState.ts
+// - connectingExistingSessionState.ts
+// - connectedState.ts
+// - stateManager.ts (orchestrator)
+
 // Client state machine types and state handlers
 // Implements idiomatic TypeScript state machine pattern with discriminated unions
 
@@ -111,7 +118,7 @@ export interface ConnectingExistingSessionState {
   readonly currentMemberId: MemberId;
   readonly createdAt: Date;
   readonly serverRequestTracker: ServerRequestTracker;
-  readonly nextRequestId: RequestId;
+  readonly requestIdCounter: RequestId;
   readonly pendingRequests: PendingRequests;
   readonly pendingQueries: PendingQueries;
 }
@@ -126,7 +133,7 @@ export interface ConnectedState {
   readonly capabilities: Map<string, string>;
   readonly createdAt: Date;
   readonly serverRequestTracker: ServerRequestTracker;
-  readonly nextRequestId: RequestId;
+  readonly requestIdCounter: RequestId;
   readonly pendingRequests: PendingRequests;
   readonly pendingQueries: PendingQueries;
   readonly currentMemberId: MemberId;
@@ -258,25 +265,14 @@ export type {
 
 /**
  * Result of a state transition
- * Includes new state and optional side effects (messages to send, events to emit)
+ * Includes new state and optional side effects (messages to send, server requests to process)
  */
 export interface StateTransitionResult {
   readonly newState: ClientState;
   readonly messagesToSend?: Array<ClientMessage>;
-  readonly eventsToEmit?: Array<ClientEventData>;
+  readonly serverRequests?: Array<ServerRequest>;
 }
 
-/**
- * Client event data for observability
- */
-export type ClientEventData =
-  | { type: 'stateChange'; oldState: ClientState['state']; newState: ClientState['state'] }
-  | { type: 'connectionAttempt'; memberId: MemberId; address: string }
-  | { type: 'connectionSuccess'; memberId: MemberId }
-  | { type: 'connectionFailure'; memberId: MemberId; error: Error }
-  | { type: 'sessionExpired' }
-  | { type: 'requestTimeout'; requestId: RequestId }
-  | { type: 'serverRequestReceived'; request: ServerRequest };
 
 // ============================================================================
 // State Handlers
@@ -344,7 +340,7 @@ export class DisconnectedStateHandler {
       throw new Error('No cluster members configured');
     }
 
-    const [firstMemberId, firstAddress] = firstMember;
+    const [firstMemberId] = firstMember;
     const nonce = Nonce.generate();
     const createdAt = new Date();
 
@@ -374,10 +370,6 @@ export class DisconnectedStateHandler {
     return {
       newState,
       messagesToSend: [createSessionMsg],
-      eventsToEmit: [
-        { type: 'stateChange', oldState: 'Disconnected', newState: 'ConnectingNewSession' },
-        { type: 'connectionAttempt', memberId: firstMemberId, address: firstAddress },
-      ],
     };
   }
 }
@@ -453,7 +445,7 @@ export class ConnectingNewSessionStateHandler {
   }
 
   /**
-   * Handle Disconnect: fail all pending, return to Disconnected
+   * Handle Disconnect: reject connect promise, return to Disconnected
    */
   private async handleDisconnect(state: ConnectingNewSessionState): Promise<StateTransitionResult> {
     const error = new Error('Client disconnected');
@@ -461,18 +453,12 @@ export class ConnectingNewSessionStateHandler {
     // Reject the connect() promise
     state.connectReject(error);
 
-    state.pendingRequests.failAll(error);
-    state.pendingQueries.failAll(error);
-
     const newState: DisconnectedState = {
       state: 'Disconnected',
       config: state.config,
     };
 
-    return {
-      newState,
-      eventsToEmit: [{ type: 'stateChange', oldState: 'ConnectingNewSession', newState: 'Disconnected' }],
-    };
+    return { newState };
   }
 
   /**
@@ -519,28 +505,13 @@ export class ConnectingNewSessionStateHandler {
       capabilities: state.capabilities,
       createdAt: state.createdAt,
       serverRequestTracker: new ServerRequestTracker(),
-      nextRequestId: RequestId.zero,
+      requestIdCounter: RequestId.zero,
       pendingRequests: state.pendingRequests,
       pendingQueries: state.pendingQueries,
       currentMemberId: state.currentMemberId,
     };
 
-    // Resend all pending requests and queries
-    const now = new Date();
-    const requestsToResend = state.pendingRequests.resendAll(now);
-    const queriesToResend = state.pendingQueries.resendAll(now);
-
-    // Build messages for pending requests and queries
-    const messagesToSend = buildResendMessages(requestsToResend, queriesToResend, state.pendingRequests, now);
-
-    return {
-      newState,
-      messagesToSend,
-      eventsToEmit: [
-        { type: 'stateChange', oldState: 'ConnectingNewSession', newState: 'Connected' },
-        { type: 'connectionSuccess', memberId: state.currentMemberId },
-      ],
-    };
+    return { newState };
   }
 
   /**
@@ -595,7 +566,6 @@ export class ConnectingNewSessionStateHandler {
         return {
           newState,
           messagesToSend: [createSessionMsg],
-          eventsToEmit: [{ type: 'connectionAttempt', memberId: leaderId, address: leaderAddress }],
         };
       }
     }
@@ -608,22 +578,15 @@ export class ConnectingNewSessionStateHandler {
    * Handle InvalidCapabilities rejection: fail immediately
    */
   private async handleInvalidCapabilities(state: ConnectingNewSessionState): Promise<StateTransitionResult> {
-    const error = new Error('Invalid capabilities');
-    state.pendingRequests.failAll(error);
-    state.pendingQueries.failAll(error);
+    // Reject the connect() promise
+    state.connectReject(new Error('Invalid capabilities'));
 
     const newState: DisconnectedState = {
       state: 'Disconnected',
       config: state.config,
     };
 
-    return {
-      newState,
-      eventsToEmit: [
-        { type: 'connectionFailure', memberId: state.currentMemberId, error },
-        { type: 'stateChange', oldState: 'ConnectingNewSession', newState: 'Disconnected' },
-      ],
-    };
+    return { newState };
   }
 
   /**
@@ -635,22 +598,14 @@ export class ConnectingNewSessionStateHandler {
 
     if (currentIndex === -1 || currentIndex === members.length - 1) {
       // No more members to try - fail
-      const error = new Error('Failed to connect to any cluster member');
-      state.pendingRequests.failAll(error);
-      state.pendingQueries.failAll(error);
+      state.connectReject(new Error('Failed to connect to any cluster member'));
 
       const newState: DisconnectedState = {
         state: 'Disconnected',
         config: state.config,
       };
 
-      return {
-        newState,
-        eventsToEmit: [
-          { type: 'connectionFailure', memberId: state.currentMemberId, error },
-          { type: 'stateChange', oldState: 'ConnectingNewSession', newState: 'Disconnected' },
-        ],
-      };
+      return { newState };
     }
 
     // Try next member
@@ -660,7 +615,7 @@ export class ConnectingNewSessionStateHandler {
       throw new Error('Unexpected: next member not found');
     }
 
-    const [nextMemberId, nextAddress] = nextMember;
+    const [nextMemberId] = nextMember;
     const nonce = Nonce.generate();
 
     const newState: ConnectingNewSessionState = {
@@ -679,7 +634,6 @@ export class ConnectingNewSessionStateHandler {
     return {
       newState,
       messagesToSend: [createSessionMsg],
-      eventsToEmit: [{ type: 'connectionAttempt', memberId: nextMemberId, address: nextAddress }],
     };
   }
 
@@ -702,11 +656,6 @@ export class ConnectingNewSessionStateHandler {
  * Handler for ConnectingExistingSession state
  * Handles session resumption after reconnection
  */
-// Session resumption is covered by integration tests in tests/integration/resend.test.ts:
-// - TC-RESEND-001/002: NotLeaderAnymore → redirect → SessionContinued → request resend
-// - TC-RESEND-005: SessionExpired during reconnect (terminal failure)
-// - TC-RESEND-006: Multiple sequential failovers (node1 → node2 → node3)
-// - TC-RESEND-007: Sequential failover with member exhaustion
 export class ConnectingExistingSessionStateHandler {
   /**
    * Handle an event in the ConnectingExistingSession state
@@ -768,10 +717,7 @@ export class ConnectingExistingSessionStateHandler {
       config: state.config,
     };
 
-    return {
-      newState,
-      eventsToEmit: [{ type: 'stateChange', oldState: 'ConnectingExistingSession', newState: 'Disconnected' }],
-    };
+    return { newState };
   }
 
   /**
@@ -815,7 +761,7 @@ export class ConnectingExistingSessionStateHandler {
       capabilities: state.capabilities,
       createdAt: state.createdAt,
       serverRequestTracker: state.serverRequestTracker,
-      nextRequestId: state.nextRequestId,
+      requestIdCounter: state.requestIdCounter,
       pendingRequests: state.pendingRequests,
       pendingQueries: state.pendingQueries,
       currentMemberId: state.currentMemberId,
@@ -832,10 +778,6 @@ export class ConnectingExistingSessionStateHandler {
     return {
       newState,
       messagesToSend,
-      eventsToEmit: [
-        { type: 'stateChange', oldState: 'ConnectingExistingSession', newState: 'Connected' },
-        { type: 'connectionSuccess', memberId: state.currentMemberId },
-      ],
     };
   }
 
@@ -881,18 +823,12 @@ export class ConnectingExistingSessionStateHandler {
       config: state.config,
     };
 
-    return {
-      newState,
-      eventsToEmit: [
-        { type: 'sessionExpired' },
-        { type: 'connectionFailure', memberId: state.currentMemberId, error },
-        { type: 'stateChange', oldState: 'ConnectingExistingSession', newState: 'Disconnected' },
-      ],
-    };
+    return { newState };
   }
 
   /**
    * Handle NotLeader rejection: try to connect to leader if known
+   * TODO: This logic repeats in ConnectingNewSessionStateHandler - consider extracting to shared helper
    */
   private async handleNotLeader(
     state: ConnectingExistingSessionState,
@@ -919,7 +855,6 @@ export class ConnectingExistingSessionStateHandler {
         return {
           newState,
           messagesToSend: [continueSessionMsg],
-          eventsToEmit: [{ type: 'connectionAttempt', memberId: leaderId, address: leaderAddress }],
         };
       }
     }
@@ -941,17 +876,12 @@ export class ConnectingExistingSessionStateHandler {
       config: state.config,
     };
 
-    return {
-      newState,
-      eventsToEmit: [
-        { type: 'connectionFailure', memberId: state.currentMemberId, error },
-        { type: 'stateChange', oldState: 'ConnectingExistingSession', newState: 'Disconnected' },
-      ],
-    };
+    return { newState };
   }
 
   /**
    * Try connecting to the next member in the cluster
+   * TODO: This logic repeats in ConnectingNewSessionStateHandler - consider extracting to shared helper
    */
   private async tryNextMember(state: ConnectingExistingSessionState): Promise<StateTransitionResult> {
     const members = Array.from(state.config.clusterMembers.entries());
@@ -968,13 +898,7 @@ export class ConnectingExistingSessionStateHandler {
         config: state.config,
       };
 
-      return {
-        newState,
-        eventsToEmit: [
-          { type: 'connectionFailure', memberId: state.currentMemberId, error },
-          { type: 'stateChange', oldState: 'ConnectingExistingSession', newState: 'Disconnected' },
-        ],
-      };
+      return { newState };
     }
 
     // Try next member
@@ -984,7 +908,7 @@ export class ConnectingExistingSessionStateHandler {
       throw new Error('Unexpected: next member not found');
     }
 
-    const [nextMemberId, nextAddress] = nextMember;
+    const [nextMemberId] = nextMember;
     const nonce = Nonce.generate();
 
     const newState: ConnectingExistingSessionState = {
@@ -1003,7 +927,6 @@ export class ConnectingExistingSessionStateHandler {
     return {
       newState,
       messagesToSend: [continueSessionMsg],
-      eventsToEmit: [{ type: 'connectionAttempt', memberId: nextMemberId, address: nextAddress }],
     };
   }
 
@@ -1057,7 +980,7 @@ export class ConnectedStateHandler {
 
       case 'SubmitCommand': {
         // Use current request ID and compute next one
-        const requestId = state.nextRequestId;
+        const requestId = state.requestIdCounter;
         const nextId = RequestId.next(requestId);
         const lowestPendingRequestId = state.pendingRequests.lowestPendingRequestIdOr(requestId);
         const now = new Date();
@@ -1082,11 +1005,11 @@ export class ConnectedStateHandler {
 
         state.pendingRequests.add(requestId, pendingData);
 
-        // Return updated state with new nextRequestId and message to send
+        // Return updated state with new requestIdCounter and message to send
         return {
           newState: {
             ...state,
-            nextRequestId: nextId,
+            requestIdCounter: nextId,
           },
           messagesToSend: [clientRequest],
         };
@@ -1150,7 +1073,6 @@ export class ConnectedStateHandler {
     return {
       newState,
       messagesToSend: [closeSessionMsg],
-      eventsToEmit: [{ type: 'stateChange', oldState: 'Connected', newState: 'Disconnected' }],
     };
   }
 
@@ -1175,8 +1097,11 @@ export class ConnectedStateHandler {
         return this.handleSessionClosed(state, message);
 
       case 'KeepAliveResponse':
-        // Acknowledge keep-alive, no state change
-        // Note: Timestamp validation (clock drift, RTT) is not required for a reference implementation
+        // TODO: Implement proper KeepAliveResponse handling:
+        // - Validate timestamp is not too far in the past (detect stale responses)
+        // - Track RTT for connection health monitoring
+        // - Consider clock drift detection for distributed systems
+        // For now, we just acknowledge the response without validation
         return { newState: state };
 
       default:
@@ -1227,7 +1152,7 @@ export class ConnectedStateHandler {
         return {
           newState,
           messagesToSend: [ackMsg],
-          eventsToEmit: [{ type: 'serverRequestReceived', request: message }],
+          serverRequests: [message],
         };
       }
 
@@ -1290,13 +1215,7 @@ export class ConnectedStateHandler {
       config: state.config,
     };
 
-    return {
-      newState,
-      eventsToEmit: [
-        { type: 'sessionExpired' },
-        { type: 'stateChange', oldState: 'Connected', newState: 'Disconnected' },
-      ],
-    };
+    return { newState };
   }
 
   /**
@@ -1305,10 +1224,9 @@ export class ConnectedStateHandler {
   private async handleNotLeaderAnymore(state: ConnectedState, leaderId?: MemberId): Promise<StateTransitionResult> {
     // Determine which member to connect to
     let targetMemberId: MemberId;
-    let targetAddress: string | undefined;
 
     if (leaderId) {
-      targetAddress = state.config.clusterMembers.get(leaderId);
+      const targetAddress = state.config.clusterMembers.get(leaderId);
       if (targetAddress) {
         targetMemberId = leaderId;
       } else {
@@ -1318,7 +1236,7 @@ export class ConnectedStateHandler {
         if (!firstMember) {
           throw new Error('No cluster members configured');
         }
-        [targetMemberId, targetAddress] = firstMember;
+        [targetMemberId] = firstMember;
       }
     } else {
       // No leader hint - try first member
@@ -1327,7 +1245,7 @@ export class ConnectedStateHandler {
       if (!firstMember) {
         throw new Error('No cluster members configured');
       }
-      [targetMemberId, targetAddress] = firstMember;
+      [targetMemberId] = firstMember;
     }
 
     // Transition to ConnectingExistingSession
@@ -1341,7 +1259,7 @@ export class ConnectedStateHandler {
       currentMemberId: targetMemberId,
       createdAt: new Date(),
       serverRequestTracker: state.serverRequestTracker,
-      nextRequestId: state.nextRequestId,
+      requestIdCounter: state.requestIdCounter,
       pendingRequests: state.pendingRequests,
       pendingQueries: state.pendingQueries,
     };
@@ -1355,10 +1273,6 @@ export class ConnectedStateHandler {
     return {
       newState,
       messagesToSend: [continueSessionMsg],
-      eventsToEmit: [
-        { type: 'stateChange', oldState: 'Connected', newState: 'ConnectingExistingSession' },
-        { type: 'connectionAttempt', memberId: targetMemberId, address: targetAddress || '' },
-      ],
     };
   }
 
@@ -1375,10 +1289,7 @@ export class ConnectedStateHandler {
       config: state.config,
     };
 
-    return {
-      newState,
-      eventsToEmit: [{ type: 'stateChange', oldState: 'Connected', newState: 'Disconnected' }],
-    };
+    return { newState };
   }
 
   /**
@@ -1404,19 +1315,12 @@ export class ConnectedStateHandler {
     const expiredRequests = state.pendingRequests.resendExpired(now, state.config.requestTimeout);
     const expiredQueries = state.pendingQueries.resendExpired(now, state.config.requestTimeout);
 
-    // Emit timeout events for each expired request
-    const timeoutEvents: ClientEventData[] = [];
-    for (const { requestId } of expiredRequests) {
-      timeoutEvents.push({ type: 'requestTimeout', requestId });
-    }
-
     // Build messages for expired requests and queries
     const messagesToSend = buildResendMessages(expiredRequests, expiredQueries, state.pendingRequests, now);
 
     return {
       newState: state,
       messagesToSend,
-      eventsToEmit: timeoutEvents,
     };
   }
 }

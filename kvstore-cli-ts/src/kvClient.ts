@@ -3,7 +3,14 @@
  * Provides typed API for KVStore operations
  */
 
-import { RaftClient, ZmqTransport } from '@zio-raft/typescript-client';
+import {
+  RaftClient,
+  ZmqTransport,
+  TimeoutError,
+  ConnectionError,
+  ProtocolError,
+  SessionExpiredError,
+} from '@zio-raft/typescript-client';
 import type { MemberId } from '@zio-raft/typescript-client';
 import { encodeSetRequest, encodeGetQuery, encodeWatchRequest, decodeGetResult, decodeNotification } from './codecs.js';
 import { WatchNotification } from './types.js';
@@ -23,9 +30,15 @@ export interface KVClientConfig {
  */
 export class KVClient {
   private readonly raftClient: RaftClient;
+  // Stored separately because RaftClient.config is private and doesn't expose timeout values.
+  // We need these for user-friendly error messages that include timeout durations.
+  private readonly connectionTimeout: number;
+  private readonly requestTimeout: number;
   private isConnected = false;
 
   constructor(config: KVClientConfig) {
+    this.connectionTimeout = config.connectionTimeout ?? 5000;
+    this.requestTimeout = config.requestTimeout ?? 5000;
     // Convert endpoints to RaftClient format with branded MemberId type
     const clusterMembers = new Map<MemberId, string>();
     for (const [memberId, endpoint] of config.endpoints) {
@@ -39,12 +52,23 @@ export class KVClient {
           ['protocol', 'kvstore'],
           ['version', '1.0.0'],
         ]),
-        connectionTimeout: config.connectionTimeout !== undefined ? config.connectionTimeout : 5000,
-        requestTimeout: config.requestTimeout !== undefined ? config.requestTimeout : 5000,
+        connectionTimeout: this.connectionTimeout,
+        requestTimeout: this.requestTimeout,
         keepAliveInterval: 3000,
       },
       new ZmqTransport()
     );
+  }
+
+  /**
+   * Map a caught error to the appropriate OperationError reason
+   */
+  private mapErrorReason(err: unknown): OperationError['reason'] {
+    if (err instanceof TimeoutError) return 'timeout';
+    if (err instanceof ConnectionError) return 'connection';
+    if (err instanceof SessionExpiredError) return 'connection';
+    if (err instanceof ProtocolError) return 'protocol';
+    return 'server_error';
   }
 
   /**
@@ -55,7 +79,9 @@ export class KVClient {
       await this.raftClient.connect();
       this.isConnected = true;
     } catch (err) {
-      throw new OperationError('connect', 'timeout', 'Could not connect to cluster (timeout after 5s)', err);
+      const reason = this.mapErrorReason(err);
+      const timeoutSecs = this.connectionTimeout / 1000;
+      throw new OperationError('connect', reason, `Could not connect to cluster (timeout after ${timeoutSecs}s)`, err);
     }
   }
 
@@ -90,7 +116,9 @@ export class KVClient {
       await this.raftClient.submitCommand(payload);
       // Result is Unit, no decoding needed
     } catch (err) {
-      throw new OperationError('set', 'timeout', 'Operation timed out after 5s', err);
+      const reason = this.mapErrorReason(err);
+      const timeoutSecs = this.requestTimeout / 1000;
+      throw new OperationError('set', reason, `Operation timed out after ${timeoutSecs}s`, err);
     }
   }
 
@@ -104,7 +132,9 @@ export class KVClient {
       const resultBuffer = await this.raftClient.submitQuery(payload);
       return decodeGetResult(resultBuffer);
     } catch (err) {
-      throw new OperationError('get', 'timeout', 'Operation timed out after 5s', err);
+      const reason = this.mapErrorReason(err);
+      const timeoutSecs = this.requestTimeout / 1000;
+      throw new OperationError('get', reason, `Operation timed out after ${timeoutSecs}s`, err);
     }
   }
 
@@ -118,7 +148,9 @@ export class KVClient {
       await this.raftClient.submitCommand(payload);
       // Watch is registered, notifications will arrive via notifications()
     } catch (err) {
-      throw new OperationError('watch', 'timeout', 'Operation timed out after 5s', err);
+      const reason = this.mapErrorReason(err);
+      const timeoutSecs = this.requestTimeout / 1000;
+      throw new OperationError('watch', reason, `Operation timed out after ${timeoutSecs}s`, err);
     }
   }
 

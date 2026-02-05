@@ -63,9 +63,6 @@ describe('Resend Logic After Reconnection', () => {
         // Ignore errors during cleanup
       }
     }
-    if (mockTransport !== null && mockTransport !== undefined) {
-      await mockTransport.disconnect();
-    }
   });
 
   describe('TC-RESEND-001: Command resend after NotLeaderAnymore', () => {

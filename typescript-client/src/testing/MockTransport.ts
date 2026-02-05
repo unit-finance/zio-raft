@@ -94,7 +94,9 @@ export class MockTransport implements ClientTransport {
   }
 
   /**
-   * Disconnect and cleanup resources
+   * Disconnect from current address (like ZmqTransport.disconnect)
+   * Queue stays open - survives across disconnect/connect cycles
+   * This matches ZMQ socket behavior where disconnect() just removes the connection
    */
   async disconnect(): Promise<void> {
     if (!this._connected) {
@@ -109,7 +111,7 @@ export class MockTransport implements ClientTransport {
       this.autoResponseTimeout = null;
     }
 
-    this.incomingMessages.close();
+    // DON'T close queue here - it survives across reconnects like ZMQ socket
   }
 
   /**
@@ -143,9 +145,12 @@ export class MockTransport implements ClientTransport {
   /**
    * Inject a server message into the incoming queue
    * This simulates the server sending a message to the client
-   * Note: MockTransport doesn't enforce connection state for testing convenience
+   * Enforces connection state - messages can't arrive while disconnected (like real transport)
    */
   injectMessage(message: ServerMessage): void {
+    if (!this._connected) {
+      throw new Error('MockTransport: Cannot inject message while disconnected');
+    }
     this.incomingMessages.offer(message);
   }
 

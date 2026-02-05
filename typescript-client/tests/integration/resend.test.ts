@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { RaftClient } from '../../src/client';
 import { MockTransport } from '../../src/testing/MockTransport';
-import { MemberId } from '../../src/types';
+import { MemberId, SessionId } from '../../src/types';
 import {
   sessionCreatedFor,
   sessionClosedDueTo,
@@ -63,9 +63,6 @@ describe('Resend Logic After Reconnection', () => {
         // Ignore errors during cleanup
       }
     }
-    if (mockTransport !== null && mockTransport !== undefined) {
-      mockTransport.closeQueues();
-    }
   });
 
   describe('TC-RESEND-001: Command resend after NotLeaderAnymore', () => {
@@ -80,7 +77,9 @@ describe('Resend Logic After Reconnection', () => {
       );
 
       const createSessionMsgs = mockTransport.getSentMessagesOfType('CreateSession');
-      mockTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-001'));
+      mockTransport.injectMessage(
+        sessionCreatedFor(createSessionMsgs[0].nonce, SessionId.fromString('test-session-001'))
+      );
 
       await connectPromise;
 
@@ -150,7 +149,9 @@ describe('Resend Logic After Reconnection', () => {
       );
 
       const createSessionMsgs = mockTransport.getSentMessagesOfType('CreateSession');
-      mockTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-002'));
+      mockTransport.injectMessage(
+        sessionCreatedFor(createSessionMsgs[0].nonce, SessionId.fromString('test-session-002'))
+      );
 
       await connectPromise;
 
@@ -231,7 +232,9 @@ describe('Resend Logic After Reconnection', () => {
         await waitForCondition(() => shortTimeoutTransport.getSentMessagesOfType('CreateSession').length > 0, 1000);
 
         const createSessionMsgs = shortTimeoutTransport.getSentMessagesOfType('CreateSession');
-        shortTimeoutTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-003'));
+        shortTimeoutTransport.injectMessage(
+          sessionCreatedFor(createSessionMsgs[0].nonce, SessionId.fromString('test-session-003'))
+        );
 
         await connectPromise;
 
@@ -272,7 +275,6 @@ describe('Resend Logic After Reconnection', () => {
         } catch {
           // Ignore disconnect errors during cleanup
         }
-        shortTimeoutTransport.closeQueues();
       }
     });
   });
@@ -285,7 +287,9 @@ describe('Resend Logic After Reconnection', () => {
       await waitForCondition(() => mockTransport.getSentMessagesOfType('CreateSession').length > 0, 1000);
 
       const createSessionMsgs = mockTransport.getSentMessagesOfType('CreateSession');
-      mockTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-004'));
+      mockTransport.injectMessage(
+        sessionCreatedFor(createSessionMsgs[0].nonce, SessionId.fromString('test-session-004'))
+      );
 
       await connectPromise;
 
@@ -356,7 +360,9 @@ describe('Resend Logic After Reconnection', () => {
       );
 
       const createSessionMsgs = mockTransport.getSentMessagesOfType('CreateSession');
-      mockTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-005'));
+      mockTransport.injectMessage(
+        sessionCreatedFor(createSessionMsgs[0].nonce, SessionId.fromString('test-session-005'))
+      );
 
       await connectPromise;
 
@@ -426,7 +432,9 @@ describe('Resend Logic After Reconnection', () => {
         await waitForCondition(() => multiNodeTransport.getSentMessagesOfType('CreateSession').length > 0, 1000);
 
         const createSessionMsgs = multiNodeTransport.getSentMessagesOfType('CreateSession');
-        multiNodeTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-006'));
+        multiNodeTransport.injectMessage(
+          sessionCreatedFor(createSessionMsgs[0].nonce, SessionId.fromString('test-session-006'))
+        );
 
         await connectPromise;
 
@@ -476,7 +484,6 @@ describe('Resend Logic After Reconnection', () => {
         } catch {
           // Ignore
         }
-        multiNodeTransport.closeQueues();
       }
     });
   });
@@ -490,7 +497,9 @@ describe('Resend Logic After Reconnection', () => {
       await waitForCondition(() => mockTransport.getSentMessagesOfType('CreateSession').length > 0, 1000);
 
       const createSessionMsgs = mockTransport.getSentMessagesOfType('CreateSession');
-      mockTransport.injectMessage(sessionCreatedFor(createSessionMsgs[0].nonce, 'test-session-007'));
+      mockTransport.injectMessage(
+        sessionCreatedFor(createSessionMsgs[0].nonce, SessionId.fromString('test-session-007'))
+      );
 
       await connectPromise;
 

@@ -18,6 +18,7 @@ export async function* mergeStreams<T>(...iterables: AsyncIterable<T>[]): AsyncI
   for (let i = 0; i < iterators.length; i++) {
     pending.set(
       i,
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       iterators[i]!.next().then((result) => ({ index: i, result }))
     );
   }
@@ -36,6 +37,7 @@ export async function* mergeStreams<T>(...iterables: AsyncIterable<T>[]): AsyncI
       // Queue the next value from this iterator
       pending.set(
         index,
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         iterators[index]!.next().then((r) => ({ index, result: r }))
       );
     }

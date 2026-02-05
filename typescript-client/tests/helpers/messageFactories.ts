@@ -20,6 +20,7 @@ import {
   ClientResponse,
   QueryResponse,
   ServerRequest,
+  SessionCloseReason,
 } from '../../src/protocol/messages';
 import { SessionId, RequestId, CorrelationId, Nonce, MemberId } from '../../src/types';
 
@@ -54,10 +55,7 @@ export function sessionCreatedFor(nonce: Nonce, sessionId?: SessionId): SessionC
  * @example
  * transport.injectMessage(sessionClosedDueTo('NotLeaderAnymore', MemberId.fromString('node2')));
  */
-export function sessionClosedDueTo(
-  reason: 'NotLeaderAnymore' | 'ServerShuttingDown' | 'Unknown',
-  leaderId?: MemberId
-): SessionClosed {
+export function sessionClosedDueTo(reason: SessionCloseReason, leaderId?: MemberId): SessionClosed {
   return {
     type: 'SessionClosed',
     reason,
@@ -163,42 +161,3 @@ export function serverRequestWith(requestId: RequestId, payload: Buffer, created
     createdAt: createdAt ?? new Date(),
   };
 }
-
-// =============================================================================
-// Convenience Aliases (for readability)
-// =============================================================================
-
-/**
- * Short alias for sessionCreatedFor
- */
-export const sessionCreated = sessionCreatedFor;
-
-/**
- * Short alias for sessionClosedDueTo
- */
-export const sessionClosed = sessionClosedDueTo;
-
-/**
- * Short alias for sessionContinuedFor
- */
-export const sessionContinued = sessionContinuedFor;
-
-/**
- * Short alias for sessionRejectedWith
- */
-export const sessionRejected = sessionRejectedWith;
-
-/**
- * Short alias for clientResponseFor
- */
-export const clientResponse = clientResponseFor;
-
-/**
- * Short alias for queryResponseFor
- */
-export const queryResponse = queryResponseFor;
-
-/**
- * Short alias for serverRequestWith
- */
-export const serverRequest = serverRequestWith;

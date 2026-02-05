@@ -3,11 +3,9 @@
  *
  * This test verifies that RaftClient properly receives and delivers
  * ServerRequest messages from the server to user handlers.
- *
- * Expected to FAIL initially due to missing queue population in emitClientEvent()
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { RaftClient } from '../../src/client';
 import { MockTransport } from '../../src/testing/MockTransport';
 import { RequestId, MemberId } from '../../src/types';
@@ -15,28 +13,16 @@ import { ServerRequest } from '../../src/protocol/messages';
 import { serverRequestWith } from '../helpers/messageFactories';
 
 describe('Server-Initiated Requests Integration', () => {
-  let client: RaftClient;
-  let mockTransport: MockTransport;
-
-  beforeEach(() => {
-    // Create mock transport
-    mockTransport = new MockTransport();
-
-    // Create RaftClient with injected transport
-    client = new RaftClient(
+  it('should receive ServerRequest via async iterable', async () => {
+    const mockTransport = new MockTransport();
+    const client = new RaftClient(
       {
         clusterMembers: new Map([[MemberId.fromString('node1'), 'tcp://localhost:5555']]),
         capabilities: new Map([['test', '1.0']]),
       },
       mockTransport
     );
-  });
 
-  afterEach(async () => {
-    await client.disconnect();
-  });
-
-  it('should receive ServerRequest via async iterable', async () => {
     await client.connect();
 
     const receivedRequests: ServerRequest[] = [];
@@ -59,11 +45,22 @@ describe('Server-Initiated Requests Integration', () => {
     ]);
 
     expect(receivedRequests).toHaveLength(1);
-    expect(receivedRequests[0].requestId).toBe(RequestId.fromBigInt(1n));
+    expect(receivedRequests[0].requestId).toEqual(RequestId.fromBigInt(1n));
     expect(receivedRequests[0].payload.toString()).toBe('test-work-item');
+
+    await client.disconnect();
   }, 15000);
 
   it('should handle multiple ServerRequest messages', async () => {
+    const mockTransport = new MockTransport();
+    const client = new RaftClient(
+      {
+        clusterMembers: new Map([[MemberId.fromString('node1'), 'tcp://localhost:5555']]),
+        capabilities: new Map([['test', '1.0']]),
+      },
+      mockTransport
+    );
+
     await client.connect();
 
     const receivedRequests: ServerRequest[] = [];
@@ -92,5 +89,8 @@ describe('Server-Initiated Requests Integration', () => {
       RequestId.fromBigInt(2n),
       RequestId.fromBigInt(3n),
     ]);
+    expect(receivedRequests.map((r) => r.payload.toString())).toEqual(['work-1', 'work-2', 'work-3']);
+
+    await client.disconnect();
   }, 15000);
 });

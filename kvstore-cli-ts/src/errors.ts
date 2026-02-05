@@ -15,7 +15,6 @@ export class ValidationError extends Error {
     public readonly expected?: string | number
   ) {
     super(message);
-    Object.setPrototypeOf(this, ValidationError.prototype);
   }
 }
 
@@ -32,7 +31,6 @@ export class OperationError extends Error {
     public readonly details?: unknown
   ) {
     super(message);
-    Object.setPrototypeOf(this, OperationError.prototype);
   }
 }
 
@@ -47,6 +45,5 @@ export class ProtocolError extends Error {
     public readonly details?: unknown
   ) {
     super(message);
-    Object.setPrototypeOf(this, ProtocolError.prototype);
   }
 }

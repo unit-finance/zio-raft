@@ -15,12 +15,12 @@ export class ZmqTransport implements ClientTransport {
 
   constructor() {
     // Create CLIENT socket (draft) to communicate with SERVER socket
-    // Configuration matching maitred's approach
+    // Configuration matching Scala ClientTransport: setHeartbeat(1.seconds, 10.second, 30.second)
     this.socket = new ZmqClient({
       linger: 0,
-      heartbeatInterval: 100,
-      heartbeatTimeToLive: 1000,
-      heartbeatTimeout: 1000,
+      heartbeatInterval: 1000, // ZMQ_HEARTBEAT_IVL: 1 second
+      heartbeatTimeout: 10000, // ZMQ_HEARTBEAT_TIMEOUT: 10 seconds
+      heartbeatTimeToLive: 30000, // ZMQ_HEARTBEAT_TTL: 30 seconds
     });
   }
 
@@ -98,8 +98,8 @@ export class ZmqTransport implements ClientTransport {
           const message = decodeServerMessage(buffer as Buffer);
           yield message;
         } catch (error) {
-          // Log decode error but continue receiving
-          // In production, this would emit an error event
+          console.error('[ZmqTransport] Failed to decode server message:', error);
+          // Continue receiving despite decode errors
         }
       }
     } catch (error) {

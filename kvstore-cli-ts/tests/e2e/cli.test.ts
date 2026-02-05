@@ -129,18 +129,6 @@ async function runCliExpectSuccess(...args: string[]): Promise<string> {
 }
 
 /**
- * Run CLI command expecting failure (exit code != 0)
- * Throws if command succeeds.
- */
-async function _runCliExpectError(...args: string[]): Promise<CliResult> {
-  const result = await runCli(...args);
-  if (result.exitCode === 0) {
-    throw new Error(`Expected CLI to fail, but it succeeded: ${result.stdout}`);
-  }
-  return result;
-}
-
-/**
  * Start a watch process in background
  *
  * @param key - Key to watch
@@ -304,10 +292,9 @@ describe('Basic Operations', () => {
    */
   it('should set a key-value pair', async () => {
     const key = uniqueKey('test_set');
-    const result = await runCli('set', key, 'testvalue');
+    const output = await runCliExpectSuccess('set', key, 'testvalue');
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain('OK');
+    expect(output).toContain('OK');
   });
 
   /**
@@ -318,10 +305,9 @@ describe('Basic Operations', () => {
     const key = uniqueKey('test_get');
     await runCliExpectSuccess('set', key, 'myvalue');
 
-    const result = await runCli('get', key);
+    const output = await runCliExpectSuccess('get', key);
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain(`${key} = myvalue`);
+    expect(output).toContain(`${key} = myvalue`);
   });
 
   /**
@@ -330,10 +316,9 @@ describe('Basic Operations', () => {
    */
   it('should return <none> for non-existent key', async () => {
     const key = uniqueKey('nonexistent');
-    const result = await runCli('get', key);
+    const output = await runCliExpectSuccess('get', key);
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain('<none>');
+    expect(output).toContain('<none>');
   });
 
   /**
@@ -571,5 +556,10 @@ describe('Watch Functionality', () => {
 
     // Should have received all 5 notifications
     expect(notifications.length).toBeGreaterThanOrEqual(5);
+
+    // Verify all values are present in the output
+    for (let i = 1; i <= 5; i++) {
+      expect(output.some((l) => l.includes(`rapid_${i}`))).toBe(true);
+    }
   });
 });

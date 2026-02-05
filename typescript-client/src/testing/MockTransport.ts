@@ -67,6 +67,11 @@ export class MockTransport implements ClientTransport {
   private _connected = true;
 
   /**
+   * Track pending auto-response timeout for cleanup
+   */
+  private autoResponseTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  /**
    * Auto-respond to CreateSession with SessionCreated
    * Set to false to manually control session creation in tests
    */
@@ -89,35 +94,41 @@ export class MockTransport implements ClientTransport {
   }
 
   /**
-   * Disconnect (mock - just sets flag)
-   * Note: Does NOT close the incoming message queue to support reconnection testing.
-   * Call closeQueues() explicitly for full cleanup.
+   * Disconnect from current address (like ZmqTransport.disconnect)
+   * Queue stays open - survives across disconnect/connect cycles
+   * This matches ZMQ socket behavior where disconnect() just removes the connection
    */
   async disconnect(): Promise<void> {
-    this._connected = false;
-    // Note: We intentionally don't close incomingMessages here to support
-    // reconnection scenarios in tests. The queue can still receive messages
-    // after "disconnect" for simulating server-side events during reconnection.
-  }
+    if (!this._connected) {
+      return; // Already disconnected
+    }
 
-  /**
-   * Close all queues - call this for final cleanup
-   */
-  closeQueues(): void {
-    this.incomingMessages.close();
+    this._connected = false;
+
+    // Clean up pending timeout
+    if (this.autoResponseTimeout !== null) {
+      clearTimeout(this.autoResponseTimeout);
+      this.autoResponseTimeout = null;
+    }
+
+    // DON'T close queue here - it survives across reconnects like ZMQ socket
   }
 
   /**
    * Send message (mock - records and optionally auto-responds)
-   * Note: MockTransport doesn't enforce connection state for testing convenience
    */
   async sendMessage(message: ClientMessage): Promise<void> {
+    if (!this._connected) {
+      throw new Error('MockTransport: Cannot send message while disconnected');
+    }
+
     // Record for assertions
     this.sentMessages.push(message);
 
     // Auto-respond to CreateSession for convenience
     if (this.autoRespondToCreateSession && message.type === 'CreateSession') {
-      setTimeout(() => {
+      this.autoResponseTimeout = setTimeout(() => {
+        this.autoResponseTimeout = null;
         this.incomingMessages.offer({
           type: 'SessionCreated',
           sessionId: SessionId.fromString(`mock-session-${Date.now()}`),
@@ -134,9 +145,12 @@ export class MockTransport implements ClientTransport {
   /**
    * Inject a server message into the incoming queue
    * This simulates the server sending a message to the client
-   * Note: MockTransport doesn't enforce connection state for testing convenience
+   * Enforces connection state - messages can't arrive while disconnected (like real transport)
    */
   injectMessage(message: ServerMessage): void {
+    if (!this._connected) {
+      throw new Error('MockTransport: Cannot inject message while disconnected');
+    }
     this.incomingMessages.offer(message);
   }
 
@@ -167,27 +181,5 @@ export class MockTransport implements ClientTransport {
    */
   isConnected(): boolean {
     return this._connected;
-  }
-
-  /**
-   * Wait for a specific message type to be sent
-   * Useful for async assertions
-   */
-  async waitForMessageType<T extends ClientMessage['type']>(
-    type: T,
-    timeoutMs = 1000
-  ): Promise<Extract<ClientMessage, { type: T }>> {
-    type MatchingMessage = Extract<ClientMessage, { type: T }>;
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < timeoutMs) {
-      const message = this.sentMessages.find((m): m is MatchingMessage => m.type === type);
-      if (message !== undefined) {
-        return message;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-
-    throw new Error(`MockTransport: No message of type '${type}' sent within ${timeoutMs}ms`);
   }
 }

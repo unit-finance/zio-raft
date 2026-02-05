@@ -45,6 +45,9 @@ export function encodeString8(str: string): Buffer {
  */
 export function encodeString(str: string): Buffer {
   const utf8 = Buffer.from(str, 'utf8');
+  if (utf8.length > 65535) {
+    throw new Error(`String too long for uint16 length prefix: ${utf8.length} bytes`);
+  }
   const length = Buffer.allocUnsafe(2);
   length.writeUInt16BE(utf8.length, 0);
   return Buffer.concat([length, utf8]);
@@ -54,6 +57,9 @@ export function encodeString(str: string): Buffer {
  * Encode a payload (Buffer) with int32 length prefix
  */
 export function encodePayload(payload: Buffer): Buffer {
+  if (payload.length > 2147483647) {
+    throw new Error(`Payload too large for int32 length prefix: ${payload.length} bytes`);
+  }
   const length = Buffer.allocUnsafe(4);
   length.writeInt32BE(payload.length, 0);
   return Buffer.concat([length, payload]);
@@ -135,6 +141,25 @@ export interface DecodeResult<T> {
 }
 
 /**
+ * Validate buffer has enough bytes for reading.
+ * Throws an error if buffer underflow would occur.
+ * @param buffer - The buffer to validate
+ * @param offset - Current read offset
+ * @param bytesNeeded - Number of bytes needed for the read operation
+ * @param context - Description of what is being decoded (for error messages)
+ */
+function validateBounds(buffer: Buffer, offset: number, bytesNeeded: number, context: string): void {
+  if (offset < 0) {
+    throw new Error(`Invalid offset ${offset} when decoding ${context}`);
+  }
+  if (offset + bytesNeeded > buffer.length) {
+    throw new Error(
+      `Buffer underflow when decoding ${context}: need ${bytesNeeded} bytes at offset ${offset}, but buffer has ${buffer.length} bytes`
+    );
+  }
+}
+
+/**
  * Decode optional field with bit-level boolean (scodec's optional(bool, codec))
  *
  * Scala's scodec encodes optional(bool, codec) as:
@@ -181,14 +206,23 @@ export interface DecodeResult<T> {
  *   ... (6 string bytes, each straddling 2 buffer bytes)
  *
  * Implementation Strategy:
- * We use direct bit-math rather than buffer reconstruction for efficiency:
+ * Uses Uint8Array view for direct byte access (faster than Buffer.readUInt8):
  * - Alternative approach: Shift entire buffer left by 1 bit, then reuse decodeMemberId()
  * - Problem: Requires allocating new buffer and shifting ALL remaining bytes
- * - This approach: Only read the exact bytes we need (2-3 for uint16, length for string)
- * - Trade-off: Duplicates uint16+UTF-8 decoding logic, but significantly more efficient
+ * - This approach: Direct Uint8Array indexing for the bytes we need
+ * - Trade-off: Duplicates uint16+UTF-8 decoding logic, but avoids allocation overhead
  */
 function decodeOptionalMemberId(buffer: Buffer, offset: number): DecodeResult<MemberId | undefined> {
-  const firstByte = buffer.readUInt8(offset);
+  // Validate we have at least 1 byte for presence flag
+  validateBounds(buffer, offset, 1, 'optional MemberId presence');
+
+  // Tested via: SessionRejected (Some), SessionRejectedNoLeader (None), SessionClosed (Some)
+  // in tests/unit/protocol/compatibility.test.ts
+
+  // Use Uint8Array view for faster direct byte access
+  const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset + offset, buffer.length - offset);
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const firstByte = bytes[0]!; // we validatedBounds above we know we have at least 1 byte
 
   // Check MSB (bit 0) for presence
   const hasValue = (firstByte & 0x80) !== 0;
@@ -201,14 +235,24 @@ function decodeOptionalMemberId(buffer: Buffer, offset: number): DecodeResult<Me
     };
   }
 
+  // Validate we have at least 3 bytes for presence + uint16 length
+  validateBounds(buffer, offset, 3, 'optional MemberId length');
+
   // Some case: read uint16 starting at bit 1
   // Extract uint16 from bits 1-16 (spans bytes 0-2)
   const byte0 = firstByte & 0x7f; // bits 1-7 of uint16
-  const byte1 = buffer.readUInt8(offset + 1); // bits 8-15 of uint16
-  const byte2 = buffer.readUInt8(offset + 2); // bit 16 of uint16 (MSB)
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const byte1 = bytes[1]!; // bits 8-15 of uint16 (validated by validateBounds above)
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const byte2 = bytes[2]!; // bit 16 of uint16 (MSB) (validated by validateBounds above)
 
   // Reconstruct uint16 from bit-shifted pieces
   const length = (byte0 << 9) | (byte1 << 1) | (byte2 >> 7);
+
+  // Calculate total bytes needed and validate
+  const totalBits = 1 + 16 + length * 8;
+  const bytesConsumed = Math.ceil(totalBits / 8);
+  validateBounds(buffer, offset, bytesConsumed, `optional MemberId string (length=${length})`);
 
   // Read string bytes starting at bit 17
   // Each character byte straddles two buffer bytes due to 1-bit shift
@@ -219,8 +263,11 @@ function decodeOptionalMemberId(buffer: Buffer, offset: number): DecodeResult<Me
     const byteIndex = Math.floor(bitOffset / 8);
     const bitInByte = bitOffset % 8;
 
-    const currentByte = buffer.readUInt8(offset + byteIndex);
-    const nextByte = buffer.readUInt8(offset + byteIndex + 1);
+    // Bounds validated by validateBounds above for bytesConsumed
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const currentByte = bytes[byteIndex]!;
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const nextByte = bytes[byteIndex + 1]!;
 
     // Extract 8 bits starting at bitOffset
     stringBytes[i] = (currentByte << bitInByte) | (nextByte >> (8 - bitInByte));
@@ -228,10 +275,6 @@ function decodeOptionalMemberId(buffer: Buffer, offset: number): DecodeResult<Me
   }
 
   const memberId = MemberId.fromString(stringBytes.toString('utf8'));
-
-  // Calculate bytes consumed: 1 bit + 16 bits + (length * 8) bits
-  const totalBits = 1 + 16 + length * 8;
-  const bytesConsumed = Math.ceil(totalBits / 8);
 
   return {
     value: memberId,
@@ -244,7 +287,9 @@ function decodeOptionalMemberId(buffer: Buffer, offset: number): DecodeResult<Me
  * Matches Scala's variableSizeBytes(uint8, utf8)
  */
 export function decodeString8(buffer: Buffer, offset: number): DecodeResult<string> {
+  validateBounds(buffer, offset, 1, 'string8 length');
   const length = buffer.readUInt8(offset);
+  validateBounds(buffer, offset + 1, length, `string8 content (length=${length})`);
   const value = buffer.toString('utf8', offset + 1, offset + 1 + length);
   return { value, newOffset: offset + 1 + length };
 }
@@ -254,7 +299,9 @@ export function decodeString8(buffer: Buffer, offset: number): DecodeResult<stri
  * Matches Scala's variableSizeBytes(uint16, utf8)
  */
 export function decodeString(buffer: Buffer, offset: number): DecodeResult<string> {
+  validateBounds(buffer, offset, 2, 'string length');
   const length = buffer.readUInt16BE(offset);
+  validateBounds(buffer, offset + 2, length, `string content (length=${length})`);
   const value = buffer.toString('utf8', offset + 2, offset + 2 + length);
   return { value, newOffset: offset + 2 + length };
 }
@@ -263,7 +310,12 @@ export function decodeString(buffer: Buffer, offset: number): DecodeResult<strin
  * Decode a payload (Buffer) with int32 length prefix
  */
 export function decodePayload(buffer: Buffer, offset: number): DecodeResult<Buffer> {
+  validateBounds(buffer, offset, 4, 'payload length');
   const length = buffer.readInt32BE(offset);
+  if (length < 0) {
+    throw new Error(`Invalid negative payload length: ${length}`);
+  }
+  validateBounds(buffer, offset + 4, length, `payload content (length=${length})`);
   const value = buffer.slice(offset + 4, offset + 4 + length);
   return { value, newOffset: offset + 4 + length };
 }
@@ -272,6 +324,7 @@ export function decodePayload(buffer: Buffer, offset: number): DecodeResult<Buff
  * Decode a Map<string, string> with uint16 count prefix
  */
 export function decodeMap(buffer: Buffer, offset: number): DecodeResult<Map<string, string>> {
+  validateBounds(buffer, offset, 2, 'map count');
   const count = buffer.readUInt16BE(offset);
   let currentOffset = offset + 2;
   const map = new Map<string, string>();
@@ -293,6 +346,7 @@ export function decodeMap(buffer: Buffer, offset: number): DecodeResult<Map<stri
  * Decode a Date from int64 epoch milliseconds
  */
 export function decodeTimestamp(buffer: Buffer, offset: number): DecodeResult<Date> {
+  validateBounds(buffer, offset, 8, 'timestamp');
   const millis = buffer.readBigInt64BE(offset);
   const value = new Date(Number(millis));
   return { value, newOffset: offset + 8 };
@@ -302,6 +356,7 @@ export function decodeTimestamp(buffer: Buffer, offset: number): DecodeResult<Da
  * Decode a Nonce from 8 bytes (bigint)
  */
 export function decodeNonce(buffer: Buffer, offset: number): DecodeResult<Nonce> {
+  validateBounds(buffer, offset, 8, 'nonce');
   const bigintValue = buffer.readBigInt64BE(offset);
   const value = Nonce.fromBigInt(bigintValue);
   return { value, newOffset: offset + 8 };
@@ -311,6 +366,7 @@ export function decodeNonce(buffer: Buffer, offset: number): DecodeResult<Nonce>
  * Decode a RequestId from 8 bytes (bigint)
  */
 export function decodeRequestId(buffer: Buffer, offset: number): DecodeResult<RequestId> {
+  validateBounds(buffer, offset, 8, 'requestId');
   const bigintValue = buffer.readBigInt64BE(offset);
   const value = RequestId.fromBigInt(bigintValue);
   return { value, newOffset: offset + 8 };
@@ -359,6 +415,9 @@ export function encodeProtocolHeader(): Buffer {
  * @throws Error if signature doesn't match or version != 1
  */
 export function decodeProtocolHeader(buffer: Buffer, offset: number): number {
+  // Validate buffer has enough bytes for signature + version
+  validateBounds(buffer, offset, 6, 'protocol header');
+
   // Verify signature (5 bytes)
   for (let i = 0; i < PROTOCOL_SIGNATURE.length; i++) {
     if (buffer[offset + i] !== PROTOCOL_SIGNATURE[i]) {
@@ -402,6 +461,7 @@ export function encodeRejectionReason(reason: RejectionReason): Buffer {
 }
 
 function decodeRejectionReason(buffer: Buffer, offset: number): DecodeResult<RejectionReason> {
+  validateBounds(buffer, offset, 1, 'rejection reason');
   const code = buffer.readUInt8(offset);
   let value: RejectionReason;
   switch (code) {
@@ -447,6 +507,7 @@ export function encodeSessionCloseReason(reason: SessionCloseReason): Buffer {
 }
 
 function decodeSessionCloseReason(buffer: Buffer, offset: number): DecodeResult<SessionCloseReason> {
+  validateBounds(buffer, offset, 1, 'session close reason');
   const code = buffer.readUInt8(offset);
   let value: SessionCloseReason;
   switch (code) {
@@ -486,6 +547,7 @@ export function encodeRequestErrorReason(_reason: RequestErrorReason): Buffer {
 }
 
 function decodeRequestErrorReason(buffer: Buffer, offset: number): DecodeResult<RequestErrorReason> {
+  validateBounds(buffer, offset, 1, 'request error reason');
   const code = buffer.readUInt8(offset);
   if (code !== RequestErrorReasonCode.ResponseEvicted) {
     throw new Error(`Unknown request error reason code: ${code}`);
@@ -579,6 +641,7 @@ export function decodeServerMessage(buffer: Buffer): ServerMessage {
   offset = decodeProtocolHeader(buffer, offset);
 
   // Read message type discriminator
+  validateBounds(buffer, offset, 1, 'message type');
   const messageType = buffer.readUInt8(offset);
   offset += 1;
 

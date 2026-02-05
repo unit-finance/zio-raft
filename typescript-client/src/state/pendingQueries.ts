@@ -1,57 +1,77 @@
 // Pending queries tracker for managing in-flight read-only queries
+// Uses immutable pattern - methods return new instances instead of mutating
 
 import { CorrelationId } from '../types';
 
 /**
- * Data for a pending query
+ * Data for a pending query (immutable)
  */
 export interface PendingQueryData {
   readonly payload: Buffer;
   readonly resolve: (result: Buffer) => void;
   readonly reject: (error: Error) => void;
   readonly createdAt: Date;
-  lastSentAt: Date; // Mutable for resend tracking
+  readonly lastSentAt: Date;
 }
 
 /**
- * Tracker for pending queries (read-only operations)
+ * Result of resend operations - includes new instance and items to resend
+ */
+export interface QueryResendResult {
+  readonly queries: PendingQueries;
+  readonly toResend: ReadonlyArray<{ correlationId: CorrelationId; payload: Buffer }>;
+}
+
+/**
+ * Immutable tracker for pending queries (read-only operations)
+ * All mutating methods return a new PendingQueries instance
  */
 export class PendingQueries {
-  private readonly queries: Map<CorrelationId, PendingQueryData> = new Map();
+  private readonly queries: ReadonlyMap<CorrelationId, PendingQueryData>;
 
-  /**
-   * Add a new pending query
-   */
-  add(correlationId: CorrelationId, data: PendingQueryData): void {
-    this.queries.set(correlationId, data);
+  constructor(queries: ReadonlyMap<CorrelationId, PendingQueryData> = new Map()) {
+    this.queries = queries;
   }
 
   /**
-   * Complete a pending query with success
+   * Add a new pending query - returns new instance
    */
-  complete(correlationId: CorrelationId, result: Buffer): boolean {
+  add(correlationId: CorrelationId, data: PendingQueryData): PendingQueries {
+    const newMap = new Map(this.queries);
+    newMap.set(correlationId, data);
+    return new PendingQueries(newMap);
+  }
+
+  /**
+   * Complete a pending query with success - returns new instance
+   * Calls resolve callback if query exists
+   */
+  complete(correlationId: CorrelationId, result: Buffer): PendingQueries {
     const data = this.queries.get(correlationId);
     if (data === undefined) {
-      return false;
+      return this;
     }
 
-    this.queries.delete(correlationId);
+    const newMap = new Map(this.queries);
+    newMap.delete(correlationId);
     data.resolve(result);
-    return true;
+    return new PendingQueries(newMap);
   }
 
   /**
-   * Fail a pending query with error
+   * Fail a pending query with error - returns new instance
+   * Calls reject callback if query exists
    */
-  fail(correlationId: CorrelationId, error: Error): boolean {
+  fail(correlationId: CorrelationId, error: Error): PendingQueries {
     const data = this.queries.get(correlationId);
     if (data === undefined) {
-      return false;
+      return this;
     }
 
-    this.queries.delete(correlationId);
+    const newMap = new Map(this.queries);
+    newMap.delete(correlationId);
     data.reject(error);
-    return true;
+    return new PendingQueries(newMap);
   }
 
   /**
@@ -69,44 +89,65 @@ export class PendingQueries {
   }
 
   /**
-   * Resend all pending queries (returns payload and correlation ID pairs)
+   * Resend all pending queries - returns new instance with updated lastSentAt
    */
-  resendAll(currentTime: Date): Array<{ correlationId: CorrelationId; payload: Buffer }> {
+  resendAll(currentTime: Date): QueryResendResult {
     const toResend: Array<{ correlationId: CorrelationId; payload: Buffer }> = [];
+    const newMap = new Map<CorrelationId, PendingQueryData>();
 
     for (const [correlationId, data] of this.queries) {
-      data.lastSentAt = currentTime;
+      // Create new data with updated lastSentAt
+      const updatedData: PendingQueryData = {
+        ...data,
+        lastSentAt: currentTime,
+      };
+      newMap.set(correlationId, updatedData);
       toResend.push({ correlationId, payload: data.payload });
     }
 
-    return toResend;
+    return {
+      queries: new PendingQueries(newMap),
+      toResend,
+    };
   }
 
   /**
-   * Resend expired queries (where lastSentAt + timeout < current time)
+   * Resend expired queries - returns new instance with updated lastSentAt for expired items
    */
-  resendExpired(currentTime: Date, timeoutMs: number): Array<{ correlationId: CorrelationId; payload: Buffer }> {
+  resendExpired(currentTime: Date, timeoutMs: number): QueryResendResult {
     const toResend: Array<{ correlationId: CorrelationId; payload: Buffer }> = [];
+    const newMap = new Map<CorrelationId, PendingQueryData>();
 
     for (const [correlationId, data] of this.queries) {
       const elapsed = currentTime.getTime() - data.lastSentAt.getTime();
       if (elapsed >= timeoutMs) {
-        data.lastSentAt = currentTime;
+        // Create new data with updated lastSentAt
+        const updatedData: PendingQueryData = {
+          ...data,
+          lastSentAt: currentTime,
+        };
+        newMap.set(correlationId, updatedData);
         toResend.push({ correlationId, payload: data.payload });
+      } else {
+        // Keep existing data
+        newMap.set(correlationId, data);
       }
     }
 
-    return toResend;
+    return {
+      queries: new PendingQueries(newMap),
+      toResend,
+    };
   }
 
   /**
-   * Fail all pending queries (used on session termination)
+   * Fail all pending queries - calls reject on all, returns empty instance
    */
-  failAll(error: Error): void {
-    for (const [_correlationId, data] of this.queries) {
+  failAll(error: Error): PendingQueries {
+    for (const [, data] of this.queries) {
       data.reject(error);
     }
-    this.queries.clear();
+    return new PendingQueries();
   }
 
   /**
@@ -117,9 +158,9 @@ export class PendingQueries {
   }
 
   /**
-   * Clear all pending queries without failing them (for testing)
+   * Clear all pending queries without failing them - returns empty instance
    */
-  clear(): void {
-    this.queries.clear();
+  clear(): PendingQueries {
+    return new PendingQueries();
   }
 }

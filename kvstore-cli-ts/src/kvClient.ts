@@ -80,8 +80,7 @@ export class KVClient {
       this.isConnected = true;
     } catch (err) {
       const reason = this.mapErrorReason(err);
-      const timeoutSecs = this.connectionTimeout / 1000;
-      throw new OperationError('connect', reason, `Could not connect to cluster (timeout after ${timeoutSecs}s)`, err);
+      throw new OperationError('connect', reason, `Could not connect to cluster (reason=${reason})`, err);
     }
   }
 
@@ -117,8 +116,7 @@ export class KVClient {
       // Result is Unit, no decoding needed
     } catch (err) {
       const reason = this.mapErrorReason(err);
-      const timeoutSecs = this.requestTimeout / 1000;
-      throw new OperationError('set', reason, `Operation timed out after ${timeoutSecs}s`, err);
+      throw new OperationError('set', reason, `Set operation failed (reason=${reason})`, err);
     }
   }
 
@@ -133,8 +131,7 @@ export class KVClient {
       return decodeGetResult(resultBuffer);
     } catch (err) {
       const reason = this.mapErrorReason(err);
-      const timeoutSecs = this.requestTimeout / 1000;
-      throw new OperationError('get', reason, `Operation timed out after ${timeoutSecs}s`, err);
+      throw new OperationError('get', reason, `Get operation failed (reason=${reason})`, err);
     }
   }
 
@@ -149,8 +146,7 @@ export class KVClient {
       // Watch is registered, notifications will arrive via notifications()
     } catch (err) {
       const reason = this.mapErrorReason(err);
-      const timeoutSecs = this.requestTimeout / 1000;
-      throw new OperationError('watch', reason, `Operation timed out after ${timeoutSecs}s`, err);
+      throw new OperationError('watch', reason, `Watch operation failed (reason=${reason})`, err);
     }
   }
 

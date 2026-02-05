@@ -45,6 +45,3 @@ export { ZmqTransport } from './transport/zmqTransport';
 
 // Testing utilities
 export { MockTransport } from './testing/MockTransport';
-
-// Event types
-export type { ConnectionEvent } from './events/eventTypes';

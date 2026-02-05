@@ -239,8 +239,8 @@ function decodeOptionalMemberId(buffer: Buffer, offset: number): DecodeResult<Me
   // Some case: read uint16 starting at bit 1
   // Extract uint16 from bits 1-16 (spans bytes 0-2)
   const byte0 = firstByte & 0x7f; // bits 1-7 of uint16
-  const byte1 = bytes[1]; // bits 8-15 of uint16
-  const byte2 = bytes[2]; // bit 16 of uint16 (MSB)
+  const byte1 = bytes[1]!; // bits 8-15 of uint16 (validated by validateBounds above)
+  const byte2 = bytes[2]!; // bit 16 of uint16 (MSB) (validated by validateBounds above)
 
   // Reconstruct uint16 from bit-shifted pieces
   const length = (byte0 << 9) | (byte1 << 1) | (byte2 >> 7);
@@ -259,8 +259,9 @@ function decodeOptionalMemberId(buffer: Buffer, offset: number): DecodeResult<Me
     const byteIndex = Math.floor(bitOffset / 8);
     const bitInByte = bitOffset % 8;
 
-    const currentByte = bytes[byteIndex];
-    const nextByte = bytes[byteIndex + 1];
+    // Bounds validated by validateBounds above for bytesConsumed
+    const currentByte = bytes[byteIndex]!;
+    const nextByte = bytes[byteIndex + 1]!;
 
     // Extract 8 bits starting at bitOffset
     stringBytes[i] = (currentByte << bitInByte) | (nextByte >> (8 - bitInByte));

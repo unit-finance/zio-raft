@@ -216,7 +216,8 @@ function decodeOptionalMemberId(buffer: Buffer, offset: number): DecodeResult<Me
   // Validate we have at least 1 byte for presence flag
   validateBounds(buffer, offset, 1, 'optional MemberId presence');
 
-  // TODO: We need to add some tests for this function.
+  // Tested via: SessionRejected (Some), SessionRejectedNoLeader (None), SessionClosed (Some)
+  // in tests/unit/protocol/compatibility.test.ts
 
   // Use Uint8Array view for faster direct byte access
   const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset + offset, buffer.length - offset);

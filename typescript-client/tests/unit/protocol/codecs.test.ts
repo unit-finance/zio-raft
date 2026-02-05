@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   decodeServerMessage,
   encodeString,
+  encodeString8,
   encodePayload,
   encodeMap,
   encodeTimestamp,
@@ -24,6 +25,16 @@ describe('Protocol Codecs', () => {
       expect(encoded.readUInt16BE(0)).toBe(5);
       // Check UTF-8 content
       expect(encoded.toString('utf8', 2)).toBe('hello');
+    });
+
+    it('TC-PROTO-001b: should encode strings with uint8 length prefix', () => {
+      const str = 'hello';
+      const encoded = encodeString8(str);
+
+      // Check length prefix (1 byte)
+      expect(encoded.readUInt8(0)).toBe(5);
+      // Check UTF-8 content
+      expect(encoded.toString('utf8', 1)).toBe('hello');
     });
 
     it('TC-PROTO-002: should encode timestamps as int64 epoch millis', () => {
@@ -59,6 +70,26 @@ describe('Protocol Codecs', () => {
 
       // Check count (2 bytes)
       expect(encoded.readUInt16BE(0)).toBe(2);
+
+      // Verify first entry: 'version' -> '1.0.0'
+      let offset = 2;
+      expect(encoded.readUInt16BE(offset)).toBe(7); // 'version' length
+      offset += 2;
+      expect(encoded.toString('utf8', offset, offset + 7)).toBe('version');
+      offset += 7;
+      expect(encoded.readUInt16BE(offset)).toBe(5); // '1.0.0' length
+      offset += 2;
+      expect(encoded.toString('utf8', offset, offset + 5)).toBe('1.0.0');
+      offset += 5;
+
+      // Verify second entry: 'client' -> 'typescript'
+      expect(encoded.readUInt16BE(offset)).toBe(6); // 'client' length
+      offset += 2;
+      expect(encoded.toString('utf8', offset, offset + 6)).toBe('client');
+      offset += 6;
+      expect(encoded.readUInt16BE(offset)).toBe(10); // 'typescript' length
+      offset += 2;
+      expect(encoded.toString('utf8', offset, offset + 10)).toBe('typescript');
     });
 
     it('TC-PROTO-006: should encode payload with length prefix', () => {

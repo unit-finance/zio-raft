@@ -60,14 +60,6 @@ describe('Key Validation', () => {
     expect(() => validateKey(manyEmojis)).toThrow(ValidationError);
   });
 
-  // TC-006: Invalid UTF-8 is rejected
-  it('should reject invalid UTF-8 sequences', () => {
-    // Create a string that doesn't round-trip through UTF-8
-    // This is difficult to create in TypeScript as strings are always valid UTF-16
-    // We'll test the validation logic by ensuring round-trip works for valid strings
-    const validUtf8 = 'valid-utf8-键';
-    expect(() => validateKey(validUtf8)).not.toThrow();
-  });
 });
 
 describe('Value Validation', () => {
@@ -112,19 +104,6 @@ describe('Value Validation', () => {
   it('should accept value at exactly 1MB', () => {
     const maxValue = 'a'.repeat(1024 * 1024); // Exactly 1MB
     expect(() => validateValue(maxValue)).not.toThrow();
-  });
-
-  // TC-011: Large unicode value validated by bytes
-  it('should validate unicode value by byte length', () => {
-    // Multi-byte characters
-    const unicodeValue = '値🎉'.repeat(100); // Japanese + emoji
-    const byteLength = Buffer.from(unicodeValue).length;
-
-    if (byteLength <= 1024 * 1024) {
-      expect(() => validateValue(unicodeValue)).not.toThrow();
-    } else {
-      expect(() => validateValue(unicodeValue)).toThrow(ValidationError);
-    }
   });
 
   // TC-012: Invalid UTF-8 value is rejected

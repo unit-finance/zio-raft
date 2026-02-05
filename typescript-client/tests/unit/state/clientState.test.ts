@@ -2,7 +2,8 @@
 // Tests state transitions with mock transport
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { DisconnectedState, StateManager, StreamEvent } from '../../../src/state/clientState';
+import { DisconnectedState, StreamEvent } from '../../../src/state/types';
+import { StateManager } from '../../../src/state/stateManager';
 import { ClientConfig } from '../../../src/config';
 import { MemberId } from '../../../src/types';
 

@@ -3,7 +3,8 @@
 
 import { ClientConfig, createConfig, ClientConfigInput } from './config';
 import { ClientTransport } from './transport/transport';
-import { ClientState, StateManager, StateTransitionResult, StreamEvent, ClientAction } from './state/clientState';
+import { ClientState, StateTransitionResult, StreamEvent, ClientAction } from './state/types';
+import { StateManager } from './state/stateManager';
 import { AsyncQueue } from './utils/asyncQueue';
 import { mergeStreams } from './utils/streamMerger';
 import { ValidationError } from './errors';

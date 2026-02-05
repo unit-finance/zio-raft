@@ -284,18 +284,15 @@ export class RaftClient {
       throw new Error(`No address found for member ${MemberId.unwrap(newState.currentMemberId)}`);
     }
 
-    // Check if we're switching to a different member (need to reconnect)
-    // TODO: When transitioning from Connected to ConnectingExistingSession with the SAME member
-    // (e.g., NotLeaderAnymore in single-member cluster), we skip disconnect but the transport
-    // may still be connected. Consider always disconnecting when oldState.state === 'Connected'.
-    if (
-      oldState.state === 'ConnectingNewSession' ||
-      oldState.state === 'ConnectingExistingSession' ||
-      oldState.state === 'Connected'
-    ) {
+    // Always disconnect when leaving Connected state (reset connection for reconnect)
+    if (oldState.state === 'Connected') {
+      await this.transport.disconnect();
+    }
+
+    // For connecting states, only disconnect if switching to a different member
+    if (oldState.state === 'ConnectingNewSession' || oldState.state === 'ConnectingExistingSession') {
       const oldMemberId = oldState.currentMemberId;
       if (MemberId.unwrap(oldMemberId) !== MemberId.unwrap(newState.currentMemberId)) {
-        // Switching to different member - disconnect first
         await this.transport.disconnect();
       }
     }

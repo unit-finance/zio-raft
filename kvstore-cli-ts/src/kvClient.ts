@@ -31,7 +31,6 @@ export interface KVClientConfig {
 export class KVClient {
   private readonly raftClient: RaftClient;
   // Stored separately because RaftClient.config is private and doesn't expose timeout values.
-  // We need these for user-friendly error messages that include timeout durations.
   private readonly connectionTimeout: number;
   private readonly requestTimeout: number;
   private isConnected = false;

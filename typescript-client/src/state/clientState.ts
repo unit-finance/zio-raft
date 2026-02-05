@@ -273,7 +273,6 @@ export interface StateTransitionResult {
   readonly serverRequests?: Array<ServerRequest>;
 }
 
-
 // ============================================================================
 // State Handlers
 // ============================================================================

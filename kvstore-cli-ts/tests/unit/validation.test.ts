@@ -59,7 +59,6 @@ describe('Key Validation', () => {
     const manyEmojis = '🔑'.repeat(65); // 65 * 4 = 260 bytes
     expect(() => validateKey(manyEmojis)).toThrow(ValidationError);
   });
-
 });
 
 describe('Value Validation', () => {

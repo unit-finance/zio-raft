@@ -220,7 +220,8 @@ function decodeOptionalMemberId(buffer: Buffer, offset: number): DecodeResult<Me
 
   // Use Uint8Array view for faster direct byte access
   const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset + offset, buffer.length - offset);
-  const firstByte = bytes[0] as number; // we validatedBounds above we know we have at least 1 byte
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const firstByte = bytes[0]!; // we validatedBounds above we know we have at least 1 byte
 
   // Check MSB (bit 0) for presence
   const hasValue = (firstByte & 0x80) !== 0;
@@ -239,7 +240,9 @@ function decodeOptionalMemberId(buffer: Buffer, offset: number): DecodeResult<Me
   // Some case: read uint16 starting at bit 1
   // Extract uint16 from bits 1-16 (spans bytes 0-2)
   const byte0 = firstByte & 0x7f; // bits 1-7 of uint16
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const byte1 = bytes[1]!; // bits 8-15 of uint16 (validated by validateBounds above)
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const byte2 = bytes[2]!; // bit 16 of uint16 (MSB) (validated by validateBounds above)
 
   // Reconstruct uint16 from bit-shifted pieces
@@ -260,7 +263,9 @@ function decodeOptionalMemberId(buffer: Buffer, offset: number): DecodeResult<Me
     const bitInByte = bitOffset % 8;
 
     // Bounds validated by validateBounds above for bytesConsumed
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const currentByte = bytes[byteIndex]!;
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const nextByte = bytes[byteIndex + 1]!;
 
     // Extract 8 bits starting at bitOffset

@@ -3,13 +3,7 @@
 
 import { ClientConfig, createConfig, ClientConfigInput } from './config';
 import { ClientTransport } from './transport/transport';
-import {
-  ClientState,
-  StateManager,
-  StateTransitionResult,
-  StreamEvent,
-  ClientAction,
-} from './state/clientState';
+import { ClientState, StateManager, StateTransitionResult, StreamEvent, ClientAction } from './state/clientState';
 import { AsyncQueue } from './utils/asyncQueue';
 import { mergeStreams } from './utils/streamMerger';
 import { ValidationError } from './errors';
@@ -258,6 +252,7 @@ export class RaftClient {
     // Send messages via transport
     if (result.messagesToSend && result.messagesToSend.length > 0) {
       for (let i = 0; i < result.messagesToSend.length; i++) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         const message = result.messagesToSend[i]!;
         await this.transport.sendMessage(message);
       }

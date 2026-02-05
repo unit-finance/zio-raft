@@ -161,4 +161,3 @@ export function serverRequestWith(requestId: RequestId, payload: Buffer, created
     createdAt: createdAt ?? new Date(),
   };
 }
-

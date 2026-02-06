@@ -11,10 +11,12 @@ import { SessionId, RequestId, MemberId, Nonce, CorrelationId } from '../../../s
 
 function makeConfig(members?: Map<MemberId, string>): ClientConfig {
   return {
-    clusterMembers: members ?? new Map([
-      [MemberId.fromString('node1'), 'tcp://localhost:5555'],
-      [MemberId.fromString('node2'), 'tcp://localhost:5556'],
-    ]),
+    clusterMembers:
+      members ??
+      new Map([
+        [MemberId.fromString('node1'), 'tcp://localhost:5555'],
+        [MemberId.fromString('node2'), 'tcp://localhost:5556'],
+      ]),
     capabilities: new Map([['version', '1.0.0']]),
     connectionTimeout: 5000,
     keepAliveInterval: 30000,

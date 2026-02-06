@@ -10,10 +10,12 @@ import { MemberId, Nonce } from '../../../src/types';
 
 function makeConfig(members?: Map<MemberId, string>): ClientConfig {
   return {
-    clusterMembers: members ?? new Map([
-      [MemberId.fromString('node1'), 'tcp://localhost:5555'],
-      [MemberId.fromString('node2'), 'tcp://localhost:5556'],
-    ]),
+    clusterMembers:
+      members ??
+      new Map([
+        [MemberId.fromString('node1'), 'tcp://localhost:5555'],
+        [MemberId.fromString('node2'), 'tcp://localhost:5556'],
+      ]),
     capabilities: new Map([['version', '1.0.0']]),
     connectionTimeout: 5000,
     keepAliveInterval: 30000,
@@ -99,7 +101,9 @@ describe('ConnectingNewSessionStateHandler', () => {
     const state = makeConnectingNewState({
       nonce: stateNonce,
       currentMemberId: MemberId.fromString('node2'), // last member
-      connectReject: (err) => { rejectedError = err; },
+      connectReject: (err) => {
+        rejectedError = err;
+      },
     });
 
     const event: StreamEvent = {
@@ -124,7 +128,9 @@ describe('ConnectingNewSessionStateHandler', () => {
     const stateNonce = Nonce.fromBigInt(42n);
     const state = makeConnectingNewState({
       nonce: stateNonce,
-      connectReject: (err) => { rejectedError = err; },
+      connectReject: (err) => {
+        rejectedError = err;
+      },
     });
 
     const event: StreamEvent = {
@@ -168,7 +174,9 @@ describe('ConnectingNewSessionStateHandler', () => {
   it('Disconnect during connect should reject the connect promise', async () => {
     let rejectedError: Error | null = null;
     const state = makeConnectingNewState({
-      connectReject: (err) => { rejectedError = err; },
+      connectReject: (err) => {
+        rejectedError = err;
+      },
     });
 
     const event: StreamEvent = {

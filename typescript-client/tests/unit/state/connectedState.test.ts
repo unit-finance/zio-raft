@@ -11,10 +11,12 @@ import { SessionId, RequestId, MemberId, CorrelationId } from '../../../src/type
 
 function makeConfig(members?: Map<MemberId, string>): ClientConfig {
   return {
-    clusterMembers: members ?? new Map([
-      [MemberId.fromString('node1'), 'tcp://localhost:5555'],
-      [MemberId.fromString('node2'), 'tcp://localhost:5556'],
-    ]),
+    clusterMembers:
+      members ??
+      new Map([
+        [MemberId.fromString('node1'), 'tcp://localhost:5555'],
+        [MemberId.fromString('node2'), 'tcp://localhost:5556'],
+      ]),
     capabilities: new Map([['version', '1.0.0']]),
     connectionTimeout: 5000,
     keepAliveInterval: 30000,
@@ -97,7 +99,9 @@ describe('ConnectedStateHandler', () => {
       const pendingData: PendingRequestData = {
         payload: Buffer.from('cmd'),
         resolve: () => {},
-        reject: (e) => { rejectedWith = e; },
+        reject: (e) => {
+          rejectedWith = e;
+        },
         createdAt: new Date(),
         lastSentAt: new Date(),
       };
@@ -185,16 +189,13 @@ describe('ConnectedStateHandler', () => {
     it('Shutdown should fail all pending and transition to Disconnected', async () => {
       const rejections: string[] = [];
       const state = makeConnectedState({
-        pendingRequests: new PendingRequests().add(
-          RequestId.fromBigInt(1n),
-          {
-            payload: Buffer.from('cmd'),
-            resolve: () => {},
-            reject: (e) => rejections.push(e.message),
-            createdAt: new Date(),
-            lastSentAt: new Date(),
-          }
-        ),
+        pendingRequests: new PendingRequests().add(RequestId.fromBigInt(1n), {
+          payload: Buffer.from('cmd'),
+          resolve: () => {},
+          reject: (e) => rejections.push(e.message),
+          createdAt: new Date(),
+          lastSentAt: new Date(),
+        }),
       });
 
       const event: StreamEvent = {

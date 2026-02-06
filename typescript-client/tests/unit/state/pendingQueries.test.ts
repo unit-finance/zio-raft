@@ -4,7 +4,9 @@ import { describe, it, expect } from 'vitest';
 import { PendingQueries, PendingQueryData } from '../../../src/state/pendingQueries';
 import { CorrelationId } from '../../../src/types';
 
-function makePendingQuery(overrides?: Partial<{ resolve: (r: Buffer) => void; reject: (e: Error) => void; lastSentAt: Date }>): PendingQueryData {
+function makePendingQuery(
+  overrides?: Partial<{ resolve: (r: Buffer) => void; reject: (e: Error) => void; lastSentAt: Date }>
+): PendingQueryData {
   return {
     payload: Buffer.from('test-payload'),
     resolve: overrides?.resolve ?? (() => {}),
@@ -18,7 +20,14 @@ describe('PendingQueries', () => {
   it('complete() should call resolve and remove the entry', () => {
     let resolvedWith: Buffer | null = null;
     const id = CorrelationId.fromString('q1');
-    const pq = new PendingQueries().add(id, makePendingQuery({ resolve: (r) => { resolvedWith = r; } }));
+    const pq = new PendingQueries().add(
+      id,
+      makePendingQuery({
+        resolve: (r) => {
+          resolvedWith = r;
+        },
+      })
+    );
 
     const result = pq.complete(id, Buffer.from('response'));
 
@@ -39,7 +48,14 @@ describe('PendingQueries', () => {
   it('fail() should call reject and remove the entry', () => {
     let rejectedWith: Error | null = null;
     const id = CorrelationId.fromString('q1');
-    const pq = new PendingQueries().add(id, makePendingQuery({ reject: (e) => { rejectedWith = e; } }));
+    const pq = new PendingQueries().add(
+      id,
+      makePendingQuery({
+        reject: (e) => {
+          rejectedWith = e;
+        },
+      })
+    );
 
     const result = pq.fail(id, new Error('test error'));
 

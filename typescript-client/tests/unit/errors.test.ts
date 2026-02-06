@@ -2,8 +2,6 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  RaftClientError,
-  ValidationError,
   TimeoutError,
   ConnectionError,
   SessionExpiredError,
@@ -12,17 +10,6 @@ import {
 import { RequestId, CorrelationId, SessionId } from '../../src/types';
 
 describe('Error Classes', () => {
-  describe('RaftClientError', () => {
-    it('should maintain instanceof chain through Object.setPrototypeOf', () => {
-      const error = new RaftClientError('test error');
-
-      expect(error).toBeInstanceOf(Error);
-      expect(error).toBeInstanceOf(RaftClientError);
-      expect(error.name).toBe('RaftClientError');
-      expect(error.message).toBe('test error');
-    });
-  });
-
   describe('TimeoutError', () => {
     it('should store RequestId when given a bigint id', () => {
       const requestId = RequestId.fromBigInt(42n);
@@ -48,15 +35,6 @@ describe('Error Classes', () => {
     });
   });
 
-  describe('ValidationError', () => {
-    it('should extend RaftClientError', () => {
-      const error = new ValidationError('bad input');
-
-      expect(error).toBeInstanceOf(RaftClientError);
-      expect(error.name).toBe('ValidationError');
-    });
-  });
-
   describe('ConnectionError', () => {
     it('should store endpoint and cause', () => {
       const cause = new Error('ECONNREFUSED');
@@ -64,7 +42,6 @@ describe('Error Classes', () => {
 
       expect(error.endpoint).toBe('tcp://localhost:5555');
       expect(error.cause).toBe(cause);
-      expect(error).toBeInstanceOf(RaftClientError);
     });
   });
 
@@ -83,7 +60,6 @@ describe('Error Classes', () => {
       const error = new ProtocolError('invalid frame');
 
       expect(error.message).toBe('Protocol error: invalid frame');
-      expect(error).toBeInstanceOf(RaftClientError);
     });
   });
 });

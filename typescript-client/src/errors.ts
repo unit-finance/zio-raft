@@ -10,8 +10,6 @@ export class RaftClientError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RaftClientError';
-    // Maintain proper prototype chain for instanceof checks
-    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 

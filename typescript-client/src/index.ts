@@ -2,17 +2,17 @@
 // Main entry point for the library
 
 // Main client class
-export { RaftClient } from './client';
+export { RaftClient } from './client.js';
 
 // Configuration
-export type { ClientConfig, ClientConfigInput } from './config';
+export type { ClientConfig, ClientConfigInput } from './config.js';
 export {
   createConfig,
   validateConfig,
   DEFAULT_CONNECTION_TIMEOUT,
   DEFAULT_KEEP_ALIVE_INTERVAL,
   DEFAULT_REQUEST_TIMEOUT,
-} from './config';
+} from './config.js';
 
 // Error types
 export {
@@ -22,11 +22,11 @@ export {
   ConnectionError,
   SessionExpiredError,
   ProtocolError,
-} from './errors';
+} from './errors.js';
 
 // Core types (for advanced usage)
 // Note: These are exported as both types and values (namespace pattern for branded types)
-export { SessionId, RequestId, MemberId, Nonce, CorrelationId } from './types';
+export { SessionId, RequestId, MemberId, Nonce, CorrelationId } from './types.js';
 
 // Protocol message types (for advanced usage / testing)
 export type {
@@ -35,13 +35,13 @@ export type {
   ServerRequest,
   RejectionReason,
   SessionCloseReason,
-} from './protocol/messages';
+} from './protocol/messages.js';
 
 // Transport interface (for testing / custom implementations)
-export type { ClientTransport } from './transport/transport';
+export type { ClientTransport } from './transport/transport.js';
 
 // Transport implementations
-export { ZmqTransport } from './transport/zmqTransport';
+export { ZmqTransport } from './transport/zmqTransport.js';
 
 // Testing utilities
-export { MockTransport } from './testing/MockTransport';
+export { MockTransport } from './testing/MockTransport.js';

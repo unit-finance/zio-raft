@@ -12,8 +12,8 @@ import {
   encodeTimestamp,
   encodeNonce,
   encodeRequestId,
-} from '../../../src/protocol/codecs';
-import { RequestId, Nonce } from '../../../src/types';
+} from '../../../src/protocol/codecs.js';
+import { RequestId, Nonce } from '../../../src/types.js';
 
 describe('Protocol Codecs', () => {
   describe('Primitive Field Encoding', () => {

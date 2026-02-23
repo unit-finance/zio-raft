@@ -21,8 +21,8 @@ import {
   QueryResponse,
   ServerRequest,
   SessionCloseReason,
-} from '../../src/protocol/messages';
-import { SessionId, RequestId, CorrelationId, Nonce, MemberId } from '../../src/types';
+} from '../../src/protocol/messages.js';
+import { SessionId, RequestId, CorrelationId, Nonce, MemberId } from '../../src/types.js';
 
 // =============================================================================
 // Session Management Messages

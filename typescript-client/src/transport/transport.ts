@@ -1,6 +1,6 @@
 // Transport layer interfaces for client-server communication
 
-import { ClientMessage, ServerMessage } from '../protocol/messages';
+import { ClientMessage, ServerMessage } from '../protocol/messages.js';
 
 /**
  * Client transport interface for sending and receiving messages

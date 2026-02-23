@@ -1,9 +1,16 @@
 // Handler for Connected state
 
-import { MemberId, Nonce, RequestId, CorrelationId } from '../types';
-import { CloseSession, KeepAlive, ClientRequest, Query, ServerRequestAck, ContinueSession } from '../protocol/messages';
-import { PendingRequestData } from './pendingRequests';
-import { PendingQueryData } from './pendingQueries';
+import { MemberId, Nonce, RequestId, CorrelationId } from '../types.js';
+import {
+  CloseSession,
+  KeepAlive,
+  ClientRequest,
+  Query,
+  ServerRequestAck,
+  ContinueSession,
+} from '../protocol/messages.js';
+import { PendingRequestData } from './pendingRequests.js';
+import { PendingQueryData } from './pendingQueries.js';
 import {
   DisconnectedState,
   ConnectingExistingSessionState,
@@ -19,7 +26,7 @@ import {
   SessionClosed,
   SessionCloseReason,
   buildResendMessages,
-} from './types';
+} from './types.js';
 
 /**
  * Handler for Connected state

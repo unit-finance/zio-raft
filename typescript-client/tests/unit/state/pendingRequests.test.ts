@@ -1,8 +1,8 @@
 // Unit tests for PendingRequests — only the unique method lowestPendingRequestIdOr
 
 import { describe, it, expect } from 'vitest';
-import { PendingRequests, PendingRequestData } from '../../../src/state/pendingRequests';
-import { RequestId } from '../../../src/types';
+import { PendingRequests, PendingRequestData } from '../../../src/state/pendingRequests.js';
+import { RequestId } from '../../../src/types.js';
 
 function makePendingRequest(): PendingRequestData {
   return {

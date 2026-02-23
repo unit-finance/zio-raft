@@ -1,8 +1,8 @@
 // Unit tests for ServerRequestTracker
 
 import { describe, it, expect } from 'vitest';
-import { ServerRequestTracker } from '../../../src/state/serverRequestTracker';
-import { RequestId } from '../../../src/types';
+import { ServerRequestTracker } from '../../../src/state/serverRequestTracker.js';
+import { RequestId } from '../../../src/types.js';
 
 describe('ServerRequestTracker', () => {
   it('shouldProcess returns OldRequest for duplicate (incoming <= current)', () => {

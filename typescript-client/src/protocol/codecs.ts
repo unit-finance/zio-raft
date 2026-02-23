@@ -1,7 +1,7 @@
 // Binary protocol codecs for ZIO Raft client-server communication
 // These must match the Scala scodec implementation exactly
 
-import { SessionId, RequestId, MemberId, Nonce, CorrelationId } from '../types';
+import { SessionId, RequestId, MemberId, Nonce, CorrelationId } from '../types.js';
 import {
   ClientMessage,
   ServerMessage,
@@ -9,7 +9,7 @@ import {
   SessionCloseReason,
   CloseReason,
   RequestErrorReason,
-} from './messages';
+} from './messages.js';
 import {
   PROTOCOL_SIGNATURE,
   PROTOCOL_VERSION,
@@ -19,7 +19,7 @@ import {
   SessionCloseReasonCode,
   CloseReasonCode,
   RequestErrorReasonCode,
-} from './constants';
+} from './constants.js';
 
 // ============================================================================
 // Encoding Primitives

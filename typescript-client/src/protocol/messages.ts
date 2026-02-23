@@ -1,7 +1,7 @@
 // Protocol message type definitions for client-server communication
 // These match the Scala protocol definitions exactly
 
-import { SessionId, RequestId, MemberId, Nonce, CorrelationId } from '../types';
+import { SessionId, RequestId, MemberId, Nonce, CorrelationId } from '../types.js';
 
 // ============================================================================
 // Client Messages (Client → Server)

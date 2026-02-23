@@ -2,10 +2,10 @@
 // Tests complete client lifecycle with mock server
 
 import { describe, it, expect } from 'vitest';
-import { RaftClient } from '../../src/client';
-import { MockTransport } from '../../src/testing/MockTransport';
-import { MemberId, SessionId } from '../../src/types';
-import { sessionCreatedFor, clientResponseFor, queryResponseFor } from '../helpers/messageFactories';
+import { RaftClient } from '../../src/client.js';
+import { MockTransport } from '../../src/testing/MockTransport.js';
+import { MemberId, SessionId } from '../../src/types.js';
+import { sessionCreatedFor, clientResponseFor, queryResponseFor } from '../helpers/messageFactories.js';
 
 // Helper to wait for a condition with timeout
 async function waitForCondition(

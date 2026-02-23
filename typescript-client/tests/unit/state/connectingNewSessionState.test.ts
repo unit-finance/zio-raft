@@ -1,12 +1,12 @@
 // Unit tests for ConnectingNewSessionStateHandler — paths not covered by integration tests
 
 import { describe, it, expect } from 'vitest';
-import { ConnectingNewSessionStateHandler } from '../../../src/state/connectingNewSessionState';
-import { ConnectingNewSessionState, StreamEvent } from '../../../src/state/types';
-import { PendingRequests } from '../../../src/state/pendingRequests';
-import { PendingQueries } from '../../../src/state/pendingQueries';
-import { ClientConfig } from '../../../src/config';
-import { MemberId, Nonce } from '../../../src/types';
+import { ConnectingNewSessionStateHandler } from '../../../src/state/connectingNewSessionState.js';
+import { ConnectingNewSessionState, StreamEvent } from '../../../src/state/types.js';
+import { PendingRequests } from '../../../src/state/pendingRequests.js';
+import { PendingQueries } from '../../../src/state/pendingQueries.js';
+import { ClientConfig } from '../../../src/config.js';
+import { MemberId, Nonce } from '../../../src/types.js';
 
 function makeConfig(members?: Map<MemberId, string>): ClientConfig {
   return {

@@ -1,9 +1,9 @@
 // Handler for Disconnected state
 
-import { Nonce } from '../types';
-import { CreateSession } from '../protocol/messages';
-import { PendingRequests } from './pendingRequests';
-import { PendingQueries } from './pendingQueries';
+import { Nonce } from '../types.js';
+import { CreateSession } from '../protocol/messages.js';
+import { PendingRequests } from './pendingRequests.js';
+import { PendingQueries } from './pendingQueries.js';
 import {
   DisconnectedState,
   ConnectingNewSessionState,
@@ -11,7 +11,7 @@ import {
   ClientAction,
   ConnectAction,
   StateTransitionResult,
-} from './types';
+} from './types.js';
 
 /**
  * Handler for Disconnected state

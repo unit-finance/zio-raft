@@ -10,8 +10,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { encodeClientMessage, decodeServerMessage } from '../../../src/protocol/codecs';
-import { SessionId, RequestId, MemberId, Nonce, CorrelationId } from '../../../src/types';
+import { encodeClientMessage, decodeServerMessage } from '../../../src/protocol/codecs.js';
+import { SessionId, RequestId, MemberId, Nonce, CorrelationId } from '../../../src/types.js';
 import {
   CreateSession,
   ContinueSession,
@@ -30,7 +30,7 @@ import {
   QueryResponse,
   ServerRequest,
   RequestError,
-} from '../../../src/protocol/messages';
+} from '../../../src/protocol/messages.js';
 
 // Fixed test data matching Scala tests
 const testTimestamp = new Date(1705680000000); // 2024-01-19 12:00:00 UTC

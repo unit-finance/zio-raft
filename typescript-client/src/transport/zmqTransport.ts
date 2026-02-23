@@ -1,9 +1,9 @@
 // ZeroMQ transport implementation for client-server communication
 
-import { Client as ZmqClient } from 'zeromq/draft';
-import { ClientTransport } from './transport';
-import { ClientMessage, ServerMessage } from '../protocol/messages';
-import { encodeClientMessage, decodeServerMessage } from '../protocol/codecs';
+import { Client as ZmqClient } from 'zeromq/draft.js';
+import { ClientTransport } from './transport.js';
+import { ClientMessage, ServerMessage } from '../protocol/messages.js';
+import { encodeClientMessage, decodeServerMessage } from '../protocol/codecs.js';
 
 /**
  * ZeroMQ CLIENT socket transport implementation (draft socket)

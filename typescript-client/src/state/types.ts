@@ -1,12 +1,12 @@
 // Client state machine types and shared definitions
 // Implements idiomatic TypeScript state machine pattern with discriminated unions
 
-import { SessionId, MemberId, RequestId, CorrelationId } from '../types';
-import { ClientConfig } from '../config';
-import { PendingRequests } from './pendingRequests';
-import { PendingQueries } from './pendingQueries';
-import { ServerRequestTracker } from './serverRequestTracker';
-import { ClientMessage, ClientRequest, Query } from '../protocol/messages';
+import { SessionId, MemberId, RequestId, CorrelationId, Nonce } from '../types.js';
+import { ClientConfig } from '../config.js';
+import { PendingRequests } from './pendingRequests.js';
+import { PendingQueries } from './pendingQueries.js';
+import { ServerRequestTracker } from './serverRequestTracker.js';
+import { ClientMessage, ClientRequest, Query } from '../protocol/messages.js';
 
 // Re-export server message types from protocol module for convenience
 export type {
@@ -21,9 +21,9 @@ export type {
   QueryResponse,
   ServerRequest,
   RequestError,
-} from '../protocol/messages';
+} from '../protocol/messages.js';
 
-import type { ServerMessage, ServerRequest } from '../protocol/messages';
+import type { ServerMessage, ServerRequest } from '../protocol/messages.js';
 
 // ============================================================================
 // Helper Functions
@@ -97,7 +97,7 @@ export interface ConnectingNewSessionState {
   readonly state: 'ConnectingNewSession';
   readonly config: ClientConfig;
   readonly capabilities: Map<string, string>;
-  readonly nonce: import('../types').Nonce;
+  readonly nonce: Nonce;
   readonly currentMemberId: MemberId;
   readonly createdAt: Date;
   readonly pendingRequests: PendingRequests;
@@ -115,7 +115,7 @@ export interface ConnectingExistingSessionState {
   readonly config: ClientConfig;
   readonly sessionId: SessionId;
   readonly capabilities: Map<string, string>;
-  readonly nonce: import('../types').Nonce;
+  readonly nonce: Nonce;
   readonly currentMemberId: MemberId;
   readonly createdAt: Date;
   readonly serverRequestTracker: ServerRequestTracker;

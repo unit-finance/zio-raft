@@ -1,7 +1,7 @@
 // Pending requests tracker for managing in-flight client requests (commands)
 // Uses immutable pattern - methods return new instances instead of mutating
 
-import { RequestId } from '../types';
+import { RequestId } from '../types.js';
 
 /**
  * Data for a pending request (immutable)

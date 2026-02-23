@@ -1,10 +1,10 @@
 // State Manager - orchestrates state handlers
 
-import { DisconnectedStateHandler } from './disconnectedState';
-import { ConnectingNewSessionStateHandler } from './connectingNewSessionState';
-import { ConnectingExistingSessionStateHandler } from './connectingExistingSessionState';
-import { ConnectedStateHandler } from './connectedState';
-import { ClientState, StreamEvent, StateTransitionResult } from './types';
+import { DisconnectedStateHandler } from './disconnectedState.js';
+import { ConnectingNewSessionStateHandler } from './connectingNewSessionState.js';
+import { ConnectingExistingSessionStateHandler } from './connectingExistingSessionState.js';
+import { ConnectedStateHandler } from './connectedState.js';
+import { ClientState, StreamEvent, StateTransitionResult } from './types.js';
 
 /**
  * State manager - orchestrates state handlers

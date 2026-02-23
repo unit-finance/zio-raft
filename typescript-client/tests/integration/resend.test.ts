@@ -5,9 +5,9 @@
 // 2. After request timeout (TimeoutCheck event)
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { RaftClient } from '../../src/client';
-import { MockTransport } from '../../src/testing/MockTransport';
-import { MemberId, SessionId } from '../../src/types';
+import { RaftClient } from '../../src/client.js';
+import { MockTransport } from '../../src/testing/MockTransport.js';
+import { MemberId, SessionId } from '../../src/types.js';
 import {
   sessionCreatedFor,
   sessionClosedDueTo,
@@ -15,7 +15,7 @@ import {
   sessionRejectedWith,
   clientResponseFor,
   queryResponseFor,
-} from '../helpers/messageFactories';
+} from '../helpers/messageFactories.js';
 
 // Helper to wait for a condition with timeout
 async function waitForCondition(

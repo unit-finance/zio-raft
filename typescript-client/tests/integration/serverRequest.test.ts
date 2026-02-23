@@ -6,11 +6,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { RaftClient } from '../../src/client';
-import { MockTransport } from '../../src/testing/MockTransport';
-import { RequestId, MemberId } from '../../src/types';
-import { ServerRequest } from '../../src/protocol/messages';
-import { serverRequestWith } from '../helpers/messageFactories';
+import { RaftClient } from '../../src/client.js';
+import { MockTransport } from '../../src/testing/MockTransport.js';
+import { RequestId, MemberId } from '../../src/types.js';
+import { ServerRequest } from '../../src/protocol/messages.js';
+import { serverRequestWith } from '../helpers/messageFactories.js';
 
 describe('Server-Initiated Requests Integration', () => {
   it('should receive ServerRequest via async iterable', async () => {

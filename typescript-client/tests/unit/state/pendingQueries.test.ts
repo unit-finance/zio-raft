@@ -1,8 +1,8 @@
 // Unit tests for PendingQueries
 
 import { describe, it, expect } from 'vitest';
-import { PendingQueries, PendingQueryData } from '../../../src/state/pendingQueries';
-import { CorrelationId } from '../../../src/types';
+import { PendingQueries, PendingQueryData } from '../../../src/state/pendingQueries.js';
+import { CorrelationId } from '../../../src/types.js';
 
 function makePendingQuery(
   overrides?: Partial<{ resolve: (r: Buffer) => void; reject: (e: Error) => void; lastSentAt: Date }>

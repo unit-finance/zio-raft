@@ -1,7 +1,7 @@
 // Handler for ConnectingExistingSession state
 
-import { MemberId, Nonce } from '../types';
-import { ContinueSession } from '../protocol/messages';
+import { MemberId, Nonce } from '../types.js';
+import { ContinueSession } from '../protocol/messages.js';
 import {
   DisconnectedState,
   ConnectingExistingSessionState,
@@ -13,7 +13,7 @@ import {
   SessionRejected,
   ServerMessage,
   buildResendMessages,
-} from './types';
+} from './types.js';
 
 /**
  * Handler for ConnectingExistingSession state

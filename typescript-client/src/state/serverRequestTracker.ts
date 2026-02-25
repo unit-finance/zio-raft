@@ -1,6 +1,6 @@
 // Server request tracker for deduplicating server-initiated requests
 
-import { RequestId } from '../types';
+import { RequestId } from '../types.js';
 
 /**
  * Result of evaluating whether to process a server request

@@ -1,7 +1,7 @@
 // Custom error classes for the Raft client
 // Extends Error with type-safe error hierarchy
 
-import { RequestId, CorrelationId, SessionId } from './types';
+import { RequestId, CorrelationId, SessionId } from './types.js';
 
 /**
  * Base error class for all Raft client errors

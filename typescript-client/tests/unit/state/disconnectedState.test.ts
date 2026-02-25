@@ -2,10 +2,10 @@
 // Tests state transitions with mock transport
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { DisconnectedState, StreamEvent } from '../../../src/state/types';
-import { StateManager } from '../../../src/state/stateManager';
-import { ClientConfig } from '../../../src/config';
-import { MemberId } from '../../../src/types';
+import { DisconnectedState, StreamEvent } from '../../../src/state/types.js';
+import { StateManager } from '../../../src/state/stateManager.js';
+import { ClientConfig } from '../../../src/config.js';
+import { MemberId } from '../../../src/types.js';
 
 describe('State Machine', () => {
   let stateManager: StateManager;

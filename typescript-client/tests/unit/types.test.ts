@@ -1,7 +1,7 @@
 // Unit tests for branded type validation
 
 import { describe, it, expect } from 'vitest';
-import { SessionId, RequestId, MemberId, Nonce, CorrelationId } from '../../src/types';
+import { SessionId, RequestId, MemberId, Nonce, CorrelationId } from '../../src/types.js';
 
 describe('Branded Types Validation', () => {
   it('SessionId.fromString rejects empty string', () => {

@@ -1,15 +1,15 @@
 // Main RaftClient class - public API for applications
 // Idiomatic TypeScript: Promise API, async iterables, classes
 
-import { ClientConfig, createConfig, ClientConfigInput } from './config';
-import { ClientTransport } from './transport/transport';
-import { ClientState, StateTransitionResult, StreamEvent, ClientAction } from './state/types';
-import { StateManager } from './state/stateManager';
-import { AsyncQueue } from './utils/asyncQueue';
-import { mergeStreams } from './utils/streamMerger';
-import { ValidationError } from './errors';
-import { ServerRequest } from './protocol/messages';
-import { MemberId } from './types';
+import { ClientConfig, createConfig, ClientConfigInput } from './config.js';
+import { ClientTransport } from './transport/transport.js';
+import { ClientState, StateTransitionResult, StreamEvent, ClientAction } from './state/types.js';
+import { StateManager } from './state/stateManager.js';
+import { AsyncQueue } from './utils/asyncQueue.js';
+import { mergeStreams } from './utils/streamMerger.js';
+import { ValidationError } from './errors.js';
+import { ServerRequest } from './protocol/messages.js';
+import { MemberId } from './types.js';
 
 // ============================================================================
 // RaftClient - Main Public API

@@ -1,7 +1,7 @@
 // Unit tests for AsyncQueue
 
 import { describe, it, expect } from 'vitest';
-import { AsyncQueue } from '../../../src/utils/asyncQueue';
+import { AsyncQueue } from '../../../src/utils/asyncQueue.js';
 
 describe('AsyncQueue', () => {
   it('should throw when offering to a closed queue', () => {

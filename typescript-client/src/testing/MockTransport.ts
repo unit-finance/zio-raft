@@ -21,10 +21,10 @@
  * ```
  */
 
-import { AsyncQueue } from '../utils/asyncQueue';
-import type { ClientTransport } from '../transport/transport';
-import type { ClientMessage, ServerMessage } from '../protocol/messages';
-import { SessionId } from '../types';
+import { AsyncQueue } from '../utils/asyncQueue.js';
+import type { ClientTransport } from '../transport/transport.js';
+import type { ClientMessage, ServerMessage } from '../protocol/messages.js';
+import { SessionId } from '../types.js';
 
 /**
  * MockTransport enables deterministic testing of client protocol logic,

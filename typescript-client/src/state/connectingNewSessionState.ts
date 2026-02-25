@@ -1,8 +1,8 @@
 // Handler for ConnectingNewSession state
 
-import { MemberId, Nonce, RequestId } from '../types';
-import { CreateSession } from '../protocol/messages';
-import { ServerRequestTracker } from './serverRequestTracker';
+import { MemberId, Nonce, RequestId } from '../types.js';
+import { CreateSession } from '../protocol/messages.js';
+import { ServerRequestTracker } from './serverRequestTracker.js';
 import {
   DisconnectedState,
   ConnectingNewSessionState,
@@ -15,7 +15,7 @@ import {
   SessionCreated,
   SessionRejected,
   ServerMessage,
-} from './types';
+} from './types.js';
 
 /**
  * Handler for ConnectingNewSession state

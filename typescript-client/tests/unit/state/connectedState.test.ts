@@ -1,13 +1,13 @@
 // Unit tests for ConnectedStateHandler — paths not covered by integration tests
 
 import { describe, it, expect } from 'vitest';
-import { ConnectedStateHandler } from '../../../src/state/connectedState';
-import { ConnectedState, StreamEvent } from '../../../src/state/types';
-import { PendingRequests, PendingRequestData } from '../../../src/state/pendingRequests';
-import { PendingQueries, PendingQueryData } from '../../../src/state/pendingQueries';
-import { ServerRequestTracker } from '../../../src/state/serverRequestTracker';
-import { ClientConfig } from '../../../src/config';
-import { SessionId, RequestId, MemberId, CorrelationId } from '../../../src/types';
+import { ConnectedStateHandler } from '../../../src/state/connectedState.js';
+import { ConnectedState, StreamEvent } from '../../../src/state/types.js';
+import { PendingRequests, PendingRequestData } from '../../../src/state/pendingRequests.js';
+import { PendingQueries, PendingQueryData } from '../../../src/state/pendingQueries.js';
+import { ServerRequestTracker } from '../../../src/state/serverRequestTracker.js';
+import { ClientConfig } from '../../../src/config.js';
+import { SessionId, RequestId, MemberId, CorrelationId } from '../../../src/types.js';
 
 function makeConfig(members?: Map<MemberId, string>): ClientConfig {
   return {

@@ -2,7 +2,7 @@
   "compilerOptions": {
     // Target and Module
     "target": "ES2022",
-    "module": "commonjs",
+    "module": "NodeNext",
     "lib": ["ES2022"],
     "types": ["node"],
     
@@ -16,9 +16,7 @@
     "composite": true,
     
     // Module Resolution
-    "moduleResolution": "node",
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
+    "moduleResolution": "NodeNext",
     "resolveJsonModule": true,
     
     // Type Checking

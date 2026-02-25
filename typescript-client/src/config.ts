@@ -1,7 +1,7 @@
 // Client configuration with validation and defaults
 // Follows idiomatic TypeScript: plain object configuration, NOT builder pattern
 
-import { MemberId } from './types';
+import { MemberId } from './types.js';
 
 /**
  * Client configuration

@@ -1,7 +1,7 @@
 // Pending queries tracker for managing in-flight read-only queries
 // Uses immutable pattern - methods return new instances instead of mutating
 
-import { CorrelationId } from '../types';
+import { CorrelationId } from '../types.js';
 
 /**
  * Data for a pending query (immutable)

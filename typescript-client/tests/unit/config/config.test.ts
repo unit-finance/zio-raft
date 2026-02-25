@@ -2,8 +2,8 @@
 // Tests ClientConfig validation and defaults
 
 import { describe, it, expect } from 'vitest';
-import { createConfig, ClientConfigInput } from '../../../src/config';
-import { MemberId } from '../../../src/types';
+import { createConfig, ClientConfigInput } from '../../../src/config.js';
+import { MemberId } from '../../../src/types.js';
 
 describe('Configuration', () => {
   describe('TC-CONFIG-001: Valid configuration accepted', () => {
